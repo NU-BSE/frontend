@@ -1,0 +1,53 @@
+{
+  "name": "creepyim",
+  "version": "1.0.0",
+  "main": "expo-router/entry",
+  "dependencies": {
+    "@expo-google-fonts/inter": "^0.4.2",
+    "@expo-google-fonts/noto-serif": "^0.4.2",
+    "@expo-google-fonts/public-sans": "^0.4.2",
+    "@react-native-async-storage/async-storage": "2.2.0",
+    "@tanstack/ai": "^0.42.0",
+    "@tanstack/ai-client": "^0.22.1",
+    "@tanstack/ai-react": "^0.18.1",
+    "@tanstack/react-query": "^5.101.4",
+    "expo": "~57.0.8",
+    "expo-constants": "~57.0.7",
+    "expo-font": "~57.0.1",
+    "expo-haptics": "~57.0.1",
+    "expo-linking": "~57.0.4",
+    "expo-router": "~57.0.8",
+    "expo-secure-store": "~57.0.1",
+    "expo-splash-screen": "~57.0.5",
+    "expo-status-bar": "~57.0.1",
+    "react": "19.2.3",
+    "react-native": "0.86.0",
+    "react-native-gesture-handler": "~2.32.0",
+    "react-native-reanimated": "4.5.0",
+    "react-native-safe-area-context": "~5.7.0",
+    "react-native-screens": "~4.26.0",
+    "react-native-svg": "^15.15.4",
+    "react-native-worklets": "0.10.0"
+  },
+  "devDependencies": {
+    "@types/react": "~19.2.2",
+    "esbuild": "^0.28.1",
+    "eslint": "^9.0.0",
+    "eslint-config-expo": "~57.0.0",
+    "react-native-svg-transformer": "^1.5.3",
+    "typescript": "~6.0.3",
+    "yoga-layout": "^3.2.1"
+  },
+  "scripts": {
+    "start": "expo start",
+    "android": "expo start --android",
+    "typecheck": "tsc --noEmit",
+    "verify:ai": "esbuild scripts/verify-ai-connection.mts --bundle --platform=node --format=cjs --outfile=node_modules/.cache/verify-ai.cjs --log-level=error && node node_modules/.cache/verify-ai.cjs",
+    "prebuild:android": "expo prebuild --platform android",
+    "lint": "expo lint",
+    "verify:logic": "esbuild scripts/verify-logic.mts --bundle --platform=node --format=cjs --outfile=node_modules/.cache/verify-logic.cjs --log-level=error && node node_modules/.cache/verify-logic.cjs",
+    "verify:layout": "esbuild scripts/verify-layout.mts --bundle --platform=node --format=esm --outfile=node_modules/.cache/verify-layout.mjs --log-level=error && node node_modules/.cache/verify-layout.mjs",
+    "verify": "npm run typecheck && npm run lint && npm run verify:ai && npm run verify:logic && npm run verify:layout"
+  },
+  "private": true
+}

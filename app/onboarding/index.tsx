@@ -1,7 +1,14 @@
 import React, { useCallback, useMemo, useState } from 'react';
 import { useRouter } from 'expo-router';
-import { Pressable, ScrollView, StyleSheet, View } from 'react-native';
+import {
+  ActivityIndicator,
+  Pressable,
+  ScrollView,
+  StyleSheet,
+  View,
+} from 'react-native';
 
+import { collectDeviceAssessment } from '@/attestation/client/deviceAssessment';
 import { Icon } from '@/components/Icon';
 import { OnboardingNavBar } from '@/components/OnboardingNavBar';
 import { Screen } from '@/components/Screen';
@@ -9,7 +16,10 @@ import { Text } from '@/components/Text';
 import CreepyMascot from '@assets/icons/creepy-mascot.svg';
 import { chunkRows } from '@/features/scenarios/chunkRows';
 import { SCENARIOS, type ScenarioId } from '@/features/scenarios/registry';
-import { setSelectedCategories } from '@/storage/prefs';
+import {
+  setDeviceAssessment,
+  setSelectedCategories,
+} from '@/storage/prefs';
 import { gutter, palette, radius, shadow, spacing } from '@/theme/tokens';
 
 /** Figma: 2 columns, 16pt gutter, inside a 24pt page margin on a 390pt frame. */
@@ -19,6 +29,7 @@ const COLUMNS = 2;
 export default function OnboardingCategories() {
   const router = useRouter();
   const [selected, setSelected] = useState<ScenarioId[]>([]);
+  const [checkingDevice, setCheckingDevice] = useState(false);
 
   // Explicit rows, not flexWrap — see chunkRows for why the column count must
   // not depend on measured width.
@@ -33,9 +44,28 @@ export default function OnboardingCategories() {
   }, []);
 
   const advance = useCallback(async () => {
+    if (checkingDevice) return;
+    setCheckingDevice(true);
+
     await setSelectedCategories(selected);
-    router.push('/onboarding/memory');
-  }, [router, selected]);
+    try {
+      const assessment = await collectDeviceAssessment();
+      await setDeviceAssessment(assessment);
+      router.push('/onboarding/memory');
+    } catch (error) {
+      const reason =
+        error instanceof Error ? error.message : 'Device assessment failed.';
+      await setDeviceAssessment({
+        schemaVersion: 1,
+        platform: 'unsupported',
+        collectedAtMs: Date.now(),
+        reason,
+      });
+      router.push('/onboarding/memory');
+    } finally {
+      setCheckingDevice(false);
+    }
+  }, [checkingDevice, router, selected]);
 
   return (
     <Screen>
@@ -79,6 +109,7 @@ export default function OnboardingCategories() {
                     accessibilityRole="checkbox"
                     accessibilityState={{ checked: active }}
                     accessibilityLabel={scenario.title}
+                    disabled={checkingDevice}
                     onPress={() => toggle(scenario.id)}
                     style={({ pressed }) => [
                       styles.cellSlot,
@@ -105,11 +136,25 @@ export default function OnboardingCategories() {
             </View>
           ))}
         </View>
+
+        {checkingDevice ? (
+          <View style={styles.assessmentCard} accessibilityLiveRegion="polite">
+            <ActivityIndicator color={palette.brand} />
+            <View style={styles.assessmentCopy}>
+              <Text variant="label">Checking this device</Text>
+              <Text variant="body" tone="secondary">
+                Reading hardware capacity, Android integrity, and the protected
+                keystore before local model selection.
+              </Text>
+            </View>
+          </View>
+        ) : null}
       </ScrollView>
 
       <OnboardingNavBar
         onAdvance={() => void advance()}
-        advanceLabel="Continue"
+        advanceLabel={checkingDevice ? 'Checking' : 'Continue'}
+        advanceDisabled={checkingDevice}
         // Skipping is allowed: an empty selection is a valid answer, and
         // blocking here would trap anyone who genuinely wants everything.
       />
@@ -165,4 +210,16 @@ const styles = StyleSheet.create({
   cellActive: { borderColor: palette.brand, backgroundColor: palette.brandWash },
   cellLabel: { textAlign: 'center' },
   pressed: { opacity: 0.8 },
+  assessmentCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.lg,
+    marginTop: spacing.xxl,
+    padding: spacing.lg,
+    borderRadius: radius.md,
+    borderWidth: 1,
+    borderColor: palette.borderSoft,
+    backgroundColor: palette.surface,
+  },
+  assessmentCopy: { flex: 1, gap: spacing.xs },
 });

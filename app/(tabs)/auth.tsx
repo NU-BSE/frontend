@@ -17,7 +17,7 @@ export default function Auth() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
   const queryClient = useQueryClient();
-  const { origin, status, degradedReason } = useAi();
+  const { origin, status, degradedReason, deactivateEngine } = useAi();
 
   const { data: memoryProfile } = useQuery({
     queryKey: ['memory-profile'],
@@ -27,6 +27,7 @@ export default function Auth() {
   const replay = useMutation({
     mutationFn: resetOnboarding,
     onSuccess: async () => {
+      await deactivateEngine();
       await queryClient.invalidateQueries({ queryKey: ['onboarding-status'] });
       router.replace('/onboarding');
     },

@@ -1,60 +1,94 @@
 import { xhrHttpStream } from '@tanstack/ai-client';
 import type { ConnectionAdapter } from '@tanstack/ai-client';
 
+import type { DeviceAssessment } from '@/attestation/client/deviceAssessment';
+import type { MemoryProfile } from '@/storage/prefs';
 import {
   FORCED_ENGINE,
   ON_DEVICE_DEFAULTS,
-  ON_DEVICE_MODEL_PATH,
   REMOTE_AI_BASE_URL,
   SYSTEM_PROMPT,
 } from './config';
+import { canUseLocalProfile } from './deviceModelSelection';
 import { engineConnection } from './engineConnection';
-import { createOnDeviceEngine, isOnDeviceSupported } from './engines/onDeviceEngine';
+import {
+  createOnDeviceEngine,
+  isOnDeviceSupported,
+} from './engines/onDeviceEngine';
 import { createStubEngine } from './engines/stubEngine';
+import { LOCAL_MODEL_PATHS, LOCAL_MODEL_RUNTIME } from './modelProfiles';
 import type { EngineDescriptor, EngineOrigin } from './types';
 
 export * from './types';
 export { engineConnection } from './engineConnection';
 export { isOnDeviceSupported } from './engines/onDeviceEngine';
 
-/**
- * Choose an engine.
- *
- * Order is deliberate: on-device first, because the product promise is that
- * text does not leave the phone. Remote is a fallback only, and the stub is
- * the floor so the app is never dead in the water.
- */
-export function resolveEngine(): EngineDescriptor {
+export type EngineSelection = {
+  memoryProfile: MemoryProfile;
+  assessment: DeviceAssessment | null;
+};
+
+export function resolveEngine(selection: EngineSelection): EngineDescriptor {
+  if (FORCED_ENGINE === 'stub') {
+    return { origin: 'stub', engine: createStubEngine() };
+  }
+
+  const profile = selection.memoryProfile;
+  if (profile === 'cloud' || FORCED_ENGINE === 'remote') {
+    return {
+      origin: 'stub',
+      engine: createStubEngine(),
+      ...(!REMOTE_AI_BASE_URL
+        ? { degradedReason: 'Remote AI endpoint is not configured.' }
+        : {}),
+    };
+  }
+
+  const modelPath = LOCAL_MODEL_PATHS[profile];
+  const assessmentAllowsLocal = canUseLocalProfile(
+    profile,
+    selection.assessment,
+  );
   const canRunOnDevice =
-    Boolean(ON_DEVICE_MODEL_PATH) && isOnDeviceSupported();
+    assessmentAllowsLocal && Boolean(modelPath) && isOnDeviceSupported();
 
-  const wants = FORCED_ENGINE || (canRunOnDevice ? 'on-device' : 'stub');
-
-  if (wants === 'on-device' && canRunOnDevice) {
+  if ((FORCED_ENGINE === 'on-device' || !FORCED_ENGINE) && canRunOnDevice) {
     return {
       origin: 'on-device',
       engine: createOnDeviceEngine({
-        modelPath: ON_DEVICE_MODEL_PATH,
+        modelPath,
         ...ON_DEVICE_DEFAULTS,
+        ...LOCAL_MODEL_RUNTIME[profile],
       }),
     };
   }
 
-  return { origin: 'stub', engine: createStubEngine() };
+  const degradedReason = !assessmentAllowsLocal
+    ? 'The selected local profile is not supported by the attested device.'
+    : !modelPath
+      ? `No GGUF path is configured for the ${profile} profile.`
+      : !isOnDeviceSupported()
+        ? 'The llama.rn native module is not present in this build.'
+        : 'Local inference was not selected.';
+
+  return {
+    origin: 'stub',
+    engine: createStubEngine(),
+    degradedReason,
+  };
 }
 
-/**
- * The connection handed to `useChat`.
- *
- * Remote mode returns TanStack AI's own XHR adapter — `xhrHttpStream` is the
- * documented choice for React Native, where `fetch` streaming is unreliable.
- * Every other mode runs through the in-process engine bridge.
- */
-export function createConnection(descriptor: EngineDescriptor): {
+export function createConnection(
+  descriptor: EngineDescriptor,
+  selection: EngineSelection,
+): {
   connection: ConnectionAdapter;
   origin: EngineOrigin;
 } {
-  if (FORCED_ENGINE === 'remote' && REMOTE_AI_BASE_URL) {
+  if (
+    (selection.memoryProfile === 'cloud' || FORCED_ENGINE === 'remote') &&
+    REMOTE_AI_BASE_URL
+  ) {
     return {
       origin: 'remote',
       connection: xhrHttpStream(`${REMOTE_AI_BASE_URL}/chat/http`),

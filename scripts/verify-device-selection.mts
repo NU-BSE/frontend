@@ -1,10 +1,16 @@
-import assert from 'node:assert/strict';
-
 import {
   getModelOptionSupport,
   getRecommendedMemoryProfile,
 } from '../src/ai/deviceModelSelection';
 import type { DeviceAssessment } from '../src/attestation/client/deviceAssessment';
+
+function assertEqual<T>(actual: T, expected: T, message?: string): void {
+  if (!Object.is(actual, expected)) {
+    throw new Error(
+      message ?? `Expected ${String(expected)}, received ${String(actual)}`,
+    );
+  }
+}
 
 const GIB = 1024 ** 3;
 
@@ -45,18 +51,18 @@ const assessment = (
   probeFailures: [],
 });
 
-assert.equal(getRecommendedMemoryProfile(assessment(8, 8)), 'performance');
-assert.equal(getRecommendedMemoryProfile(assessment(4, 4)), 'balanced');
-assert.equal(getRecommendedMemoryProfile(assessment(3, 2)), 'efficient');
-assert.equal(getRecommendedMemoryProfile(assessment(2, 8)), 'cloud');
+assertEqual(getRecommendedMemoryProfile(assessment(8, 8)), 'performance');
+assertEqual(getRecommendedMemoryProfile(assessment(4, 4)), 'balanced');
+assertEqual(getRecommendedMemoryProfile(assessment(3, 2)), 'efficient');
+assertEqual(getRecommendedMemoryProfile(assessment(2, 8)), 'cloud');
 
 const blocked = assessment(8, 8, {
   status: 'blocked',
   rooted: true,
   riskFlags: ['ROOT'],
 });
-assert.equal(getRecommendedMemoryProfile(blocked), 'cloud');
-assert.equal(
+assertEqual(getRecommendedMemoryProfile(blocked), 'cloud');
+assertEqual(
   getModelOptionSupport(blocked).filter(
     (option) => option.profile !== 'cloud' && option.supported,
   ).length,

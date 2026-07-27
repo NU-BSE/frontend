@@ -2,6 +2,35 @@ import { NativeModules, Platform } from 'react-native';
 
 type NativeProbeResult<T> = Promise<T>;
 
+export type AndroidNativeSignals = {
+  debuggablePackage: boolean;
+  installerPackageName?: string;
+  strongBoxAvailable?: boolean;
+  emulator?: boolean;
+  model?: string;
+  brand?: string;
+  manufacturer?: string;
+  product?: string;
+  hardware?: string;
+  sdkInt?: number;
+  osRelease?: string;
+  securityPatch?: string;
+  supportedAbis: string[];
+  cpuCoreCount?: number;
+  totalMemoryBytes?: number;
+  availableMemoryBytes?: number;
+  memoryClassMb?: number;
+  largeMemoryClassMb?: number;
+  lowRamDevice?: boolean;
+  totalStorageBytes?: number;
+  availableStorageBytes?: number;
+  screenWidthPx?: number;
+  screenHeightPx?: number;
+  densityDpi?: number;
+  powerSaveMode?: boolean;
+  thermalStatus?: number;
+};
+
 type AttestationNativeProbesModule = {
   tcpProbeLocalhost?: (
     port: number,
@@ -10,13 +39,7 @@ type AttestationNativeProbesModule = {
   fileExists?: (path: string) => NativeProbeResult<boolean>;
   readProcSelfMaps?: () => NativeProbeResult<string>;
   isDebuggerAttached?: () => NativeProbeResult<boolean>;
-  getAndroidSignals?: () => NativeProbeResult<{
-    debuggablePackage: boolean;
-    installerPackageName?: string;
-    strongBoxAvailable?: boolean;
-    model?: string;
-    sdkInt?: number;
-  }>;
+  getAndroidSignals?: () => NativeProbeResult<AndroidNativeSignals>;
   suspiciousDyldImages?: () => NativeProbeResult<string[]>;
   envVar?: (name: string) => NativeProbeResult<string | null>;
   canOpenUrlScheme?: (scheme: string) => NativeProbeResult<boolean>;
@@ -26,11 +49,8 @@ type AttestationNativeProbesModule = {
   ) => NativeProbeResult<{
     alias: string;
     certificateChainBase64: string[];
-    /** Which keystore actually produced the key. */
     strongBoxBacked: boolean;
-    /** StrongBox was advertised by the device and attempted first. */
     strongBoxRequested?: boolean;
-    /** Present when StrongBox was attempted and the TEE was used instead. */
     strongBoxFallbackReason?: string;
   }>;
 };

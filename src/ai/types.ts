@@ -49,4 +49,6 @@ export type EngineOrigin = 'on-device' | 'remote' | 'stub';
 export interface EngineDescriptor {
   engine: LlmEngine;
   origin: EngineOrigin;
+  /** Explains why the selected profile fell back to the offline preview. */
+  degradedReason?: string;
 }

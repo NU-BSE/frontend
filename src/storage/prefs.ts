@@ -1,10 +1,12 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
+import type { DeviceAssessment } from '@/attestation/client/deviceAssessment';
 import type { ScenarioId } from '@/features/scenarios/registry';
 
 const ONBOARDING_KEY = 'creepyim.onboarding.completed.v1';
 const CATEGORIES_KEY = 'creepyim.onboarding.categories.v1';
 const MEMORY_KEY = 'creepyim.onboarding.memory.v1';
+const DEVICE_ASSESSMENT_KEY = 'creepyim.onboarding.device-assessment.v1';
 
 /** Matches the four rows in the Memory Config frame. */
 export type MemoryProfile = 'efficient' | 'balanced' | 'performance' | 'cloud';
@@ -34,7 +36,12 @@ export async function setOnboardingComplete(): Promise<void> {
 
 export async function resetOnboarding(): Promise<void> {
   try {
-    await AsyncStorage.multiRemove([ONBOARDING_KEY, CATEGORIES_KEY, MEMORY_KEY]);
+    await AsyncStorage.multiRemove([
+      ONBOARDING_KEY,
+      CATEGORIES_KEY,
+      MEMORY_KEY,
+      DEVICE_ASSESSMENT_KEY,
+    ]);
   } catch {
     // Non-fatal.
   }
@@ -80,5 +87,31 @@ export async function setMemoryProfile(profile: MemoryProfile): Promise<void> {
     await AsyncStorage.setItem(MEMORY_KEY, profile);
   } catch {
     // Non-fatal.
+  }
+}
+
+export async function getDeviceAssessment(): Promise<DeviceAssessment | null> {
+  try {
+    const raw = await AsyncStorage.getItem(DEVICE_ASSESSMENT_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as Partial<DeviceAssessment>;
+    return parsed.schemaVersion === 1 && typeof parsed.platform === 'string'
+      ? (parsed as DeviceAssessment)
+      : null;
+  } catch {
+    return null;
+  }
+}
+
+export async function setDeviceAssessment(
+  assessment: DeviceAssessment,
+): Promise<void> {
+  try {
+    await AsyncStorage.setItem(
+      DEVICE_ASSESSMENT_KEY,
+      JSON.stringify(assessment),
+    );
+  } catch {
+    // The second onboarding screen will safely fall back to cloud-only.
   }
 }

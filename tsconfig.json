@@ -8,13 +8,26 @@
       ],
       "@assets/*": [
         "./assets/*"
+      ],
+      "@attestation/*": [
+        "./src/attestation/*"
+      ],
+      "@native/*": [
+        "./src/attestation/native/*"
       ]
     }
   },
   "include": [
-    "**/*.ts",
-    "**/*.tsx",
+    "app/**/*.ts",
+    "app/**/*.tsx",
+    "src/**/*.ts",
+    "src/**/*.tsx",
+    "scripts/**/*.ts",
+    "scripts/**/*.mts",
     ".expo/types/**/*.ts",
     "expo-env.d.ts"
+  ],
+  "exclude": [
+    "src/attestation/**"
   ]
 }

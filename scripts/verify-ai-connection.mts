@@ -56,10 +56,13 @@ async function main() {
     'system prompt did not leak into the reply',
   );
 
-  const types = seen.map((c) => c.type);
+  // StreamChunk's public type currently omits lifecycle event names even though
+  // the connection emits and the client consumes them at runtime. Normalize to
+  // strings here because this verification checks observed wire events.
+  const types = seen.map((chunk) => String(chunk.type));
   assert(types.includes('RUN_STARTED'), 'RUN_STARTED emitted');
   assert(
-    types.filter((t) => t === 'TEXT_MESSAGE_CONTENT').length > 1,
+    types.filter((type) => type === 'TEXT_MESSAGE_CONTENT').length > 1,
     'response streamed as multiple deltas, not one blob',
   );
   assert(types.includes('RUN_FINISHED'), 'RUN_FINISHED emitted');

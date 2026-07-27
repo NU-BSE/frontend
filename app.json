@@ -18,7 +18,8 @@
     },
     "plugins": [
       "expo-router",
-      "expo-secure-store"
+      "expo-secure-store",
+      "./plugins/with-attestation-native-probes"
     ],
     "scheme": "creepyim"
   }

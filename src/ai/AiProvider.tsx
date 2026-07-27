@@ -1,5 +1,6 @@
 import React, {
   createContext,
+  useCallback,
   useContext,
   useEffect,
   useMemo,
@@ -8,13 +9,20 @@ import React, {
 } from 'react';
 import type { ConnectionAdapter } from '@tanstack/ai-client';
 
+import type { DeviceAssessment } from '@/attestation/client/deviceAssessment';
+import {
+  getDeviceAssessment,
+  getMemoryProfile,
+  hasCompletedOnboarding,
+  type MemoryProfile,
+} from '@/storage/prefs';
 import { createConnection, resolveEngine } from './index';
 import { createStubEngine } from './engines/stubEngine';
 import { engineConnection } from './engineConnection';
 import { SYSTEM_PROMPT } from './config';
 import type { EngineOrigin, LlmEngine } from './types';
 
-type EngineStatus = 'preparing' | 'ready' | 'degraded';
+type EngineStatus = 'idle' | 'preparing' | 'ready' | 'degraded';
 
 interface AiContextValue {
   connection: ConnectionAdapter;
@@ -22,48 +30,71 @@ interface AiContextValue {
   status: EngineStatus;
   /** Set when the preferred engine failed and a fallback took over. */
   degradedReason: string | null;
+  /** Starts the selected engine only after device assessment and user choice. */
+  activateSelectedEngine(
+    profile: MemoryProfile,
+    assessment: DeviceAssessment | null,
+  ): Promise<void>;
+  deactivateEngine(): Promise<void>;
 }
 
 const AiContext = createContext<AiContextValue | null>(null);
 
-/**
- * Owns engine lifecycle for the whole app.
- *
- * Weights are loaded once here rather than per-screen, and a failure to load
- * them degrades to the stub instead of leaving the user with a chat box that
- * silently never answers.
- */
 export function AiProvider({ children }: { children: React.ReactNode }) {
   const initial = useMemo(() => {
-    const descriptor = resolveEngine();
-    return { descriptor, ...createConnection(descriptor) };
+    const engine = createStubEngine();
+    return {
+      engine,
+      connection: engineConnection(engine, { systemPrompt: SYSTEM_PROMPT }),
+    };
   }, []);
 
   const [connection, setConnection] = useState<ConnectionAdapter>(
     initial.connection,
   );
-  const [origin, setOrigin] = useState<EngineOrigin>(initial.origin);
-  // Seeded as 'preparing' rather than set inside the effect: preparation
-  // starts on mount unconditionally, so that IS the initial state. Setting it
-  // in the effect body would be a cascading render for no benefit.
-  const [status, setStatus] = useState<EngineStatus>('preparing');
+  const [origin, setOrigin] = useState<EngineOrigin>('stub');
+  const [status, setStatus] = useState<EngineStatus>('idle');
   const [degradedReason, setDegradedReason] = useState<string | null>(null);
 
-  const engineRef = useRef<LlmEngine>(initial.descriptor.engine);
+  const engineRef = useRef<LlmEngine>(initial.engine);
+  const activationRef = useRef(0);
 
-  useEffect(() => {
-    let cancelled = false;
-    const engine = engineRef.current;
+  const activateSelectedEngine = useCallback(
+    async (
+      profile: MemoryProfile,
+      assessment: DeviceAssessment | null,
+    ): Promise<void> => {
+      const activation = activationRef.current + 1;
+      activationRef.current = activation;
+      const selection = { memoryProfile: profile, assessment };
+      const descriptor = resolveEngine(selection);
+      const nextConnection = createConnection(descriptor, selection);
+      const previous = engineRef.current;
 
-    engine
-      .prepare()
-      .then(() => {
-        if (!cancelled) setStatus('ready');
-      })
-      .catch((error: unknown) => {
-        if (cancelled) return;
-        // The preferred engine is unusable on this device/build. Rather than
-        // surfacing a dead chat, fall back and say so.
+      engineRef.current = descriptor.engine;
+      setConnection(nextConnection.connection);
+      setOrigin(nextConnection.origin);
+      setDegradedReason(descriptor.degradedReason ?? null);
+
+      try {
+        await previous.dispose?.();
+      } catch {
+        // The replacement engine can still start if disposal fails.
+      }
+      if (activation !== activationRef.current) return;
+
+      if (nextConnection.origin === 'remote') {
+        setStatus('ready');
+        return;
+      }
+
+      setStatus('preparing');
+      try {
+        await descriptor.engine.prepare();
+        if (activation !== activationRef.current) return;
+        setStatus(descriptor.degradedReason ? 'degraded' : 'ready');
+      } catch (error: unknown) {
+        if (activation !== activationRef.current) return;
         const fallback = createStubEngine();
         engineRef.current = fallback;
         setConnection(
@@ -74,18 +105,64 @@ export function AiProvider({ children }: { children: React.ReactNode }) {
           error instanceof Error ? error.message : 'Model failed to load',
         );
         setStatus('degraded');
-        void fallback.prepare();
-      });
+        await fallback.prepare();
+      }
+    },
+    [],
+  );
+
+  const deactivateEngine = useCallback(async (): Promise<void> => {
+    activationRef.current += 1;
+    const previous = engineRef.current;
+    const idle = createStubEngine();
+    engineRef.current = idle;
+    try {
+      await previous.dispose?.();
+    } catch {
+      // Disposal is best-effort; the new idle connection must still replace it.
+    }
+    setConnection(engineConnection(idle, { systemPrompt: SYSTEM_PROMPT }));
+    setOrigin('stub');
+    setStatus('idle');
+    setDegradedReason(null);
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    void Promise.all([
+      hasCompletedOnboarding(),
+      getMemoryProfile(),
+      getDeviceAssessment(),
+    ]).then(([completed, profile, assessment]) => {
+      if (!cancelled && completed) {
+        void activateSelectedEngine(profile, assessment);
+      }
+    });
 
     return () => {
       cancelled = true;
+      activationRef.current += 1;
       void engineRef.current.dispose?.();
     };
-  }, []);
+  }, [activateSelectedEngine]);
 
   const value = useMemo<AiContextValue>(
-    () => ({ connection, origin, status, degradedReason }),
-    [connection, origin, status, degradedReason],
+    () => ({
+      connection,
+      origin,
+      status,
+      degradedReason,
+      activateSelectedEngine,
+      deactivateEngine,
+    }),
+    [
+      activateSelectedEngine,
+      connection,
+      deactivateEngine,
+      degradedReason,
+      origin,
+      status,
+    ],
   );
 
   return <AiContext.Provider value={value}>{children}</AiContext.Provider>;

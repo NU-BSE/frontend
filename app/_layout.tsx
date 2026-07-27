@@ -17,6 +17,7 @@ import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 
 import { AiProvider } from '@/ai/AiProvider';
+import { WebAuthGate } from '@/auth/WebAuthGate';
 import { palette } from '@/theme/tokens';
 
 // Held until fonts resolve. Without this the first frame renders in the
@@ -54,29 +55,31 @@ export default function RootLayout() {
   return (
     <GestureHandlerRootView style={{ flex: 1, backgroundColor: palette.canvas }}>
       <SafeAreaProvider>
-        <QueryClientProvider client={queryClient}>
-          <AiProvider>
-            <StatusBar style="dark" />
-            <Stack
-              screenOptions={{
-                headerShown: false,
-                contentStyle: { backgroundColor: palette.canvas },
-              }}
-            >
-              <Stack.Screen name="index" />
-              <Stack.Screen name="onboarding" />
-              <Stack.Screen name="(tabs)" />
-              <Stack.Screen
-                name="chat"
-                options={{
-                  // Slides up over the tabs — it is a task, not a destination.
-                  presentation: 'modal',
-                  animation: 'slide_from_bottom',
+        <WebAuthGate>
+          <QueryClientProvider client={queryClient}>
+            <AiProvider>
+              <StatusBar style="dark" />
+              <Stack
+                screenOptions={{
+                  headerShown: false,
+                  contentStyle: { backgroundColor: palette.canvas },
                 }}
-              />
-            </Stack>
-          </AiProvider>
-        </QueryClientProvider>
+              >
+                <Stack.Screen name="index" />
+                <Stack.Screen name="onboarding" />
+                <Stack.Screen name="(tabs)" />
+                <Stack.Screen
+                  name="chat"
+                  options={{
+                    // Slides up over the tabs — it is a task, not a destination.
+                    presentation: 'modal',
+                    animation: 'slide_from_bottom',
+                  }}
+                />
+              </Stack>
+            </AiProvider>
+          </QueryClientProvider>
+        </WebAuthGate>
       </SafeAreaProvider>
     </GestureHandlerRootView>
   );

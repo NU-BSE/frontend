@@ -47,7 +47,8 @@
     "lint": "expo lint",
     "verify:logic": "esbuild scripts/verify-logic.mts --bundle --platform=node --format=cjs --outfile=node_modules/.cache/verify-logic.cjs --log-level=error && node node_modules/.cache/verify-logic.cjs",
     "verify:layout": "esbuild scripts/verify-layout.mts --bundle --platform=node --format=esm --outfile=node_modules/.cache/verify-layout.mjs --log-level=error && node node_modules/.cache/verify-layout.mjs",
-    "verify": "npm run typecheck && npm run lint && npm run verify:ai && npm run verify:logic && npm run verify:layout"
+    "verify:device": "esbuild scripts/verify-device-selection.mts --bundle --platform=node --format=cjs --outfile=node_modules/.cache/verify-device-selection.cjs --log-level=error && node node_modules/.cache/verify-device-selection.cjs",
+    "verify": "npm run typecheck && npm run lint && npm run verify:ai && npm run verify:logic && npm run verify:layout && npm run verify:device"
   },
   "private": true
 }

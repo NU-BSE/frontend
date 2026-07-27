@@ -128,7 +128,6 @@ export function WebAuthGate({ children }: { children: React.ReactNode }) {
 const styles = StyleSheet.create({
   page: {
     flex: 1,
-    minHeight: '100vh',
     alignItems: 'center',
     justifyContent: 'center',
     backgroundColor: palette.canvas,

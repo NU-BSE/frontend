@@ -2,6 +2,7 @@ import { Platform } from 'react-native';
 
 import {
   AttestationNativeProbes,
+  type AndroidKeySecurityLevel,
   type AndroidNativeSignals,
 } from '../native/AttestationNativeProbes';
 
@@ -58,6 +59,11 @@ export type AndroidDeviceAssessment = {
     strongBoxBacked: boolean;
     certificateChainLength: number;
     fallbackReason?: string;
+    securityLevel?: AndroidKeySecurityLevel;
+    attestationChainAvailable?: boolean;
+    keyCreated?: boolean;
+    challengeApplied?: boolean;
+    serverVerified?: boolean;
   };
   probeFailures: string[];
 };
@@ -76,6 +82,7 @@ type ProbeResult<T> =
   | { ok: false; reason: string };
 
 const PROBE_TIMEOUT_MS = 1_500;
+const ASSESSMENT_KEY_ALIAS = 'creepyim.llm.assessment.v2';
 const TRUSTED_INSTALLERS = new Set([
   'com.android.vending',
   'com.google.android.feedback',
@@ -113,13 +120,10 @@ const makeChallenge = (): string => {
   const cryptoApi = globalThis.crypto as
     | { getRandomValues?: (input: Uint8Array) => Uint8Array }
     | undefined;
-  if (cryptoApi?.getRandomValues) {
-    cryptoApi.getRandomValues(bytes);
-  } else {
-    for (let index = 0; index < bytes.length; index += 1) {
-      bytes[index] = Math.floor(Math.random() * 256);
-    }
+  if (!cryptoApi?.getRandomValues) {
+    throw new Error('Secure random generation is unavailable in this runtime.');
   }
+  cryptoApi.getRandomValues(bytes);
 
   let binary = '';
   bytes.forEach((byte) => {
@@ -131,12 +135,21 @@ const makeChallenge = (): string => {
   if (!encodeBase64) {
     throw new Error('Base64 encoding is unavailable in this runtime.');
   }
-  const encoded = encodeBase64(binary);
-  return encoded.replace(/\+/gu, '-').replace(/\//gu, '_').replace(/=+$/gu, '');
+  return encodeBase64(binary)
+    .replace(/\+/gu, '-')
+    .replace(/\//gu, '_')
+    .replace(/=+$/gu, '');
 };
 
 const readValue = <T>(result: ProbeResult<T>, fallback: T): T =>
   result.ok ? result.value : fallback;
+
+const isHardwareSecurityLevel = (
+  level: AndroidKeySecurityLevel | undefined,
+): boolean =>
+  level === 'trustedEnvironment' ||
+  level === 'strongBox' ||
+  level === 'unknownSecure';
 
 export async function collectDeviceAssessment(): Promise<DeviceAssessment> {
   if (Platform.OS !== 'android') {
@@ -181,9 +194,9 @@ export async function collectDeviceAssessment(): Promise<DeviceAssessment> {
     withTimeout('Magisk path', () =>
       AttestationNativeProbes.fileExists('/data/adb/magisk'),
     ),
-    withTimeout('Android hardware key attestation', () =>
+    withTimeout('Android hardware key capability', () =>
       AttestationNativeProbes.generateHardwareKeyAttestation(
-        'creepyim.llm.assessment.v1',
+        ASSESSMENT_KEY_ALIAS,
         makeChallenge(),
       ),
     ),
@@ -289,10 +302,15 @@ export async function collectDeviceAssessment(): Promise<DeviceAssessment> {
     },
     keystore: {
       checked: hardwareKeyResult.ok,
-      hardwareBacked: Boolean(key && key.certificateChainBase64.length > 0),
+      hardwareBacked: isHardwareSecurityLevel(key?.securityLevel),
       strongBoxBacked: key?.strongBoxBacked ?? false,
       certificateChainLength: key?.certificateChainBase64.length ?? 0,
       fallbackReason: key?.strongBoxFallbackReason,
+      securityLevel: key?.securityLevel,
+      attestationChainAvailable: Boolean(key?.certificateChainBase64.length),
+      keyCreated: key?.created,
+      challengeApplied: key?.challengeApplied,
+      serverVerified: false,
     },
     probeFailures: failures,
   };

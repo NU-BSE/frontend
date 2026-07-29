@@ -83,6 +83,8 @@ type ProbeResult<T> =
 
 const PROBE_TIMEOUT_MS = 1_500;
 const ASSESSMENT_KEY_ALIAS = 'creepyim.llm.assessment.v2';
+const LOCAL_CAPABILITY_CHALLENGE_BASE64URL =
+  'Y3JlZXB5aW0tbG9jYWwtY2FwYWJpbGl0eS12Mg';
 const TRUSTED_INSTALLERS = new Set([
   'com.android.vending',
   'com.google.android.feedback',
@@ -113,32 +115,6 @@ const withTimeout = async <T>(
   } finally {
     if (timeout) clearTimeout(timeout);
   }
-};
-
-const makeChallenge = (): string => {
-  const bytes = new Uint8Array(32);
-  const cryptoApi = globalThis.crypto as
-    | { getRandomValues?: (input: Uint8Array) => Uint8Array }
-    | undefined;
-  if (!cryptoApi?.getRandomValues) {
-    throw new Error('Secure random generation is unavailable in this runtime.');
-  }
-  cryptoApi.getRandomValues(bytes);
-
-  let binary = '';
-  bytes.forEach((byte) => {
-    binary += String.fromCharCode(byte);
-  });
-  const encodeBase64 = (globalThis as {
-    btoa?: (value: string) => string;
-  }).btoa;
-  if (!encodeBase64) {
-    throw new Error('Base64 encoding is unavailable in this runtime.');
-  }
-  return encodeBase64(binary)
-    .replace(/\+/gu, '-')
-    .replace(/\//gu, '_')
-    .replace(/=+$/gu, '');
 };
 
 const readValue = <T>(result: ProbeResult<T>, fallback: T): T =>
@@ -197,7 +173,7 @@ export async function collectDeviceAssessment(): Promise<DeviceAssessment> {
     withTimeout('Android hardware key capability', () =>
       AttestationNativeProbes.generateHardwareKeyAttestation(
         ASSESSMENT_KEY_ALIAS,
-        makeChallenge(),
+        LOCAL_CAPABILITY_CHALLENGE_BASE64URL,
       ),
     ),
   ]);

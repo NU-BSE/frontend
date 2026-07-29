@@ -9,6 +9,7 @@ import android.os.Environment
 import android.os.PowerManager
 import android.os.StatFs
 import android.security.keystore.KeyGenParameterSpec
+import android.security.keystore.KeyInfo
 import android.security.keystore.KeyProperties
 import android.util.DisplayMetrics
 import com.facebook.react.bridge.Promise
@@ -20,10 +21,20 @@ import com.facebook.react.bridge.WritableNativeMap
 import java.io.File
 import java.net.InetSocketAddress
 import java.net.Socket
+import java.nio.charset.StandardCharsets
+import java.security.Key
+import java.security.KeyFactory
 import java.security.KeyPairGenerator
 import java.security.KeyStore
+import java.security.PrivateKey
+import java.security.Signature
 import java.security.spec.ECGenParameterSpec
 import java.util.Base64
+import javax.crypto.Cipher
+import javax.crypto.KeyGenerator
+import javax.crypto.SecretKey
+import javax.crypto.SecretKeyFactory
+import javax.crypto.spec.GCMParameterSpec
 
 class AttestationNativeProbesModule(
   private val reactContext: ReactApplicationContext,
@@ -147,34 +158,50 @@ class AttestationNativeProbesModule(
     promise: Promise,
   ) {
     try {
-      val challenge = Base64.getUrlDecoder().decode(challengeBase64)
-      val strongBoxRequested =
-        Build.VERSION.SDK_INT >= Build.VERSION_CODES.P &&
-          reactContext.packageManager.hasSystemFeature(
-            "android.hardware.strongbox_keystore",
-          )
-      var strongBoxBacked = strongBoxRequested
-      var strongBoxFallbackReason: String? = null
-      try {
-        generateAttestedKey(alias, challenge, strongBoxBacked = strongBoxRequested)
-      } catch (error: Throwable) {
-        if (!strongBoxRequested) throw error
-        strongBoxBacked = false
-        strongBoxFallbackReason = error.message ?: error.javaClass.simpleName
-        generateAttestedKey(alias, challenge, strongBoxBacked = false)
+      val challenge = decodeBase64(challengeBase64)
+      require(challenge.isNotEmpty()) { "Attestation challenge must not be empty" }
+      require(challenge.size <= MAX_ATTESTATION_CHALLENGE_BYTES) {
+        "Attestation challenge exceeds $MAX_ATTESTATION_CHALLENGE_BYTES bytes"
       }
 
-      val keyStore = KeyStore.getInstance("AndroidKeyStore").apply { load(null) }
+      val keyStore = androidKeyStore()
+      val created = !keyStore.containsAlias(alias)
+      val strongBoxRequested = created && isStrongBoxAvailable()
+      var strongBoxFallbackReason: String? = null
+      if (created) {
+        try {
+          generateAttestedKey(alias, challenge, strongBoxRequested)
+        } catch (error: Throwable) {
+          if (!strongBoxRequested) throw error
+          strongBoxFallbackReason = error.message ?: error.javaClass.simpleName
+          generateAttestedKey(alias, challenge, strongBoxBacked = false)
+        }
+      }
+
+      val privateKey = keyStore.getKey(alias, null) as? PrivateKey
+        ?: throw IllegalStateException("Alias does not contain a private key")
+      val securityLevel = getSecurityLevel(
+        privateKey,
+        strongBoxRequested && strongBoxFallbackReason == null,
+      )
       val certs = keyStore.getCertificateChain(alias)
         ?: throw IllegalStateException("AndroidKeyStore returned no certificate chain")
       val chain = WritableNativeArray()
       certs.forEach { cert ->
         chain.pushString(Base64.getEncoder().encodeToString(cert.encoded))
       }
+
       val result = WritableNativeMap()
       result.putString("alias", alias)
       result.putArray("certificateChainBase64", chain)
-      result.putBoolean("strongBoxBacked", strongBoxBacked)
+      result.putString(
+        "publicKeyBase64",
+        Base64.getEncoder().encodeToString(certs.first().publicKey.encoded),
+      )
+      result.putBoolean("created", created)
+      result.putBoolean("challengeApplied", created)
+      result.putString("securityLevel", securityLevel)
+      result.putBoolean("strongBoxBacked", securityLevel == SECURITY_LEVEL_STRONG_BOX)
       result.putBoolean("strongBoxRequested", strongBoxRequested)
       if (strongBoxFallbackReason != null) {
         result.putString("strongBoxFallbackReason", strongBoxFallbackReason)
@@ -185,21 +212,139 @@ class AttestationNativeProbesModule(
     }
   }
 
+  @ReactMethod
+  fun signDeviceChallenge(
+    alias: String,
+    challengeBase64: String,
+    promise: Promise,
+  ) {
+    try {
+      val challenge = decodeBase64(challengeBase64)
+      require(challenge.isNotEmpty()) { "Challenge must not be empty" }
+      val keyStore = androidKeyStore()
+      val privateKey = keyStore.getKey(alias, null) as? PrivateKey
+        ?: throw IllegalStateException("Device identity key does not exist")
+      val payload = DEVICE_CHALLENGE_DOMAIN.toByteArray(StandardCharsets.UTF_8) +
+        byteArrayOf(0) + challenge
+      val signature = Signature.getInstance(SIGNATURE_ALGORITHM).run {
+        initSign(privateKey)
+        update(payload)
+        sign()
+      }
+
+      val result = WritableNativeMap()
+      result.putString("alias", alias)
+      result.putString(
+        "signatureBase64",
+        Base64.getEncoder().encodeToString(signature),
+      )
+      result.putString("signatureAlgorithm", SIGNATURE_ALGORITHM)
+      result.putString("challengeDomain", DEVICE_CHALLENGE_DOMAIN)
+      promise.resolve(result)
+    } catch (error: Throwable) {
+      promise.reject("KEY_SIGNATURE_FAILED", error)
+    }
+  }
+
+  @ReactMethod
+  fun encryptWithHardwareAesKey(
+    alias: String,
+    plaintextBase64: String,
+    promise: Promise,
+  ) {
+    try {
+      val plaintext = decodeBase64(plaintextBase64)
+      val keyStore = androidKeyStore()
+      val created = !keyStore.containsAlias(alias)
+      val strongBoxRequested = created && isStrongBoxAvailable()
+      var strongBoxFallbackReason: String? = null
+      if (created) {
+        try {
+          generateAesKey(alias, strongBoxRequested)
+        } catch (error: Throwable) {
+          if (!strongBoxRequested) throw error
+          strongBoxFallbackReason = error.message ?: error.javaClass.simpleName
+          generateAesKey(alias, strongBoxBacked = false)
+        }
+      }
+
+      val key = keyStore.getKey(alias, null) as? SecretKey
+        ?: throw IllegalStateException("Alias does not contain an AES key")
+      val securityLevel = getSecurityLevel(
+        key,
+        strongBoxRequested && strongBoxFallbackReason == null,
+      )
+      val cipher = Cipher.getInstance(AES_TRANSFORMATION).apply {
+        init(Cipher.ENCRYPT_MODE, key)
+        updateAAD(LOCAL_SECRET_AAD)
+      }
+      val ciphertext = cipher.doFinal(plaintext)
+
+      val result = WritableNativeMap()
+      result.putString("alias", alias)
+      result.putString(
+        "ciphertextBase64",
+        Base64.getEncoder().encodeToString(ciphertext),
+      )
+      result.putString(
+        "ivBase64",
+        Base64.getEncoder().encodeToString(cipher.iv),
+      )
+      result.putBoolean("created", created)
+      result.putString("securityLevel", securityLevel)
+      result.putBoolean("strongBoxBacked", securityLevel == SECURITY_LEVEL_STRONG_BOX)
+      if (strongBoxFallbackReason != null) {
+        result.putString("strongBoxFallbackReason", strongBoxFallbackReason)
+      }
+      promise.resolve(result)
+    } catch (error: Throwable) {
+      promise.reject("KEY_ENCRYPTION_FAILED", error)
+    }
+  }
+
+  @ReactMethod
+  fun decryptWithHardwareAesKey(
+    alias: String,
+    ciphertextBase64: String,
+    ivBase64: String,
+    promise: Promise,
+  ) {
+    try {
+      val keyStore = androidKeyStore()
+      val key = keyStore.getKey(alias, null) as? SecretKey
+        ?: throw IllegalStateException("Local secret key does not exist")
+      val cipher = Cipher.getInstance(AES_TRANSFORMATION).apply {
+        init(
+          Cipher.DECRYPT_MODE,
+          key,
+          GCMParameterSpec(GCM_TAG_LENGTH_BITS, decodeBase64(ivBase64)),
+        )
+        updateAAD(LOCAL_SECRET_AAD)
+      }
+      val plaintext = cipher.doFinal(decodeBase64(ciphertextBase64))
+      val result = WritableNativeMap()
+      result.putString(
+        "plaintextBase64",
+        Base64.getEncoder().encodeToString(plaintext),
+      )
+      promise.resolve(result)
+    } catch (error: Throwable) {
+      promise.reject("KEY_DECRYPTION_FAILED", error)
+    }
+  }
+
   private fun generateAttestedKey(
     alias: String,
     challenge: ByteArray,
     strongBoxBacked: Boolean,
   ) {
-    val keyStore = KeyStore.getInstance("AndroidKeyStore").apply { load(null) }
-    if (keyStore.containsAlias(alias)) keyStore.deleteEntry(alias)
-
     val generator = KeyPairGenerator.getInstance(
       KeyProperties.KEY_ALGORITHM_EC,
-      "AndroidKeyStore",
+      ANDROID_KEYSTORE,
     )
     val builder = KeyGenParameterSpec.Builder(
       alias,
-      KeyProperties.PURPOSE_SIGN or KeyProperties.PURPOSE_VERIFY,
+      KeyProperties.PURPOSE_SIGN,
     )
       .setAlgorithmParameterSpec(ECGenParameterSpec("secp256r1"))
       .setDigests(KeyProperties.DIGEST_SHA256)
@@ -211,6 +356,66 @@ class AttestationNativeProbesModule(
     generator.generateKeyPair()
   }
 
+  private fun generateAesKey(alias: String, strongBoxBacked: Boolean) {
+    val generator = KeyGenerator.getInstance(
+      KeyProperties.KEY_ALGORITHM_AES,
+      ANDROID_KEYSTORE,
+    )
+    val builder = KeyGenParameterSpec.Builder(
+      alias,
+      KeyProperties.PURPOSE_ENCRYPT or KeyProperties.PURPOSE_DECRYPT,
+    )
+      .setBlockModes(KeyProperties.BLOCK_MODE_GCM)
+      .setEncryptionPaddings(KeyProperties.ENCRYPTION_PADDING_NONE)
+      .setKeySize(256)
+      .setRandomizedEncryptionRequired(true)
+    if (strongBoxBacked && Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+      builder.setIsStrongBoxBacked(true)
+    }
+    generator.init(builder.build())
+    generator.generateKey()
+  }
+
+  private fun androidKeyStore(): KeyStore =
+    KeyStore.getInstance(ANDROID_KEYSTORE).apply { load(null) }
+
+  private fun isStrongBoxAvailable(): Boolean =
+    Build.VERSION.SDK_INT >= Build.VERSION_CODES.P &&
+      reactContext.packageManager.hasSystemFeature("android.hardware.strongbox_keystore")
+
+  private fun getSecurityLevel(key: Key, newlyCreatedWithStrongBox: Boolean): String {
+    val keyInfo = when (key) {
+      is PrivateKey -> KeyFactory.getInstance(key.algorithm, ANDROID_KEYSTORE)
+        .getKeySpec(key, KeyInfo::class.java)
+      is SecretKey -> SecretKeyFactory.getInstance(key.algorithm, ANDROID_KEYSTORE)
+        .getKeySpec(key, KeyInfo::class.java)
+      else -> return SECURITY_LEVEL_UNKNOWN
+    }
+
+    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+      return when (keyInfo.securityLevel) {
+        KeyProperties.SECURITY_LEVEL_STRONGBOX -> SECURITY_LEVEL_STRONG_BOX
+        KeyProperties.SECURITY_LEVEL_TRUSTED_ENVIRONMENT -> SECURITY_LEVEL_TRUSTED_ENVIRONMENT
+        KeyProperties.SECURITY_LEVEL_UNKNOWN_SECURE -> SECURITY_LEVEL_UNKNOWN_SECURE
+        KeyProperties.SECURITY_LEVEL_SOFTWARE -> SECURITY_LEVEL_SOFTWARE
+        else -> SECURITY_LEVEL_UNKNOWN
+      }
+    }
+
+    @Suppress("DEPRECATION")
+    return when {
+      newlyCreatedWithStrongBox && keyInfo.isInsideSecureHardware -> SECURITY_LEVEL_STRONG_BOX
+      keyInfo.isInsideSecureHardware -> SECURITY_LEVEL_TRUSTED_ENVIRONMENT
+      else -> SECURITY_LEVEL_SOFTWARE
+    }
+  }
+
+  private fun decodeBase64(value: String): ByteArray = try {
+    Base64.getUrlDecoder().decode(value)
+  } catch (_: IllegalArgumentException) {
+    Base64.getDecoder().decode(value)
+  }
+
   private fun isProbablyEmulator(): Boolean =
     Build.FINGERPRINT.startsWith("generic") ||
       Build.FINGERPRINT.startsWith("unknown") ||
@@ -220,4 +425,20 @@ class AttestationNativeProbesModule(
       Build.MANUFACTURER.contains("Genymotion", ignoreCase = true) ||
       Build.BRAND.startsWith("generic") && Build.DEVICE.startsWith("generic") ||
       Build.PRODUCT == "google_sdk"
+
+  companion object {
+    private const val ANDROID_KEYSTORE = "AndroidKeyStore"
+    private const val SIGNATURE_ALGORITHM = "SHA256withECDSA"
+    private const val DEVICE_CHALLENGE_DOMAIN = "creepyim-device-challenge-v1"
+    private const val AES_TRANSFORMATION = "AES/GCM/NoPadding"
+    private const val GCM_TAG_LENGTH_BITS = 128
+    private const val MAX_ATTESTATION_CHALLENGE_BYTES = 128
+    private const val SECURITY_LEVEL_SOFTWARE = "software"
+    private const val SECURITY_LEVEL_TRUSTED_ENVIRONMENT = "trustedEnvironment"
+    private const val SECURITY_LEVEL_STRONG_BOX = "strongBox"
+    private const val SECURITY_LEVEL_UNKNOWN_SECURE = "unknownSecure"
+    private const val SECURITY_LEVEL_UNKNOWN = "unknown"
+    private val LOCAL_SECRET_AAD =
+      "creepyim-local-secret-v1".toByteArray(StandardCharsets.UTF_8)
+  }
 }

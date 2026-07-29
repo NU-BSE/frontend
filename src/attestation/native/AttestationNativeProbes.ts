@@ -2,6 +2,13 @@ import { NativeModules, Platform } from 'react-native';
 
 type NativeProbeResult<T> = Promise<T>;
 
+export type AndroidKeySecurityLevel =
+  | 'software'
+  | 'trustedEnvironment'
+  | 'strongBox'
+  | 'unknownSecure'
+  | 'unknown';
+
 export type AndroidNativeSignals = {
   debuggablePackage: boolean;
   installerPackageName?: string;
@@ -31,6 +38,35 @@ export type AndroidNativeSignals = {
   thermalStatus?: number;
 };
 
+export type HardwareKeyAttestation = {
+  alias: string;
+  certificateChainBase64: string[];
+  publicKeyBase64: string;
+  created: boolean;
+  challengeApplied: boolean;
+  securityLevel: AndroidKeySecurityLevel;
+  strongBoxBacked: boolean;
+  strongBoxRequested?: boolean;
+  strongBoxFallbackReason?: string;
+};
+
+export type HardwareKeySignature = {
+  alias: string;
+  signatureBase64: string;
+  signatureAlgorithm: 'SHA256withECDSA';
+  challengeDomain: 'creepyim-device-challenge-v1';
+};
+
+export type HardwareEncryptedPayload = {
+  alias: string;
+  ciphertextBase64: string;
+  ivBase64: string;
+  created: boolean;
+  securityLevel: AndroidKeySecurityLevel;
+  strongBoxBacked: boolean;
+  strongBoxFallbackReason?: string;
+};
+
 type AttestationNativeProbesModule = {
   tcpProbeLocalhost?: (
     port: number,
@@ -46,13 +82,20 @@ type AttestationNativeProbesModule = {
   generateHardwareKeyAttestation?: (
     alias: string,
     challengeBase64: string,
-  ) => NativeProbeResult<{
-    alias: string;
-    certificateChainBase64: string[];
-    strongBoxBacked: boolean;
-    strongBoxRequested?: boolean;
-    strongBoxFallbackReason?: string;
-  }>;
+  ) => NativeProbeResult<HardwareKeyAttestation>;
+  signDeviceChallenge?: (
+    alias: string,
+    challengeBase64: string,
+  ) => NativeProbeResult<HardwareKeySignature>;
+  encryptWithHardwareAesKey?: (
+    alias: string,
+    plaintextBase64: string,
+  ) => NativeProbeResult<HardwareEncryptedPayload>;
+  decryptWithHardwareAesKey?: (
+    alias: string,
+    ciphertextBase64: string,
+    ivBase64: string,
+  ) => NativeProbeResult<{ plaintextBase64: string }>;
 };
 
 const moduleCandidate =
@@ -90,4 +133,16 @@ export const AttestationNativeProbes: Required<AttestationNativeProbesModule> = 
   generateHardwareKeyAttestation: (alias, challengeBase64) =>
     moduleCandidate?.generateHardwareKeyAttestation?.(alias, challengeBase64) ??
     unavailable('generateHardwareKeyAttestation'),
+  signDeviceChallenge: (alias, challengeBase64) =>
+    moduleCandidate?.signDeviceChallenge?.(alias, challengeBase64) ??
+    unavailable('signDeviceChallenge'),
+  encryptWithHardwareAesKey: (alias, plaintextBase64) =>
+    moduleCandidate?.encryptWithHardwareAesKey?.(alias, plaintextBase64) ??
+    unavailable('encryptWithHardwareAesKey'),
+  decryptWithHardwareAesKey: (alias, ciphertextBase64, ivBase64) =>
+    moduleCandidate?.decryptWithHardwareAesKey?.(
+      alias,
+      ciphertextBase64,
+      ivBase64,
+    ) ?? unavailable('decryptWithHardwareAesKey'),
 };

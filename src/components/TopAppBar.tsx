@@ -50,7 +50,7 @@ export function TopAppBar({ scenarioId }: { scenarioId?: string }) {
         style={({ pressed }) => [styles.askPill, pressed && styles.pressed]}
       >
         <View style={styles.mascotWell}>
-          <CreepyMascot width={18} height={18} color={palette.brand} />
+          <CreepyMascot width={18} height={18} color={palette.white} />
         </View>
         <Text variant="button" tone="inverse">
           Ask Creepy
@@ -88,17 +88,12 @@ const styles = StyleSheet.create({
     paddingVertical: 6,
     ...shadow.raised,
   },
-  // Figma: 24px rounded well with a 1px white-alpha ring around the mascot.
+  // The mascot sits directly on the pill so the blue background stays seamless.
   mascotWell: {
     width: 24,
     height: 24,
-    borderRadius: radius.lg,
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.2)',
-    backgroundColor: '#efedee',
     alignItems: 'center',
     justifyContent: 'center',
-    overflow: 'hidden',
   },
   pressed: { opacity: 0.75 },
 });

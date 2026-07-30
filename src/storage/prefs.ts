@@ -1,15 +1,15 @@
-import AsyncStorage from '@react-native-async-storage/async-storage';
+import AsyncStorage from "@react-native-async-storage/async-storage";
 
-import type { DeviceAssessment } from '@/attestation/client/deviceAssessment';
-import type { ScenarioId } from '@/features/scenarios/registry';
+import type { DeviceAssessment } from "@/attestation/client/deviceAssessment";
+import type { ScenarioId } from "@/features/scenarios/registry";
 
-const ONBOARDING_KEY = 'creepyim.onboarding.completed.v1';
-const USER_PROFILE_KEY = 'creepyim.onboarding.user-profile.v1';
-const CATEGORIES_KEY = 'creepyim.onboarding.categories.v1';
-const MEMORY_KEY = 'creepyim.onboarding.memory.v1';
-const DEVICE_ASSESSMENT_KEY = 'creepyim.onboarding.device-assessment.v1';
+const ONBOARDING_KEY = "creepyim.onboarding.completed.v1";
+const USER_PROFILE_KEY = "creepyim.onboarding.user-profile.v1";
+const CATEGORIES_KEY = "creepyim.onboarding.categories.v1";
+const MEMORY_KEY = "creepyim.onboarding.memory.v1";
+const DEVICE_ASSESSMENT_KEY = "creepyim.onboarding.device-assessment.v1";
 
-export type MemoryProfile = 'efficient' | 'balanced' | 'performance' | 'cloud';
+export type MemoryProfile = "efficient" | "balanced" | "performance" | "cloud";
 
 export type UserProfile = {
   name: string;
@@ -18,7 +18,7 @@ export type UserProfile = {
 
 export async function hasCompletedOnboarding(): Promise<boolean> {
   try {
-    return (await AsyncStorage.getItem(ONBOARDING_KEY)) === 'true';
+    return (await AsyncStorage.getItem(ONBOARDING_KEY)) === "true";
   } catch {
     return false;
   }
@@ -26,7 +26,7 @@ export async function hasCompletedOnboarding(): Promise<boolean> {
 
 export async function setOnboardingComplete(): Promise<void> {
   try {
-    await AsyncStorage.setItem(ONBOARDING_KEY, 'true');
+    await AsyncStorage.setItem(ONBOARDING_KEY, "true");
   } catch {
     // Worst case the user sees onboarding once more.
   }
@@ -51,7 +51,7 @@ export async function getUserProfile(): Promise<UserProfile | null> {
     const raw = await AsyncStorage.getItem(USER_PROFILE_KEY);
     if (!raw) return null;
     const parsed = JSON.parse(raw) as Partial<UserProfile>;
-    return typeof parsed.name === 'string' && typeof parsed.email === 'string'
+    return typeof parsed.name === "string" && typeof parsed.email === "string"
       ? { name: parsed.name, email: parsed.email }
       : null;
   } catch {
@@ -78,9 +78,7 @@ export async function getSelectedCategories(): Promise<ScenarioId[]> {
   }
 }
 
-export async function setSelectedCategories(
-  ids: ScenarioId[],
-): Promise<void> {
+export async function setSelectedCategories(ids: ScenarioId[]): Promise<void> {
   try {
     await AsyncStorage.setItem(CATEGORIES_KEY, JSON.stringify(ids));
   } catch {
@@ -91,14 +89,14 @@ export async function setSelectedCategories(
 export async function getMemoryProfile(): Promise<MemoryProfile> {
   try {
     const raw = await AsyncStorage.getItem(MEMORY_KEY);
-    return raw === 'efficient' ||
-      raw === 'balanced' ||
-      raw === 'performance' ||
-      raw === 'cloud'
+    return raw === "efficient" ||
+      raw === "balanced" ||
+      raw === "performance" ||
+      raw === "cloud"
       ? raw
-      : 'efficient';
+      : "efficient";
   } catch {
-    return 'efficient';
+    return "efficient";
   }
 }
 
@@ -115,7 +113,7 @@ export async function getDeviceAssessment(): Promise<DeviceAssessment | null> {
     const raw = await AsyncStorage.getItem(DEVICE_ASSESSMENT_KEY);
     if (!raw) return null;
     const parsed = JSON.parse(raw) as Partial<DeviceAssessment>;
-    return parsed.schemaVersion === 1 && typeof parsed.platform === 'string'
+    return parsed.schemaVersion === 1 && typeof parsed.platform === "string"
       ? (parsed as DeviceAssessment)
       : null;
   } catch {

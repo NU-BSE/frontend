@@ -1,13 +1,13 @@
-import React from 'react';
-import { useRouter } from 'expo-router';
-import { ScrollView, StyleSheet, View } from 'react-native';
+import React from "react";
+import { useRouter } from "expo-router";
+import { ScrollView, StyleSheet, View } from "react-native";
 
-import { AUTH_PROVIDERS } from '@/auth/providers';
-import { Button } from '@/components/Button';
-import { OnboardingNavBar } from '@/components/OnboardingNavBar';
-import { Screen } from '@/components/Screen';
-import { Text } from '@/components/Text';
-import { gutter, palette, radius, shadow, spacing } from '@/theme/tokens';
+import { AUTH_PROVIDERS } from "@/auth/providers";
+import { Button } from "@/components/Button";
+import { OnboardingNavBar } from "@/components/OnboardingNavBar";
+import { Screen } from "@/components/Screen";
+import { Text } from "@/components/Text";
+import { gutter, palette, radius, shadow, spacing } from "@/theme/tokens";
 
 export default function OnboardingAuth() {
   const router = useRouter();
@@ -54,7 +54,7 @@ export default function OnboardingAuth() {
 
       <OnboardingNavBar
         onBack={() => router.back()}
-        onAdvance={() => router.push('/onboarding/memory')}
+        onAdvance={() => router.push("/onboarding/memory")}
         advanceLabel="Continue"
       />
     </Screen>
@@ -64,17 +64,17 @@ export default function OnboardingAuth() {
 const styles = StyleSheet.create({
   content: {
     flexGrow: 1,
-    justifyContent: 'center',
+    justifyContent: "center",
     paddingHorizontal: gutter.screen,
     paddingVertical: spacing.xxxl,
   },
-  intro: { alignItems: 'center', marginBottom: spacing.xxxl },
+  intro: { alignItems: "center", marginBottom: spacing.xxxl },
   heading: {
     marginTop: spacing.sm,
     marginBottom: spacing.lg,
-    textAlign: 'center',
+    textAlign: "center",
   },
-  body: { textAlign: 'center' },
+  body: { textAlign: "center" },
   card: {
     gap: spacing.lg,
     padding: spacing.lg,

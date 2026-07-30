@@ -1,25 +1,22 @@
-import React, { useCallback, useMemo, useState } from 'react';
-import { useRouter } from 'expo-router';
+import React, { useCallback, useMemo, useState } from "react";
+import { useRouter } from "expo-router";
 import {
   ActivityIndicator,
   Pressable,
   ScrollView,
   StyleSheet,
   View,
-} from 'react-native';
+} from "react-native";
 
-import { collectDeviceAssessment } from '@/attestation/client/deviceAssessment';
-import { Icon } from '@/components/Icon';
-import { OnboardingNavBar } from '@/components/OnboardingNavBar';
-import { Screen } from '@/components/Screen';
-import { Text } from '@/components/Text';
-import { chunkRows } from '@/features/scenarios/chunkRows';
-import { SCENARIOS, type ScenarioId } from '@/features/scenarios/registry';
-import {
-  setDeviceAssessment,
-  setSelectedCategories,
-} from '@/storage/prefs';
-import { gutter, palette, radius, spacing } from '@/theme/tokens';
+import { collectDeviceAssessment } from "@/attestation/client/deviceAssessment";
+import { Icon } from "@/components/Icon";
+import { OnboardingNavBar } from "@/components/OnboardingNavBar";
+import { Screen } from "@/components/Screen";
+import { Text } from "@/components/Text";
+import { chunkRows } from "@/features/scenarios/chunkRows";
+import { SCENARIOS, type ScenarioId } from "@/features/scenarios/registry";
+import { setDeviceAssessment, setSelectedCategories } from "@/storage/prefs";
+import { gutter, palette, radius, spacing } from "@/theme/tokens";
 
 const COLUMN_GAP = spacing.lg;
 const COLUMNS = 2;
@@ -48,16 +45,16 @@ export default function OnboardingFeatures() {
       await setDeviceAssessment(assessment);
     } catch (error) {
       const reason =
-        error instanceof Error ? error.message : 'Device assessment failed.';
+        error instanceof Error ? error.message : "Device assessment failed.";
       await setDeviceAssessment({
         schemaVersion: 1,
-        platform: 'unsupported',
+        platform: "unsupported",
         collectedAtMs: Date.now(),
         reason,
       });
     } finally {
       setCheckingDevice(false);
-      router.push('/onboarding/auth');
+      router.push("/onboarding/auth");
     }
   }, [checkingDevice, router, selected]);
 
@@ -112,7 +109,7 @@ export default function OnboardingFeatures() {
                     />
                     <Text
                       variant="label"
-                      tone={active ? 'brand' : 'primary'}
+                      tone={active ? "brand" : "primary"}
                       style={styles.cellLabel}
                     >
                       {scenario.title}
@@ -140,7 +137,7 @@ export default function OnboardingFeatures() {
       <OnboardingNavBar
         onBack={() => router.back()}
         onAdvance={() => void advance()}
-        advanceLabel={checkingDevice ? 'Checking' : 'Continue'}
+        advanceLabel={checkingDevice ? "Checking" : "Continue"}
         advanceDisabled={checkingDevice}
       />
     </Screen>
@@ -153,16 +150,16 @@ const styles = StyleSheet.create({
     paddingTop: spacing.xxxl,
     paddingBottom: spacing.xxl,
   },
-  intro: { alignItems: 'center', paddingBottom: spacing.xxxl },
-  heading: { textAlign: 'center', marginBottom: spacing.lg },
-  body: { textAlign: 'center' },
+  intro: { alignItems: "center", paddingBottom: spacing.xxxl },
+  heading: { textAlign: "center", marginBottom: spacing.lg },
+  body: { textAlign: "center" },
   grid: { gap: COLUMN_GAP },
-  row: { flexDirection: 'row', gap: COLUMN_GAP },
+  row: { flexDirection: "row", gap: COLUMN_GAP },
   cellSlot: { flex: 1, minWidth: 0 },
   cell: {
     minHeight: 144,
-    alignItems: 'center',
-    justifyContent: 'center',
+    alignItems: "center",
+    justifyContent: "center",
     gap: spacing.lg,
     paddingHorizontal: spacing.lg,
     backgroundColor: palette.surface,
@@ -170,12 +167,15 @@ const styles = StyleSheet.create({
     borderColor: palette.borderSoft,
     borderRadius: radius.md,
   },
-  cellActive: { borderColor: palette.brand, backgroundColor: palette.brandWash },
-  cellLabel: { textAlign: 'center' },
+  cellActive: {
+    borderColor: palette.brand,
+    backgroundColor: palette.brandWash,
+  },
+  cellLabel: { textAlign: "center" },
   pressed: { opacity: 0.8 },
   assessmentCard: {
-    flexDirection: 'row',
-    alignItems: 'center',
+    flexDirection: "row",
+    alignItems: "center",
     gap: spacing.lg,
     marginTop: spacing.xxl,
     padding: spacing.lg,

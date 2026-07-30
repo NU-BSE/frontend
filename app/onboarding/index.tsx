@@ -1,5 +1,5 @@
-import React, { useCallback, useMemo, useState } from 'react';
-import { useRouter } from 'expo-router';
+import React, { useCallback, useMemo, useState } from "react";
+import { useRouter } from "expo-router";
 import {
   KeyboardAvoidingView,
   Platform,
@@ -7,21 +7,21 @@ import {
   StyleSheet,
   TextInput,
   View,
-} from 'react-native';
+} from "react-native";
 
-import { OnboardingNavBar } from '@/components/OnboardingNavBar';
-import { Screen } from '@/components/Screen';
-import { Text } from '@/components/Text';
-import CreepyMascot from '@assets/icons/creepy-mascot.svg';
-import { setUserProfile } from '@/storage/prefs';
-import { gutter, palette, radius, shadow, spacing } from '@/theme/tokens';
+import { OnboardingNavBar } from "@/components/OnboardingNavBar";
+import { Screen } from "@/components/Screen";
+import { Text } from "@/components/Text";
+import CreepyMascot from "@assets/icons/creepy-mascot.svg";
+import { setUserProfile } from "@/storage/prefs";
+import { gutter, palette, radius, shadow, spacing } from "@/theme/tokens";
 
 const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 export default function OnboardingProfile() {
   const router = useRouter();
-  const [name, setName] = useState('');
-  const [email, setEmail] = useState('');
+  const [name, setName] = useState("");
+  const [email, setEmail] = useState("");
   const [saving, setSaving] = useState(false);
 
   const normalizedName = name.trim();
@@ -40,14 +40,14 @@ export default function OnboardingProfile() {
       name: normalizedName,
       email: normalizedEmail,
     });
-    router.push('/onboarding/features');
+    router.push("/onboarding/features");
     setSaving(false);
   }, [canContinue, normalizedEmail, normalizedName, router]);
 
   return (
     <Screen>
       <KeyboardAvoidingView
-        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+        behavior={Platform.OS === "ios" ? "padding" : undefined}
         style={styles.flex}
       >
         <ScrollView
@@ -112,7 +112,7 @@ export default function OnboardingProfile() {
 
         <OnboardingNavBar
           onAdvance={() => void advance()}
-          advanceLabel={saving ? 'Saving' : 'Continue'}
+          advanceLabel={saving ? "Saving" : "Continue"}
           advanceDisabled={!canContinue}
         />
       </KeyboardAvoidingView>
@@ -124,26 +124,26 @@ const styles = StyleSheet.create({
   flex: { flex: 1 },
   content: {
     flexGrow: 1,
-    justifyContent: 'center',
+    justifyContent: "center",
     paddingHorizontal: gutter.screen,
     paddingVertical: spacing.xxxl,
   },
-  intro: { alignItems: 'center', marginBottom: spacing.xxxl },
+  intro: { alignItems: "center", marginBottom: spacing.xxxl },
   mascotFrame: {
     width: 96,
     height: 96,
     marginBottom: spacing.xxl,
-    alignItems: 'center',
-    justifyContent: 'center',
-    overflow: 'hidden',
+    alignItems: "center",
+    justifyContent: "center",
+    overflow: "hidden",
     borderWidth: 1,
     borderColor: palette.borderFaint,
     borderRadius: radius.lg,
     backgroundColor: palette.surface,
     ...shadow.card,
   },
-  heading: { marginBottom: spacing.lg, textAlign: 'center' },
-  body: { textAlign: 'center' },
+  heading: { marginBottom: spacing.lg, textAlign: "center" },
+  body: { textAlign: "center" },
   form: { gap: spacing.xl },
   field: { gap: spacing.sm },
   input: {

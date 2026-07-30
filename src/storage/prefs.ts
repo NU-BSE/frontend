@@ -4,20 +4,18 @@ import type { DeviceAssessment } from '@/attestation/client/deviceAssessment';
 import type { ScenarioId } from '@/features/scenarios/registry';
 
 const ONBOARDING_KEY = 'creepyim.onboarding.completed.v1';
+const USER_PROFILE_KEY = 'creepyim.onboarding.user-profile.v1';
 const CATEGORIES_KEY = 'creepyim.onboarding.categories.v1';
 const MEMORY_KEY = 'creepyim.onboarding.memory.v1';
 const DEVICE_ASSESSMENT_KEY = 'creepyim.onboarding.device-assessment.v1';
 
-/** Matches the four rows in the Memory Config frame. */
 export type MemoryProfile = 'efficient' | 'balanced' | 'performance' | 'cloud';
 
-/**
- * Preferences, not secrets, so AsyncStorage is correct. Auth tokens belong
- * in expo-secure-store instead — see src/auth/providers.ts.
- *
- * Every read swallows its error and returns a safe default: a storage
- * failure should never lock a user out of the app.
- */
+export type UserProfile = {
+  name: string;
+  email: string;
+};
+
 export async function hasCompletedOnboarding(): Promise<boolean> {
   try {
     return (await AsyncStorage.getItem(ONBOARDING_KEY)) === 'true';
@@ -38,12 +36,34 @@ export async function resetOnboarding(): Promise<void> {
   try {
     await AsyncStorage.multiRemove([
       ONBOARDING_KEY,
+      USER_PROFILE_KEY,
       CATEGORIES_KEY,
       MEMORY_KEY,
       DEVICE_ASSESSMENT_KEY,
     ]);
   } catch {
     // Non-fatal.
+  }
+}
+
+export async function getUserProfile(): Promise<UserProfile | null> {
+  try {
+    const raw = await AsyncStorage.getItem(USER_PROFILE_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as Partial<UserProfile>;
+    return typeof parsed.name === 'string' && typeof parsed.email === 'string'
+      ? { name: parsed.name, email: parsed.email }
+      : null;
+  } catch {
+    return null;
+  }
+}
+
+export async function setUserProfile(profile: UserProfile): Promise<void> {
+  try {
+    await AsyncStorage.setItem(USER_PROFILE_KEY, JSON.stringify(profile));
+  } catch {
+    // Non-fatal — the profile can be collected again later.
   }
 }
 
@@ -112,6 +132,6 @@ export async function setDeviceAssessment(
       JSON.stringify(assessment),
     );
   } catch {
-    // The second onboarding screen will safely fall back to cloud-only.
+    // The model selection screen will safely fall back to cloud-only.
   }
 }

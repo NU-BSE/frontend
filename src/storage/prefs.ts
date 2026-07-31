@@ -5,6 +5,7 @@ import type { ScenarioId } from "@/features/scenarios/registry";
 
 const ONBOARDING_KEY = "creepyim.onboarding.completed.v1";
 const USER_PROFILE_KEY = "creepyim.onboarding.user-profile.v1";
+const PENDING_EMAIL_AUTH_KEY = "creepyim.auth.pending-email.v1";
 const CATEGORIES_KEY = "creepyim.onboarding.categories.v1";
 const MEMORY_KEY = "creepyim.onboarding.memory.v1";
 const DEVICE_ASSESSMENT_KEY = "creepyim.onboarding.device-assessment.v1";
@@ -14,6 +15,13 @@ export type MemoryProfile = "efficient" | "balanced" | "performance" | "cloud";
 export type UserProfile = {
   name: string;
   email: string;
+};
+
+export type PendingEmailAuth = {
+  challengeId: string;
+  email: string;
+  name?: string;
+  purpose: "registration" | "login";
 };
 
 export async function hasCompletedOnboarding(): Promise<boolean> {
@@ -37,10 +45,46 @@ export async function resetOnboarding(): Promise<void> {
     await AsyncStorage.multiRemove([
       ONBOARDING_KEY,
       USER_PROFILE_KEY,
+      PENDING_EMAIL_AUTH_KEY,
       CATEGORIES_KEY,
       MEMORY_KEY,
       DEVICE_ASSESSMENT_KEY,
     ]);
+  } catch {
+    // Non-fatal.
+  }
+}
+
+export async function getPendingEmailAuth(): Promise<PendingEmailAuth | null> {
+  try {
+    const raw = await AsyncStorage.getItem(PENDING_EMAIL_AUTH_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as Partial<PendingEmailAuth>;
+    const purposeIsValid =
+      parsed.purpose === "registration" || parsed.purpose === "login";
+    return typeof parsed.challengeId === "string" &&
+      typeof parsed.email === "string" &&
+      purposeIsValid
+      ? (parsed as PendingEmailAuth)
+      : null;
+  } catch {
+    return null;
+  }
+}
+
+export async function setPendingEmailAuth(
+  pending: PendingEmailAuth,
+): Promise<void> {
+  try {
+    await AsyncStorage.setItem(PENDING_EMAIL_AUTH_KEY, JSON.stringify(pending));
+  } catch {
+    // The code screen will ask the user to request a new code.
+  }
+}
+
+export async function clearPendingEmailAuth(): Promise<void> {
+  try {
+    await AsyncStorage.removeItem(PENDING_EMAIL_AUTH_KEY);
   } catch {
     // Non-fatal.
   }

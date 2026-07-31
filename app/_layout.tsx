@@ -1,27 +1,22 @@
-import React, { useEffect, useMemo } from 'react';
-// Per-weight subpaths, not the package barrels. Importing from
-// '@expo-google-fonts/noto-serif' pulls every weight into the bundle — that
-// measured 55 TTFs for the six faces actually used.
-import { Inter_400Regular } from '@expo-google-fonts/inter/400Regular';
-import { NotoSerif_400Regular } from '@expo-google-fonts/noto-serif/400Regular';
-import { NotoSerif_600SemiBold } from '@expo-google-fonts/noto-serif/600SemiBold';
-import { NotoSerif_700Bold } from '@expo-google-fonts/noto-serif/700Bold';
-import { PublicSans_600SemiBold } from '@expo-google-fonts/public-sans/600SemiBold';
-import { PublicSans_700Bold } from '@expo-google-fonts/public-sans/700Bold';
-import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { useFonts } from 'expo-font';
-import { Stack } from 'expo-router';
-import * as SplashScreen from 'expo-splash-screen';
-import { StatusBar } from 'expo-status-bar';
-import { GestureHandlerRootView } from 'react-native-gesture-handler';
-import { SafeAreaProvider } from 'react-native-safe-area-context';
+import React, { useEffect, useMemo } from "react";
+import { Inter_400Regular } from "@expo-google-fonts/inter/400Regular";
+import { NotoSerif_400Regular } from "@expo-google-fonts/noto-serif/400Regular";
+import { NotoSerif_600SemiBold } from "@expo-google-fonts/noto-serif/600SemiBold";
+import { NotoSerif_700Bold } from "@expo-google-fonts/noto-serif/700Bold";
+import { PublicSans_600SemiBold } from "@expo-google-fonts/public-sans/600SemiBold";
+import { PublicSans_700Bold } from "@expo-google-fonts/public-sans/700Bold";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { useFonts } from "expo-font";
+import { Stack } from "expo-router";
+import * as SplashScreen from "expo-splash-screen";
+import { StatusBar } from "expo-status-bar";
+import { GestureHandlerRootView } from "react-native-gesture-handler";
+import { SafeAreaProvider } from "react-native-safe-area-context";
 
-import { AiProvider } from '@/ai/AiProvider';
-import { WebAuthGate } from '@/auth/WebAuthGate';
-import { palette } from '@/theme/tokens';
+import { AiProvider } from "@/ai/AiProvider";
+import { WebAuthGate } from "@/auth/WebAuthGate";
+import { palette } from "@/theme/tokens";
 
-// Held until fonts resolve. Without this the first frame renders in the
-// system font and visibly reflows once Noto Serif lands.
 void SplashScreen.preventAutoHideAsync();
 
 export default function RootLayout() {
@@ -45,15 +40,15 @@ export default function RootLayout() {
   );
 
   useEffect(() => {
-    // Hide on error too — a font failure should degrade to system fonts,
-    // not strand the user on a splash screen forever.
     if (fontsLoaded || fontError) void SplashScreen.hideAsync();
   }, [fontError, fontsLoaded]);
 
   if (!fontsLoaded && !fontError) return null;
 
   return (
-    <GestureHandlerRootView style={{ flex: 1, backgroundColor: palette.canvas }}>
+    <GestureHandlerRootView
+      style={{ flex: 1, backgroundColor: palette.canvas }}
+    >
       <SafeAreaProvider>
         <WebAuthGate>
           <QueryClientProvider client={queryClient}>
@@ -67,13 +62,13 @@ export default function RootLayout() {
               >
                 <Stack.Screen name="index" />
                 <Stack.Screen name="onboarding" />
+                <Stack.Screen name="auth" />
                 <Stack.Screen name="(tabs)" />
                 <Stack.Screen
                   name="chat"
                   options={{
-                    // Slides up over the tabs — it is a task, not a destination.
-                    presentation: 'modal',
-                    animation: 'slide_from_bottom',
+                    presentation: "modal",
+                    animation: "slide_from_bottom",
                   }}
                 />
               </Stack>

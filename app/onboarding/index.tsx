@@ -6,14 +6,16 @@ import {
   ScrollView,
   StyleSheet,
   TextInput,
+  Pressable,
   View,
 } from "react-native";
 
+import { requestEmailCode } from "@/auth/emailAuth";
 import { OnboardingNavBar } from "@/components/OnboardingNavBar";
 import { Screen } from "@/components/Screen";
 import { Text } from "@/components/Text";
 import CreepyMascot from "@assets/icons/creepy-mascot.svg";
-import { setUserProfile } from "@/storage/prefs";
+import { setPendingEmailAuth, setUserProfile } from "@/storage/prefs";
 import { gutter, palette, radius, shadow, spacing } from "@/theme/tokens";
 
 const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
@@ -23,6 +25,7 @@ export default function OnboardingProfile() {
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
   const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   const normalizedName = name.trim();
   const normalizedEmail = email.trim().toLowerCase();
@@ -36,12 +39,35 @@ export default function OnboardingProfile() {
     if (!canContinue) return;
 
     setSaving(true);
-    await setUserProfile({
-      name: normalizedName,
-      email: normalizedEmail,
-    });
-    router.push("/onboarding/features");
-    setSaving(false);
+    setError(null);
+    try {
+      const challenge = await requestEmailCode({
+        email: normalizedEmail,
+        name: normalizedName,
+        purpose: "registration",
+      });
+      await Promise.all([
+        setUserProfile({
+          name: normalizedName,
+          email: normalizedEmail,
+        }),
+        setPendingEmailAuth({
+          challengeId: challenge.challengeId,
+          email: normalizedEmail,
+          name: normalizedName,
+          purpose: "registration",
+        }),
+      ]);
+      router.push("/onboarding/auth");
+    } catch (requestError) {
+      setError(
+        requestError instanceof Error
+          ? requestError.message
+          : "Could not send the verification code.",
+      );
+    } finally {
+      setSaving(false);
+    }
   }, [canContinue, normalizedEmail, normalizedName, router]);
 
   return (
@@ -107,6 +133,24 @@ export default function OnboardingProfile() {
                 </Text>
               ) : null}
             </View>
+            {error ? (
+              <Text
+                accessibilityLiveRegion="polite"
+                variant="bodySmall"
+                tone="danger"
+              >
+                {error}
+              </Text>
+            ) : null}
+            <Pressable
+              accessibilityRole="button"
+              onPress={() => router.push("/auth")}
+              style={({ pressed }) => pressed && styles.pressed}
+            >
+              <Text variant="label" tone="brand" style={styles.signIn}>
+                Already have an account? Sign in
+              </Text>
+            </Pressable>
           </View>
         </ScrollView>
 
@@ -156,4 +200,6 @@ const styles = StyleSheet.create({
     color: palette.textPrimary,
     fontSize: 16,
   },
+  signIn: { textAlign: "center" },
+  pressed: { opacity: 0.7 },
 });

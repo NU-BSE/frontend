@@ -1,26 +1,25 @@
-import React from 'react';
-import { useQuery } from '@tanstack/react-query';
-import { Redirect } from 'expo-router';
-import { ActivityIndicator, StyleSheet, View } from 'react-native';
+import React from "react";
+import { useQuery } from "@tanstack/react-query";
+import { Redirect } from "expo-router";
+import { ActivityIndicator, StyleSheet, View } from "react-native";
 
-import { hasCompletedOnboarding } from '@/storage/prefs';
-import { palette } from '@/theme/tokens';
+import { hasAuthSession } from "@/auth/emailAuth";
+import { hasCompletedOnboarding } from "@/storage/prefs";
+import { palette } from "@/theme/tokens";
 
-/**
- * Entry gate.
- *
- * Reading the flag is async, so rendering a redirect before it resolves would
- * flash onboarding at returning users. This holds on a neutral splash until
- * the answer is known — which is why it renders nothing branded.
- */
 export default function Index() {
-  const { data, isPending } = useQuery({
-    queryKey: ['onboarding-status'],
+  const onboarding = useQuery({
+    queryKey: ["onboarding-status"],
     queryFn: hasCompletedOnboarding,
     staleTime: Infinity,
   });
+  const auth = useQuery({
+    queryKey: ["auth-session"],
+    queryFn: hasAuthSession,
+    staleTime: Infinity,
+  });
 
-  if (isPending) {
+  if (onboarding.isPending || auth.isPending) {
     return (
       <View style={styles.splash}>
         <ActivityIndicator color={palette.brand} />
@@ -28,14 +27,16 @@ export default function Index() {
     );
   }
 
-  return <Redirect href={data ? '/(tabs)/feed' : '/onboarding'} />;
+  if (!onboarding.data) return <Redirect href="/onboarding" />;
+  if (!auth.data) return <Redirect href="/auth" />;
+  return <Redirect href="/(tabs)/feed" />;
 }
 
 const styles = StyleSheet.create({
   splash: {
     flex: 1,
-    alignItems: 'center',
-    justifyContent: 'center',
+    alignItems: "center",
+    justifyContent: "center",
     backgroundColor: palette.canvas,
   },
 });

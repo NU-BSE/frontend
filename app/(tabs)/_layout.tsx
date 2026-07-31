@@ -1,12 +1,12 @@
-import React from 'react';
-import { Tabs } from 'expo-router';
-import { StyleSheet } from 'react-native';
+import React from "react";
+import { Tabs } from "expo-router";
+import { StyleSheet } from "react-native";
 
-import { Icon } from '@/components/Icon';
-import NavAuth from '@assets/icons/people-group.svg';
-import NavFeed from '@assets/icons/nav-feed.svg';
-import NavHistory from '@assets/icons/nav-history.svg';
-import { palette, radius, spacing, typography } from '@/theme/tokens';
+import { Icon } from "@/components/Icon";
+import NavAuth from "@assets/icons/people-group.svg";
+import NavFeed from "@assets/icons/nav-feed.svg";
+import NavHistory from "@assets/icons/nav-history.svg";
+import { palette, radius, spacing, typography } from "@/theme/tokens";
 
 export default function TabsLayout() {
   return (
@@ -23,7 +23,7 @@ export default function TabsLayout() {
       <Tabs.Screen
         name="feed"
         options={{
-          title: 'Feed',
+          title: "Feed",
           tabBarIcon: ({ color }) => (
             <Icon source={NavFeed} size={14} color={color} />
           ),
@@ -32,7 +32,7 @@ export default function TabsLayout() {
       <Tabs.Screen
         name="history"
         options={{
-          title: 'History',
+          title: "History",
           tabBarIcon: ({ color }) => (
             <Icon source={NavHistory} size={15} color={color} />
           ),
@@ -41,10 +41,8 @@ export default function TabsLayout() {
       <Tabs.Screen
         name="auth"
         options={{
-          title: 'Auth',
+          title: "Account",
           tabBarIcon: ({ color }) => (
-            // Non-square glyph (18.33 × 13.33) — both dimensions set so it
-            // keeps the designed aspect ratio.
             <Icon source={NavAuth} size={18} height={13} color={color} />
           ),
         }}

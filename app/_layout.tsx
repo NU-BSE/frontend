@@ -14,7 +14,7 @@ import { GestureHandlerRootView } from "react-native-gesture-handler";
 import { SafeAreaProvider } from "react-native-safe-area-context";
 
 import { AiProvider } from "@/ai/AiProvider";
-import { WebAuthGate } from "@/auth/WebAuthGate";
+import { AuthRouteGuard } from "@/auth/AuthRouteGuard";
 import { palette } from "@/theme/tokens";
 
 void SplashScreen.preventAutoHideAsync();
@@ -50,8 +50,9 @@ export default function RootLayout() {
       style={{ flex: 1, backgroundColor: palette.canvas }}
     >
       <SafeAreaProvider>
-        <WebAuthGate>
-          <QueryClientProvider client={queryClient}>
+        <QueryClientProvider client={queryClient}>
+          {/* Legacy WebAuthGate (login/password) intentionally disabled. */}
+          <AuthRouteGuard>
             <AiProvider>
               <StatusBar style="dark" />
               <Stack
@@ -73,8 +74,8 @@ export default function RootLayout() {
                 />
               </Stack>
             </AiProvider>
-          </QueryClientProvider>
-        </WebAuthGate>
+          </AuthRouteGuard>
+        </QueryClientProvider>
       </SafeAreaProvider>
     </GestureHandlerRootView>
   );

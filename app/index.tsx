@@ -27,8 +27,8 @@ export default function Index() {
     );
   }
 
-  if (!onboarding.data) return <Redirect href="/onboarding" />;
   if (!auth.data) return <Redirect href="/auth" />;
+  if (!onboarding.data) return <Redirect href="/onboarding" />;
   return <Redirect href="/(tabs)/feed" />;
 }
 

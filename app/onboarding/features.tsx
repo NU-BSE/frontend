@@ -54,7 +54,7 @@ export default function OnboardingFeatures() {
       });
     } finally {
       setCheckingDevice(false);
-      router.push("/onboarding/memory");
+      router.push("/onboarding/connections");
     }
   }, [checkingDevice, router, selected]);
 

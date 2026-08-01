@@ -1,4 +1,5 @@
 import * as SecureStore from "expo-secure-store";
+import { Platform } from "react-native";
 
 const ACCESS_TOKEN_KEY = "creepyim.auth.access-token.v1";
 const REFRESH_TOKEN_KEY = "creepyim.auth.refresh-token.v1";
@@ -40,6 +41,37 @@ export class EmailAuthError extends Error {
     this.name = "EmailAuthError";
   }
 }
+
+const readSessionValue = async (key: string): Promise<string | null> => {
+  if (Platform.OS === "web") {
+    return typeof sessionStorage === "undefined"
+      ? null
+      : sessionStorage.getItem(key);
+  }
+
+  return SecureStore.getItemAsync(key);
+};
+
+const writeSessionValue = async (key: string, value: string): Promise<void> => {
+  if (Platform.OS === "web") {
+    if (typeof sessionStorage === "undefined") {
+      throw new EmailAuthError("Browser session storage is unavailable.");
+    }
+    sessionStorage.setItem(key, value);
+    return;
+  }
+
+  await SecureStore.setItemAsync(key, value);
+};
+
+const deleteSessionValue = async (key: string): Promise<void> => {
+  if (Platform.OS === "web") {
+    if (typeof sessionStorage !== "undefined") sessionStorage.removeItem(key);
+    return;
+  }
+
+  await SecureStore.deleteItemAsync(key);
+};
 
 const getApiUrl = (path: string): string => {
   const baseUrl = process.env.EXPO_PUBLIC_API_URL?.replace(/\/+$/u, "");
@@ -120,10 +152,10 @@ export async function verifyEmailCode(
     throw new EmailAuthError("The server did not return an access token.");
   }
 
-  await SecureStore.setItemAsync(ACCESS_TOKEN_KEY, accessToken);
-  await SecureStore.setItemAsync(EMAIL_KEY, input.email);
+  await writeSessionValue(ACCESS_TOKEN_KEY, accessToken);
+  await writeSessionValue(EMAIL_KEY, input.email);
   if (typeof refreshToken === "string" && refreshToken.length > 0) {
-    await SecureStore.setItemAsync(REFRESH_TOKEN_KEY, refreshToken);
+    await writeSessionValue(REFRESH_TOKEN_KEY, refreshToken);
   }
 
   const onboardingCompleted =
@@ -139,7 +171,7 @@ export async function verifyEmailCode(
 
 export async function hasAuthSession(): Promise<boolean> {
   try {
-    return Boolean(await SecureStore.getItemAsync(ACCESS_TOKEN_KEY));
+    return Boolean(await readSessionValue(ACCESS_TOKEN_KEY));
   } catch {
     return false;
   }
@@ -147,7 +179,7 @@ export async function hasAuthSession(): Promise<boolean> {
 
 export async function getAuthenticatedEmail(): Promise<string | null> {
   try {
-    return await SecureStore.getItemAsync(EMAIL_KEY);
+    return await readSessionValue(EMAIL_KEY);
   } catch {
     return null;
   }
@@ -155,8 +187,8 @@ export async function getAuthenticatedEmail(): Promise<string | null> {
 
 export async function clearAuthSession(): Promise<void> {
   await Promise.all([
-    SecureStore.deleteItemAsync(ACCESS_TOKEN_KEY),
-    SecureStore.deleteItemAsync(REFRESH_TOKEN_KEY),
-    SecureStore.deleteItemAsync(EMAIL_KEY),
+    deleteSessionValue(ACCESS_TOKEN_KEY),
+    deleteSessionValue(REFRESH_TOKEN_KEY),
+    deleteSessionValue(EMAIL_KEY),
   ]);
 }

@@ -23,9 +23,7 @@
     "src/**/*.ts",
     "src/**/*.tsx",
     "scripts/**/*.ts",
-    "scripts/**/*.mts",
-    ".expo/types/**/*.ts",
-    "expo-env.d.ts"
+    "scripts/**/*.mts"
   ],
   "exclude": [
     "src/attestation/**"

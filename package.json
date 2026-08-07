@@ -2,10 +2,21 @@
   "name": "creepyim",
   "version": "1.0.0",
   "main": "expo-router/entry",
+  "workspaces": [
+    "app/*",
+    "packages/*"
+  ],
   "dependencies": {
     "@expo-google-fonts/inter": "^0.4.2",
     "@expo-google-fonts/noto-serif": "^0.4.2",
     "@expo-google-fonts/public-sans": "^0.4.2",
+    "@expo/metro-runtime": "~57.0.7",
+    "@mobile-agent/connector-core": "*",
+    "@mobile-agent/connector-mock": "*",
+    "@mobile-agent/mcp-client": "*",
+    "@mobile-agent/mcp-server": "*",
+    "@modelcontextprotocol/client": "^2.0.0",
+    "@modelcontextprotocol/server": "^2.0.0",
     "@react-native-async-storage/async-storage": "2.2.0",
     "@tanstack/ai": "^0.42.0",
     "@tanstack/ai-client": "^0.22.1",
@@ -29,7 +40,8 @@
     "react-native-screens": "~4.26.0",
     "react-native-svg": "^15.15.4",
     "react-native-web": "^0.21.2",
-    "react-native-worklets": "0.10.0"
+    "react-native-worklets": "0.10.0",
+    "zod": "^4.4.3"
   },
   "devDependencies": {
     "@types/react": "~19.2.2",
@@ -38,11 +50,12 @@
     "eslint-config-expo": "~57.0.0",
     "react-native-svg-transformer": "^1.5.3",
     "typescript": "~6.0.3",
+    "wrangler": "^4.114.0",
     "yoga-layout": "^3.2.1"
   },
   "scripts": {
     "start": "expo start",
-    "android": "expo start --android",
+    "android": "expo run:android",
     "web": "expo start --web",
     "build": "npm run build:android && npm run build:web",
     "build:android": "expo export --platform android --output-dir dist/android",
@@ -54,7 +67,10 @@
     "verify:logic": "esbuild scripts/verify-logic.mts --bundle --platform=node --format=cjs --outfile=node_modules/.cache/verify-logic.cjs --log-level=error && node node_modules/.cache/verify-logic.cjs",
     "verify:layout": "esbuild scripts/verify-layout.mts --bundle --platform=node --format=esm --outfile=node_modules/.cache/verify-layout.mjs --log-level=error && node node_modules/.cache/verify-layout.mjs",
     "verify:device": "esbuild scripts/verify-device-selection.mts --bundle --platform=node --format=cjs --outfile=node_modules/.cache/verify-device-selection.cjs --log-level=error && node node_modules/.cache/verify-device-selection.cjs",
-    "verify": "npm run typecheck && npm run lint && npm run verify:ai && npm run verify:logic && npm run verify:layout && npm run verify:device"
+    "verify:mcp": "esbuild scripts/verify-mcp.mts --bundle --platform=node --format=cjs --outfile=node_modules/.cache/verify-mcp.cjs --log-level=error && node node_modules/.cache/verify-mcp.cjs",
+    "verify": "npm run typecheck && npm run lint && npm run verify:ai && npm run verify:logic && npm run verify:layout && npm run verify:device && npm run verify:mcp",
+    "deploy": "node deploy.js",
+    "preview": "npx expo export --platform web && wrangler dev"
   },
   "private": true
 }

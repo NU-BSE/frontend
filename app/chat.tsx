@@ -19,6 +19,7 @@ import { Composer } from '@/features/chat/Composer';
 import { DeepLinkBar } from '@/features/chat/DeepLinkBar';
 import { MessageBubble, messageText } from '@/features/chat/MessageBubble';
 import { SuggestionChips } from '@/features/chat/SuggestionChips';
+import { McpDebugButton } from '@/mcp/McpDebugButton';
 import {
   GENERAL_SUGGESTIONS,
   getScenario,
@@ -123,17 +124,21 @@ export default function Chat() {
           </Text>
         </View>
 
-        <Pressable
-          accessibilityRole="button"
-          accessibilityLabel="Close chat"
-          hitSlop={12}
-          onPress={() => router.back()}
-          style={({ pressed }) => pressed && styles.pressed}
-        >
-          <Text variant="label" tone="brand">
-            Close
-          </Text>
-        </Pressable>
+        <View style={styles.headerActions}>
+          <McpDebugButton />
+
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel="Close chat"
+            hitSlop={12}
+            onPress={() => router.back()}
+            style={({ pressed }) => pressed && styles.pressed}
+          >
+            <Text variant="label" tone="brand">
+              Close
+            </Text>
+          </Pressable>
+        </View>
       </View>
 
       <KeyboardAvoidingView
@@ -214,6 +219,11 @@ const styles = StyleSheet.create({
     borderBottomColor: palette.borderFaint,
   },
   headerText: { gap: spacing.xs },
+  headerActions: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.md,
+  },
   listContent: { padding: gutter.home, flexGrow: 1 },
   gap: { height: spacing.md },
   intro: { paddingBottom: spacing.lg },

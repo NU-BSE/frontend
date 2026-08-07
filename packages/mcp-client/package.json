@@ -1,0 +1,19 @@
+{
+  "name": "@mobile-agent/mcp-client",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "build": "tsc"
+  },
+  "dependencies": {
+    "@mobile-agent/connector-core": "*",
+    "@mobile-agent/mcp-server": "*",
+    "@modelcontextprotocol/client": "^2.0.0",
+    "zod": "^4.0.0"
+  }
+}

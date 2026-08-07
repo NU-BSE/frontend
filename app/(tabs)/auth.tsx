@@ -3,7 +3,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useRouter } from "expo-router";
 import { ScrollView, StyleSheet, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-
+import { AUTH_PROVIDERS } from "@/auth/providers";
 import { clearAuthSession, getAuthenticatedEmail } from "@/auth/emailAuth";
 import { useAi } from "@/ai/AiProvider";
 import { Button } from "@/components/Button";
@@ -69,6 +69,28 @@ export default function Account() {
             loading={signOut.isPending}
             onPress={() => signOut.mutate()}
           />
+        </View>
+        
+        <View style={styles.section}>
+          <Text variant="headline">Connectors</Text>
+          {AUTH_PROVIDERS.map((provider) => (
+            <View key={provider.id} style={styles.provider}>
+              <Button
+                label={provider.label}
+                variant="secondary"
+                disabled={!provider.enabled}
+                onPress={() => {
+                  // OAuth/deep-link integrations attach here when configured.
+                }}
+              />
+              {!provider.enabled && provider.note ? (
+                <Text variant="bodySmall" tone="muted" style={styles.note}>
+                  {provider.note}
+                </Text>
+              ) : null}
+            </View>
+          ))}
+          
         </View>
 
         <View style={styles.section}>
@@ -150,4 +172,6 @@ const styles = StyleSheet.create({
     justifyContent: "space-between",
     gap: spacing.md,
   },
+  provider: { gap: spacing.xs },
+  note: { paddingHorizontal: spacing.xs },
 });

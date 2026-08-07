@@ -2,6 +2,10 @@ export {
   createMobileAgentMcpServer,
 } from "./create-server";
 
+export {
+  registerConnectorTools,
+} from "./register-connector-tools";
+
 export type {
   ApprovalCheckInput,
   ApprovalIssueInput,

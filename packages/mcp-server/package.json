@@ -12,6 +12,9 @@
   },
   "dependencies": {
     "@mobile-agent/connector-core": "*",
+    "@mobile-agent/connector-registry": "*",
+    "@mobile-agent/policy-core": "*",
+    "@mobile-agent/approval-core": "*",
     "@modelcontextprotocol/server": "^2.0.0",
     "zod": "^4.0.0"
   }

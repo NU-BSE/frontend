@@ -1,0 +1,12 @@
+{
+  "name": "@mobile-agent/oauth-core",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": { ".": "./src/index.ts" },
+  "scripts": { "typecheck": "tsc --noEmit", "build": "tsc" },
+  "dependencies": {
+    "@mobile-agent/connector-core": "*",
+    "@mobile-agent/credential-vault": "*"
+  }
+}

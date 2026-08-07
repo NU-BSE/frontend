@@ -12,6 +12,7 @@ import { Text } from "@/components/Text";
 import { TopAppBar } from "@/components/TopAppBar";
 import { getMemoryProfile, resetOnboarding } from "@/storage/prefs";
 import { gutter, palette, radius, shadow, spacing } from "@/theme/tokens";
+import { listConnectors, connectConnector, disconnectConnector } from "@/api/client";
 
 export default function Account() {
   const insets = useSafeAreaInsets();
@@ -35,6 +36,22 @@ export default function Account() {
       queryClient.removeQueries({ queryKey: ["authenticated-email"] });
       router.replace("/auth");
     },
+  });
+
+  const { data: connectors } = useQuery({
+    queryKey: ["connectors"],
+    queryFn: listConnectors,
+    enabled: Boolean(email),
+  });
+
+  const connectMut = useMutation({
+    mutationFn: (connectorId: string) => connectConnector(connectorId),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["connectors"] }),
+  });
+
+  const disconnectMut = useMutation({
+    mutationFn: (connectorId: string) => disconnectConnector(connectorId),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["connectors"] }),
   });
 
   const replay = useMutation({
@@ -73,24 +90,39 @@ export default function Account() {
         
         <View style={styles.section}>
           <Text variant="headline">Connectors</Text>
-          {AUTH_PROVIDERS.map((provider) => (
-            <View key={provider.id} style={styles.provider}>
-              <Button
-                label={provider.label}
-                variant="secondary"
-                disabled={!provider.enabled}
-                onPress={() => {
-                  // OAuth/deep-link integrations attach here when configured.
-                }}
-              />
-              {!provider.enabled && provider.note ? (
-                <Text variant="bodySmall" tone="muted" style={styles.note}>
-                  {provider.note}
-                </Text>
-              ) : null}
-            </View>
-          ))}
-          
+          {AUTH_PROVIDERS.map((provider) => {
+            const connector = connectors?.find((c) => c.id === provider.connectorId);
+            const connected = connector?.connected ?? false;
+            return (
+              <View key={provider.id} style={styles.provider}>
+                <Button
+                  label={
+                    connected
+                      ? `${provider.label} — Connected`
+                      : provider.label
+                  }
+                  variant={connected ? "primary" : "secondary"}
+                  disabled={!provider.enabled}
+                  loading={
+                    connectMut.isPending || disconnectMut.isPending
+                  }
+                  onPress={() => {
+                    if (!provider.connectorId) return;
+                    if (connected) {
+                      disconnectMut.mutate(provider.connectorId);
+                    } else {
+                      connectMut.mutate(provider.connectorId);
+                    }
+                  }}
+                />
+                {!provider.enabled && provider.note ? (
+                  <Text variant="bodySmall" tone="muted" style={styles.note}>
+                    {provider.note}
+                  </Text>
+                ) : null}
+              </View>
+            );
+          })}
         </View>
 
         <View style={styles.section}>

@@ -2,6 +2,7 @@ import AsyncStorage from "@react-native-async-storage/async-storage";
 
 import type { DeviceAssessment } from "@/attestation/client/deviceAssessment";
 import type { ScenarioId } from "@/features/scenarios/registry";
+import { updateUserPreferences } from "@/api/client";
 
 const ONBOARDING_KEY = "creepyim.onboarding.completed.v1";
 const USER_PROFILE_KEY = "creepyim.onboarding.user-profile.v1";
@@ -36,8 +37,9 @@ export async function setOnboardingComplete(): Promise<void> {
   try {
     await AsyncStorage.setItem(ONBOARDING_KEY, "true");
   } catch {
-    // Worst case the user sees onboarding once more.
+    // Non-fatal.
   }
+  void updateUserPreferences({ onboardingCompleted: true }).catch(() => {});
 }
 
 export async function resetOnboarding(): Promise<void> {
@@ -126,8 +128,9 @@ export async function setSelectedCategories(ids: ScenarioId[]): Promise<void> {
   try {
     await AsyncStorage.setItem(CATEGORIES_KEY, JSON.stringify(ids));
   } catch {
-    // Non-fatal — the app works without a category preference.
+    // Non-fatal.
   }
+  void updateUserPreferences({ categories: ids as string[] }).catch(() => {});
 }
 
 export async function getMemoryProfile(): Promise<MemoryProfile> {
@@ -150,6 +153,7 @@ export async function setMemoryProfile(profile: MemoryProfile): Promise<void> {
   } catch {
     // Non-fatal.
   }
+  void updateUserPreferences({ memoryProfile: profile }).catch(() => {});
 }
 
 export async function getDeviceAssessment(): Promise<DeviceAssessment | null> {

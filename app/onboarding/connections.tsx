@@ -1,4 +1,5 @@
 import React from "react";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useRouter } from "expo-router";
 import { ScrollView, StyleSheet, View } from "react-native";
 
@@ -8,9 +9,26 @@ import { OnboardingNavBar } from "@/components/OnboardingNavBar";
 import { Screen } from "@/components/Screen";
 import { Text } from "@/components/Text";
 import { gutter, palette, radius, shadow, spacing } from "@/theme/tokens";
+import { listConnectors, connectConnector, disconnectConnector } from "@/api/client";
 
 export default function OnboardingConnections() {
   const router = useRouter();
+  const queryClient = useQueryClient();
+
+  const { data: connectors } = useQuery({
+    queryKey: ["connectors"],
+    queryFn: listConnectors,
+  });
+
+  const connectMut = useMutation({
+    mutationFn: connectConnector,
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["connectors"] }),
+  });
+
+  const disconnectMut = useMutation({
+    mutationFn: disconnectConnector,
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["connectors"] }),
+  });
 
   return (
     <Screen>
@@ -32,23 +50,37 @@ export default function OnboardingConnections() {
         </View>
 
         <View style={styles.card}>
-          {AUTH_PROVIDERS.map((provider) => (
-            <View key={provider.id} style={styles.provider}>
-              <Button
-                label={provider.label}
-                variant="secondary"
-                disabled={!provider.enabled}
-                onPress={() => {
-                  // OAuth/deep-link integrations attach here when configured.
-                }}
-              />
-              {!provider.enabled && provider.note ? (
-                <Text variant="bodySmall" tone="muted" style={styles.note}>
-                  {provider.note}
-                </Text>
-              ) : null}
-            </View>
-          ))}
+          {AUTH_PROVIDERS.map((provider) => {
+            const connector = connectors?.find((c) => c.id === provider.connectorId);
+            const connected = connector?.connected ?? false;
+            return (
+              <View key={provider.id} style={styles.provider}>
+                <Button
+                  label={
+                    connected
+                      ? `${provider.label} — Connected`
+                      : provider.label
+                  }
+                  variant={connected ? "primary" : "secondary"}
+                  disabled={!provider.enabled}
+                  loading={connectMut.isPending || disconnectMut.isPending}
+                  onPress={() => {
+                    if (!provider.connectorId) return;
+                    if (connected) {
+                      disconnectMut.mutate(provider.connectorId);
+                    } else {
+                      connectMut.mutate(provider.connectorId);
+                    }
+                  }}
+                />
+                {!provider.enabled && provider.note ? (
+                  <Text variant="bodySmall" tone="muted" style={styles.note}>
+                    {provider.note}
+                  </Text>
+                ) : null}
+              </View>
+            );
+          })}
         </View>
       </ScrollView>
 

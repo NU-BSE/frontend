@@ -1,0 +1,1 @@
+export { ConnectorRegistry } from './registry';

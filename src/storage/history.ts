@@ -1,9 +1,5 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
-import {
-  appendHistory as apiAppendHistory,
-} from '@/api/client';
-
 const HISTORY_KEY = 'creepyim.history.v2';
 const MAX_ENTRIES = 200;
 
@@ -62,17 +58,6 @@ export async function appendHistory(
   } catch {
     // Non-fatal.
   }
-
-  // Sync to backend (fire-and-forget)
-  void apiAppendHistory({
-    threadId: record.threadId,
-    category: record.category,
-    prompt: record.prompt,
-    reply: record.reply,
-    engine: record.engine,
-  }).catch(() => {
-    // Backend sync is best-effort
-  });
 
   return record;
 }

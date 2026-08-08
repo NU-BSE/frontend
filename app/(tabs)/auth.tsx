@@ -1,4 +1,4 @@
-import React from "react";
+import React, { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useRouter } from "expo-router";
 import { ScrollView, StyleSheet, View } from "react-native";
@@ -12,13 +12,17 @@ import { Text } from "@/components/Text";
 import { TopAppBar } from "@/components/TopAppBar";
 import { getMemoryProfile, resetOnboarding } from "@/storage/prefs";
 import { gutter, palette, radius, shadow, spacing } from "@/theme/tokens";
-import { listConnectors, connectConnector, disconnectConnector } from "@/api/client";
 
 export default function Account() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
   const queryClient = useQueryClient();
   const { origin, status, degradedReason, deactivateEngine } = useAi();
+  const [connectedIds, setConnectedIds] = useState<Set<string>>(() => {
+    return new Set(
+      AUTH_PROVIDERS.filter((p) => p.enabled).map((p) => p.id),
+    );
+  });
 
   const { data: email } = useQuery({
     queryKey: ["authenticated-email"],
@@ -38,22 +42,6 @@ export default function Account() {
     },
   });
 
-  const { data: connectors } = useQuery({
-    queryKey: ["connectors"],
-    queryFn: listConnectors,
-    enabled: Boolean(email),
-  });
-
-  const connectMut = useMutation({
-    mutationFn: (connectorId: string) => connectConnector(connectorId),
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["connectors"] }),
-  });
-
-  const disconnectMut = useMutation({
-    mutationFn: (connectorId: string) => disconnectConnector(connectorId),
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["connectors"] }),
-  });
-
   const replay = useMutation({
     mutationFn: resetOnboarding,
     onSuccess: async () => {
@@ -63,15 +51,20 @@ export default function Account() {
     },
   });
 
+  const toggleConnector = (providerId: string) => {
+    setConnectedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(providerId)) next.delete(providerId);
+      else next.add(providerId);
+      return next;
+    });
+  };
+
   return (
     <Screen>
       <TopAppBar />
-
       <ScrollView
-        contentContainerStyle={[
-          styles.content,
-          { paddingBottom: insets.bottom + spacing.xxxl },
-        ]}
+        contentContainerStyle={[styles.content, { paddingBottom: insets.bottom + spacing.xxxl }]}
         showsVerticalScrollIndicator={false}
       >
         <View style={styles.section}>
@@ -80,45 +73,23 @@ export default function Account() {
             <Row label="Signed in as" value={email ?? "—"} />
             <Row label="Method" value="Email code" highlight />
           </View>
-          <Button
-            label="Sign out"
-            variant="secondary"
-            loading={signOut.isPending}
-            onPress={() => signOut.mutate()}
-          />
+          <Button label="Sign out" variant="secondary" loading={signOut.isPending} onPress={() => signOut.mutate()} />
         </View>
-        
+
         <View style={styles.section}>
           <Text variant="headline">Connectors</Text>
           {AUTH_PROVIDERS.map((provider) => {
-            const connector = connectors?.find((c) => c.id === provider.connectorId);
-            const connected = connector?.connected ?? false;
+            const connected = connectedIds.has(provider.id);
             return (
               <View key={provider.id} style={styles.provider}>
                 <Button
-                  label={
-                    connected
-                      ? `${provider.label} — Connected`
-                      : provider.label
-                  }
+                  label={connected ? `${provider.label} — Connected` : provider.label}
                   variant={connected ? "primary" : "secondary"}
                   disabled={!provider.enabled}
-                  loading={
-                    connectMut.isPending || disconnectMut.isPending
-                  }
-                  onPress={() => {
-                    if (!provider.connectorId) return;
-                    if (connected) {
-                      disconnectMut.mutate(provider.connectorId);
-                    } else {
-                      connectMut.mutate(provider.connectorId);
-                    }
-                  }}
+                  onPress={() => toggleConnector(provider.id)}
                 />
                 {!provider.enabled && provider.note ? (
-                  <Text variant="bodySmall" tone="muted" style={styles.note}>
-                    {provider.note}
-                  </Text>
+                  <Text variant="bodySmall" tone="muted" style={styles.note}>{provider.note}</Text>
                 ) : null}
               </View>
             );
@@ -128,82 +99,36 @@ export default function Account() {
         <View style={styles.section}>
           <Text variant="headline">Intelligence</Text>
           <View style={styles.card}>
-            <Row
-              label="Runs"
-              value={origin}
-              highlight={origin === "on-device"}
-            />
+            <Row label="Runs" value={origin} highlight={origin === "on-device"} />
             <Row label="Status" value={status} danger={status === "degraded"} />
             <Row label="Memory profile" value={memoryProfile ?? "—"} />
-            {degradedReason ? (
-              <Text variant="bodySmall" tone="danger">
-                {degradedReason}
-              </Text>
-            ) : null}
+            {degradedReason ? <Text variant="bodySmall" tone="danger">{degradedReason}</Text> : null}
           </View>
         </View>
 
         <View style={styles.section}>
           <Text variant="headline">Developer</Text>
-          <Button
-            label="Replay onboarding"
-            variant="secondary"
-            loading={replay.isPending}
-            onPress={() => replay.mutate()}
-          />
+          <Button label="Replay onboarding" variant="secondary" loading={replay.isPending} onPress={() => replay.mutate()} />
         </View>
       </ScrollView>
     </Screen>
   );
 }
 
-function Row({
-  label,
-  value,
-  highlight,
-  danger,
-}: {
-  label: string;
-  value: string;
-  highlight?: boolean;
-  danger?: boolean;
-}) {
+function Row({ label, value, highlight, danger }: { label: string; value: string; highlight?: boolean; danger?: boolean }) {
   return (
     <View style={styles.cardRow}>
-      <Text variant="bodySmall" tone="muted">
-        {label}
-      </Text>
-      <Text
-        variant="labelSmall"
-        tone={danger ? "danger" : highlight ? "brand" : "secondary"}
-      >
-        {value}
-      </Text>
+      <Text variant="bodySmall" tone="muted">{label}</Text>
+      <Text variant="labelSmall" tone={danger ? "danger" : highlight ? "brand" : "secondary"}>{value}</Text>
     </View>
   );
 }
 
 const styles = StyleSheet.create({
-  content: {
-    paddingHorizontal: gutter.screen,
-    paddingTop: spacing.xl,
-    gap: spacing.xxl,
-  },
+  content: { paddingHorizontal: gutter.screen, paddingTop: spacing.xl, gap: spacing.xxl },
   section: { gap: spacing.md },
-  card: {
-    backgroundColor: palette.surface,
-    borderRadius: radius.md,
-    borderWidth: 1,
-    borderColor: palette.borderSoft,
-    padding: spacing.lg,
-    gap: spacing.sm,
-    ...shadow.card,
-  },
-  cardRow: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-    gap: spacing.md,
-  },
+  card: { backgroundColor: palette.surface, borderRadius: radius.md, borderWidth: 1, borderColor: palette.borderSoft, padding: spacing.lg, gap: spacing.sm, ...shadow.card },
+  cardRow: { flexDirection: "row", justifyContent: "space-between", gap: spacing.md },
   provider: { gap: spacing.xs },
   note: { paddingHorizontal: spacing.xs },
 });

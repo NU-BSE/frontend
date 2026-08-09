@@ -6,8 +6,7 @@ import {
   timingSafeEqual,
 } from 'node:crypto';
 import Config from '../../../config/attestation.config';
-import type { DeviceRegistry } from '../../marketplace/deviceregistry';
-import { submitStockSellingDevice } from '../../marketplace/deviceregistry/stockSellingRoute';
+import type { DeviceRegistry } from './deviceRegistry';
 import type {
   NativeLaunchConsumeRequest,
   NativeLaunchConsumeResponse,
@@ -177,17 +176,6 @@ export const createTelegramAuthRouter = (deps: {
         issuedAtMs,
         expiresAtMs,
       });
-
-      if (body.deviceSubmission) {
-        await submitStockSellingDevice(
-          deps.deviceRegistry,
-          {
-            ...body.deviceSubmission,
-            source: 'telegramMiniApp',
-          },
-          body.customUserId,
-        );
-      }
 
       res.json({
         ok: true,

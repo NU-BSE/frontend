@@ -2,7 +2,7 @@ import Config from '../../../../config/attestation.config';
 import {
   InMemoryDeviceRegistry,
   type DeviceRegistry,
-} from '../../../marketplace/deviceregistry';
+} from '../deviceRegistry';
 import {
   createInMemoryAttestationResultStore,
   type AttestationResultStore,
@@ -63,7 +63,7 @@ export type AttestationStores = {
  * Redis holds the ephemeral, high-churn state (nonces, velocity windows, recent
  * WebAuthn ceremonies, launch sessions, attestation results); PostgreSQL holds
  * the durable records (device registry with the App Attest counter, WebAuthn
- * credentials, marketplace submissions).
+ * credentials).
  *
  * In-memory stores remain available for local development and unit tests, but
  * with `ATTESTATION_REQUIRE_PRODUCTION_DEPENDENCIES=1` (the default when
@@ -109,7 +109,7 @@ export const createStores = async (): Promise<AttestationStores> => {
     deviceRegistry = new PostgresDeviceRegistry(pool);
     webAuthnCredentialStore = new PostgresWebAuthnCredentialStore(pool);
     durable = 'postgres';
-    notes.push('PostgreSQL: device registry, WebAuthn credentials, marketplace');
+    notes.push('PostgreSQL: device registry, WebAuthn credentials');
   } else {
     missing.push(
       'PostgreSQL (ATTESTATION_DATABASE_URL) — device registry and WebAuthn credentials',

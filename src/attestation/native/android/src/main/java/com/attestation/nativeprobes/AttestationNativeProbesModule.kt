@@ -384,11 +384,21 @@ class AttestationNativeProbesModule(
       reactContext.packageManager.hasSystemFeature("android.hardware.strongbox_keystore")
 
   private fun getSecurityLevel(key: Key, newlyCreatedWithStrongBox: Boolean): String {
-    val keyInfo = when (key) {
+    /*
+     * The explicit type and cast are both load-bearing.
+     *
+     * KeyFactory.getKeySpec is generic (`<T : KeySpec> getKeySpec(Key, Class<T>): T`)
+     * so that branch yields KeyInfo, but SecretKeyFactory.getKeySpec is not —
+     * it is declared `KeySpec getKeySpec(SecretKey, Class<?>)` and returns the
+     * raw supertype. Without the cast, `when` infers the common supertype
+     * KeySpec, which declares neither securityLevel nor isInsideSecureHardware,
+     * and the module fails to compile.
+     */
+    val keyInfo: KeyInfo = when (key) {
       is PrivateKey -> KeyFactory.getInstance(key.algorithm, ANDROID_KEYSTORE)
         .getKeySpec(key, KeyInfo::class.java)
       is SecretKey -> SecretKeyFactory.getInstance(key.algorithm, ANDROID_KEYSTORE)
-        .getKeySpec(key, KeyInfo::class.java)
+        .getKeySpec(key, KeyInfo::class.java) as KeyInfo
       else -> return SECURITY_LEVEL_UNKNOWN
     }
 

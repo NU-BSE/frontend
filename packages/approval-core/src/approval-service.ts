@@ -76,11 +76,45 @@ export class InMemoryApprovalService implements ApprovalService {
   }
 }
 
-function hashArgs(input: Record<string, unknown>): string {
-  const sorted = JSON.stringify(input, Object.keys(input).sort());
+/**
+ * Stable hash of a tool's arguments, used to bind an approval to the exact
+ * payload the user saw. Exported because the caller that redeems an approval
+ * must derive the same value from the arguments it is about to execute — if
+ * the model alters so much as a recipient between approval and execution, the
+ * hashes diverge and `consume` rejects it.
+ */
+export function hashArgs(input: Record<string, unknown>): string {
+  const canonical = JSON.stringify(canonicalize(input));
   let hash = 0;
-  for (let i = 0; i < sorted.length; i++) {
-    hash = ((hash << 5) - hash + sorted.charCodeAt(i)) | 0;
+  for (let i = 0; i < canonical.length; i++) {
+    hash = ((hash << 5) - hash + canonical.charCodeAt(i)) | 0;
   }
   return `h_${Math.abs(hash).toString(36)}`;
+}
+
+/**
+ * Order-independent deep copy: object keys are sorted at every level so that
+ * two payloads differing only in key order hash identically.
+ *
+ * This replaces `JSON.stringify(input, Object.keys(input).sort())`. That form
+ * looks like a sort but the second argument is a *replacer allowlist*, applied
+ * at every depth — so any nested key absent from the top-level key list was
+ * silently dropped before hashing. `{to, body:{text}}` hashed without `text`
+ * at all, meaning an approval for one message body would validate a call
+ * carrying a completely different one. Arrays keep their order, which is
+ * meaningful data rather than incidental.
+ */
+function canonicalize(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(canonicalize);
+
+  if (value !== null && typeof value === 'object') {
+    const record = value as Record<string, unknown>;
+    return Object.fromEntries(
+      Object.keys(record)
+        .sort()
+        .map((key) => [key, canonicalize(record[key])] as const),
+    );
+  }
+
+  return value;
 }

@@ -11,8 +11,11 @@
     "build": "tsc"
   },
   "dependencies": {
+    "@mobile-agent/approval-core": "*",
     "@mobile-agent/connector-core": "*",
+    "@mobile-agent/connector-registry": "*",
     "@mobile-agent/mcp-server": "*",
+    "@mobile-agent/policy-core": "*",
     "@modelcontextprotocol/client": "^2.0.0",
     "zod": "^4.0.0"
   }

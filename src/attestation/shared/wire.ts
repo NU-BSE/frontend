@@ -239,7 +239,6 @@ export type TelegramMiniAppAuthRequest = {
   initData: string;
   customUserId: string;
   requestedPlatform: 'android';
-  deviceSubmission?: StockSellingDeviceDraft;
 };
 
 export type TelegramMiniAppAuthResponse =
@@ -304,33 +303,3 @@ export type GetAttestationResultResponse =
   | { ok: true; result: AttestationResultRecord }
   | { ok: false; message: string };
 
-export type StockSellingDeviceSubmission = {
-  submissionId?: string;
-  sellerUserId?: string;
-  deviceExternalId?: string;
-  manufacturer: string;
-  model: string;
-  serialHash?: string;
-  imeiHash?: string;
-  condition: 'new' | 'good' | 'fair' | 'parts';
-  askingPrice?: number;
-  currency?: string;
-  submittedAtMs?: number;
-  source: 'telegramMiniApp' | 'androidNative';
-};
-
-export type StockSellingDeviceDraft = Omit<
-  StockSellingDeviceSubmission,
-  'source' | 'sellerUserId' | 'submittedAtMs'
-> & {
-  source?: 'telegramMiniApp' | 'androidNative';
-  submittedAtMs?: number;
-};
-
-export type StockSellingDeviceRecord = StockSellingDeviceSubmission & {
-  submissionId: string;
-  sellerUserId: string;
-  status: 'submitted' | 'attestation_pending' | 'listed' | 'rejected';
-  createdAtMs: number;
-  updatedAtMs: number;
-};

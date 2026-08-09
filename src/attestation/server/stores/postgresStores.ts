@@ -5,8 +5,7 @@ import Config from '../../../../config/attestation.config';
 import type {
   DeviceRegistry,
   RegisteredDevice,
-  StockSellingDeviceRecord,
-} from '../../../marketplace/deviceregistry';
+} from '../deviceRegistry';
 import type {
   WebAuthnCredential,
   WebAuthnCredentialStore,
@@ -84,40 +83,6 @@ const toDevice = (row: DeviceRow): RegisteredDevice => ({
   ...(row.model_family ? { modelFamily: row.model_family } : {}),
 });
 
-type StockRow = {
-  submission_id: string;
-  seller_user_id: string;
-  device_external_id: string | null;
-  manufacturer: string;
-  model: string;
-  serial_hash: string | null;
-  imei_hash: string | null;
-  condition: StockSellingDeviceRecord['condition'];
-  asking_price: string | null;
-  currency: string | null;
-  source: StockSellingDeviceRecord['source'];
-  status: StockSellingDeviceRecord['status'];
-  created_at_ms: string;
-  updated_at_ms: string;
-};
-
-const toStockRecord = (row: StockRow): StockSellingDeviceRecord => ({
-  submissionId: row.submission_id,
-  sellerUserId: row.seller_user_id,
-  manufacturer: row.manufacturer,
-  model: row.model,
-  condition: row.condition,
-  source: row.source,
-  status: row.status,
-  createdAtMs: Number(row.created_at_ms),
-  updatedAtMs: Number(row.updated_at_ms),
-  ...(row.device_external_id ? { deviceExternalId: row.device_external_id } : {}),
-  ...(row.serial_hash ? { serialHash: row.serial_hash } : {}),
-  ...(row.imei_hash ? { imeiHash: row.imei_hash } : {}),
-  ...(row.asking_price !== null ? { askingPrice: Number(row.asking_price) } : {}),
-  ...(row.currency ? { currency: row.currency } : {}),
-});
-
 /**
  * Durable device registry. The App Attest assertion counter lives here, so
  * losing this table means losing the replay guard — it must never move back
@@ -185,55 +150,6 @@ export class PostgresDeviceRegistry implements DeviceRegistry {
         WHERE device_id = $1`,
       [deviceId, counter],
     );
-  }
-
-  async submitStockSellingDevice(
-    record: StockSellingDeviceRecord,
-  ): Promise<StockSellingDeviceRecord> {
-    const { rows } = await this.db.query<StockRow>(
-      `INSERT INTO stock_selling_devices (
-         submission_id, seller_user_id, device_external_id, manufacturer, model,
-         serial_hash, imei_hash, condition, asking_price, currency, source,
-         status, created_at_ms, updated_at_ms
-       ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)
-       ON CONFLICT (submission_id) DO UPDATE SET
-         status        = EXCLUDED.status,
-         asking_price  = EXCLUDED.asking_price,
-         currency      = EXCLUDED.currency,
-         updated_at_ms = EXCLUDED.updated_at_ms
-       RETURNING *`,
-      [
-        record.submissionId,
-        record.sellerUserId,
-        record.deviceExternalId ?? null,
-        record.manufacturer,
-        record.model,
-        record.serialHash ?? null,
-        record.imeiHash ?? null,
-        record.condition,
-        record.askingPrice ?? null,
-        record.currency ?? null,
-        record.source,
-        record.status,
-        record.createdAtMs,
-        record.updatedAtMs,
-      ],
-    );
-    return toStockRecord(rows[0]!);
-  }
-
-  async listStockSellingDevices(
-    sellerUserId?: string,
-  ): Promise<StockSellingDeviceRecord[]> {
-    const { rows } = sellerUserId
-      ? await this.db.query<StockRow>(
-          'SELECT * FROM stock_selling_devices WHERE seller_user_id = $1 ORDER BY created_at_ms DESC',
-          [sellerUserId],
-        )
-      : await this.db.query<StockRow>(
-          'SELECT * FROM stock_selling_devices ORDER BY created_at_ms DESC',
-        );
-    return rows.map(toStockRecord);
   }
 }
 

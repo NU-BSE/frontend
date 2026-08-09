@@ -49,6 +49,18 @@ const formatBytes = (bytes?: number): string => {
   return `${(bytes / 1024 ** 3).toFixed(1)} GB`;
 };
 
+/**
+ * Processor description from what Android actually exposes: core count and the
+ * primary ABI. Both gate local execution — cores set the speed floor, and a
+ * non-arm64 ABI rules local models out entirely — so the screen that disables
+ * profiles should show the numbers that did the disabling.
+ */
+const formatProcessor = (cores?: number, abis?: string[]): string => {
+  const arch = abis?.find((abi) => /arm64|aarch64/iu.test(abi)) ?? abis?.[0];
+  if (typeof cores !== 'number') return arch ?? 'Unknown CPU';
+  return arch ? `${cores}-core ${arch}` : `${cores}-core CPU`;
+};
+
 export default function OnboardingMemory() {
   const router = useRouter();
   const queryClient = useQueryClient();
@@ -87,7 +99,10 @@ export default function OnboardingMemory() {
 
   const summary =
     assessment?.platform === 'android'
-      ? `${assessment.hardware.model ?? 'Android device'} · ${formatBytes(
+      ? `${assessment.hardware.model ?? 'Android device'} · ${formatProcessor(
+          assessment.hardware.cpuCoreCount,
+          assessment.hardware.supportedAbis,
+        )} · ${formatBytes(
           assessment.hardware.totalMemoryBytes,
         )} RAM · ${formatBytes(
           assessment.hardware.availableStorageBytes,

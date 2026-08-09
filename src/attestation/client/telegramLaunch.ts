@@ -4,7 +4,6 @@ import { setCustomUserId, userHeaders } from './userSession';
 import type {
   GetAttestationResultResponse,
   NativeLaunchConsumeResponse,
-  StockSellingDeviceDraft,
   SubmitAttestationResultRequest,
   SubmitAttestationResultResponse,
   TelegramMiniAppAuthResponse,
@@ -32,7 +31,6 @@ export const getTelegramMiniAppInitData = (): string => {
 export const authenticateTelegramMiniAppLaunch = async (input: {
   customUserId: string;
   initData?: string;
-  deviceSubmission?: StockSellingDeviceDraft;
 }): Promise<Extract<TelegramMiniAppAuthResponse, { ok: true }>> => {
   const response = await fetch(`${serverBaseUrl}/auth/telegram/init-data`, {
     method: 'POST',
@@ -41,9 +39,6 @@ export const authenticateTelegramMiniAppLaunch = async (input: {
       initData: input.initData ?? getTelegramMiniAppInitData(),
       customUserId: input.customUserId,
       requestedPlatform: 'android',
-      ...(input.deviceSubmission
-        ? { deviceSubmission: input.deviceSubmission }
-        : {}),
     }),
   });
   const json = (await response.json()) as TelegramMiniAppAuthResponse;
@@ -57,7 +52,6 @@ export const authenticateTelegramMiniAppLaunch = async (input: {
 export const launchAndroidNativeAppFromTelegram = async (input: {
   customUserId: string;
   initData?: string;
-  deviceSubmission?: StockSellingDeviceDraft;
 }): Promise<void> => {
   const launch = await authenticateTelegramMiniAppLaunch(input);
   const webApp = (globalThis as unknown as { window?: TelegramWindow }).window

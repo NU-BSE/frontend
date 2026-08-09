@@ -10,13 +10,27 @@ export type ModelOptionSupport = {
 
 const GIB = 1024 ** 3;
 
+/**
+ * Per-profile floor for the three capacities that decide whether a model can
+ * run locally: RAM, free storage for the weights, and CPU parallelism.
+ *
+ * `minCpuCores` gates generation speed rather than whether the model loads.
+ * Weights that fit in RAM on a 4-core device still produce tokens too slowly
+ * to feel like a conversation at the larger profiles, so each step up asks for
+ * more parallelism. Core count is the only processor capacity Android exposes
+ * portably — there is no reliable clock-speed or big.LITTLE breakdown — so it
+ * stands in for the whole dimension.
+ *
+ * These are the tuning knobs: adjust here, and both the recommendation and the
+ * per-option reasons follow.
+ */
 const REQUIREMENTS: Record<
   Exclude<MemoryProfile, 'cloud'>,
-  { minMemoryBytes: number; minStorageBytes: number }
+  { minMemoryBytes: number; minStorageBytes: number; minCpuCores: number }
 > = {
-  efficient: { minMemoryBytes: 3 * GIB, minStorageBytes: 1 * GIB },
-  balanced: { minMemoryBytes: 4 * GIB, minStorageBytes: 2 * GIB },
-  performance: { minMemoryBytes: 6 * GIB, minStorageBytes: 3 * GIB },
+  efficient: { minMemoryBytes: 3 * GIB, minStorageBytes: 1 * GIB, minCpuCores: 4 },
+  balanced: { minMemoryBytes: 4 * GIB, minStorageBytes: 2 * GIB, minCpuCores: 6 },
+  performance: { minMemoryBytes: 6 * GIB, minStorageBytes: 3 * GIB, minCpuCores: 8 },
 };
 
 const LOCAL_PROFILES: Exclude<MemoryProfile, 'cloud'>[] = [
@@ -79,15 +93,22 @@ export function getModelOptionSupport(
       };
     }
 
+    /*
+     * The native probe reports all three unconditionally, so a missing value
+     * means the probe itself failed rather than that the device lacks the
+     * capability. Refusing to guess is the safe branch: claiming support and
+     * then OOM-ing mid-generation is worse than falling back to cloud.
+     */
     if (
       typeof hardware.totalMemoryBytes !== 'number' ||
-      typeof hardware.availableStorageBytes !== 'number'
+      typeof hardware.availableStorageBytes !== 'number' ||
+      typeof hardware.cpuCoreCount !== 'number'
     ) {
       return {
         profile,
         supported: false,
         recommended: false,
-        reason: 'RAM or storage capacity could not be verified.',
+        reason: 'RAM, storage or processor capacity could not be verified.',
       };
     }
 
@@ -110,6 +131,15 @@ export function getModelOptionSupport(
         reason: `Requires at least ${formatRequirement(
           requirement.minStorageBytes,
         )} free storage.`,
+      };
+    }
+
+    if (hardware.cpuCoreCount < requirement.minCpuCores) {
+      return {
+        profile,
+        supported: false,
+        recommended: false,
+        reason: `Requires at least ${requirement.minCpuCores} CPU cores; this device reports ${hardware.cpuCoreCount}.`,
       };
     }
 

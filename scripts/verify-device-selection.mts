@@ -20,6 +20,10 @@ const assessment = (
   overrides: Partial<
     Extract<DeviceAssessment, { platform: 'android' }>['integrity']
   > = {},
+  // `null` means "the probe did not report it". Not `undefined`: passing that
+  // explicitly triggers the default parameter, which would silently test the
+  // 8-core case instead of the unverified one.
+  cpuCoreCount: number | null = 8,
 ): Extract<DeviceAssessment, { platform: 'android' }> => ({
   schemaVersion: 1,
   platform: 'android',
@@ -29,6 +33,7 @@ const assessment = (
     totalMemoryBytes: ramGiB * GIB,
     availableStorageBytes: storageGiB * GIB,
     lowRamDevice: false,
+    ...(cpuCoreCount === null ? {} : { cpuCoreCount }),
   },
   integrity: {
     status: 'trusted',
@@ -67,6 +72,57 @@ assertEqual(
     (option) => option.profile !== 'cloud' && option.supported,
   ).length,
   0,
+);
+
+/*
+ * Processor gating. RAM and storage are held generous in every case below, so
+ * only the core count can be responsible for the profile that comes back.
+ */
+assertEqual(
+  getRecommendedMemoryProfile(assessment(8, 8, {}, 8)),
+  'performance',
+  '8 cores reach the performance profile',
+);
+assertEqual(
+  getRecommendedMemoryProfile(assessment(8, 8, {}, 6)),
+  'balanced',
+  '6 cores cap the recommendation at balanced despite ample RAM',
+);
+assertEqual(
+  getRecommendedMemoryProfile(assessment(8, 8, {}, 4)),
+  'efficient',
+  '4 cores cap the recommendation at efficient despite ample RAM',
+);
+assertEqual(
+  getRecommendedMemoryProfile(assessment(8, 8, {}, 2)),
+  'cloud',
+  '2 cores rule out every local profile',
+);
+
+// A probe failure leaves cpuCoreCount undefined. Unverified must not read as
+// capable — the fallback is cloud, not an optimistic guess.
+assertEqual(
+  getRecommendedMemoryProfile(assessment(8, 8, {}, null)),
+  'cloud',
+  'an unverified processor falls back to cloud',
+);
+assertEqual(
+  getModelOptionSupport(assessment(8, 8, {}, null)).filter(
+    (option) => option.profile !== 'cloud' && option.supported,
+  ).length,
+  0,
+  'an unverified processor disables every local profile',
+);
+
+// The reason strings drive the disabled-option copy in onboarding, so they
+// have to name the dimension that actually failed.
+const twoCore = getModelOptionSupport(assessment(8, 8, {}, 2)).find(
+  (option) => option.profile === 'performance',
+);
+assertEqual(
+  twoCore?.reason.includes('CPU cores'),
+  true,
+  'a core-count failure is reported as a processor limit',
 );
 
 console.log('device model selection: ok');

@@ -9,7 +9,20 @@ import type {
 
 import {
   createMobileAgentMcpServer,
+  registerConnectorTools,
 } from "@mobile-agent/mcp-server";
+
+import type {
+  ConnectorRegistry,
+} from "@mobile-agent/connector-registry";
+
+import type {
+  PolicyEngine,
+} from "@mobile-agent/policy-core";
+
+import type {
+  ApprovalService,
+} from "@mobile-agent/approval-core";
 
 import {
   AgentMcpClient,
@@ -22,17 +35,50 @@ export interface LocalMcpRuntime {
 }
 
 /**
+ * Подключение connectors к тому же runtime.
+ *
+ * Передаётся целиком или не передаётся вовсе:
+ * без policy engine и approval service
+ * connector tools регистрировать нельзя.
+ */
+export interface LocalMcpConnectors {
+  registry: ConnectorRegistry;
+  policyEngine: PolicyEngine;
+  approvalService: ApprovalService;
+}
+
+/**
  * Поднимает MCP client и MCP server
  * внутри одного JavaScript-процесса
  * и соединяет их через InMemoryTransport.
  *
  * Без сети, localhost и child_process.
+ *
+ * Если передан `connectors`, инструменты всех
+ * подключённых connectors регистрируются
+ * на том же сервере, рядом с `system.health`
+ * и calendar-инструментами.
  */
 export async function createLocalMcpRuntime(
   dependencies: MobileAgentDependencies,
+  connectors?: LocalMcpConnectors,
 ): Promise<LocalMcpRuntime> {
   const server =
     createMobileAgentMcpServer(dependencies);
+
+  /*
+   * Строго до server.connect:
+   * инструменты, зарегистрированные после connect,
+   * не попадут в первый listTools.
+   */
+  if (connectors) {
+    await registerConnectorTools(
+      server,
+      connectors.registry,
+      connectors.policyEngine,
+      connectors.approvalService,
+    );
+  }
 
   const rawClient = new Client({
     name: "mobile-agent-local-client",

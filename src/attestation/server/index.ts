@@ -9,7 +9,6 @@ import {
   createWebAuthnRouter,
   type MdsTrustProvider,
 } from './webauthn';
-import { createStockSellingDeviceRouter } from '../../marketplace/deviceregistry/stockSellingRoute';
 import { createTelegramAuthRouter } from './telegramAuth';
 import { createAttestationResultRouter } from './attestationResult';
 import { createAsnLookup, resolveVerifiers } from './defaults';
@@ -98,7 +97,6 @@ export const buildAttestationServer = async (): Promise<AttestationServer> => {
   );
   app.use(createNonceRouter(stores.nonceStore));
   app.use(correlateLatency(stores.nonceStore));
-  app.use(createStockSellingDeviceRouter(stores.deviceRegistry));
   app.use(
     createWebAuthnRouter({
       credentialStore: stores.webAuthnCredentialStore,

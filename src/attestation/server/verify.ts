@@ -19,7 +19,7 @@ import {
   type RiskProvider,
 } from './velocity';
 import { getRequestUserId, type NonceStore } from './nonceRoute';
-import type { DeviceRegistry } from '../../marketplace/deviceregistry';
+import type { DeviceRegistry } from './deviceRegistry';
 import type {
   AndroidAttestationSuccess,
   AttestationErrorCode,

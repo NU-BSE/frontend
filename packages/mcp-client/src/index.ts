@@ -12,6 +12,7 @@ export type {
 } from "./agent-mcp-client";
 
 export type {
+  LocalMcpConnectors,
   LocalMcpRuntime,
 } from "./create-local-runtime";
 

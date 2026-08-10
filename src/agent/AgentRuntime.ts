@@ -15,6 +15,12 @@ import {
   type ConnectionSummary,
   type PendingApproval,
 } from './types';
+import {
+  ReasoningComplexityMonitor,
+  estimateInitialTier,
+  type ModelTier,
+  type RoutingDecision,
+} from './routing';
 
 export interface AgentRuntimeOptions {
   model: AgentModel;
@@ -28,6 +34,8 @@ export interface AgentRuntimeOptions {
    * human through the approval sheet.
    */
   approveApproval: (approvalId: string) => Promise<void>;
+  /** Called when the tier changes (diagnostics / status line). */
+  onTierChange?: (tier: ModelTier, decision: RoutingDecision) => void;
   onMessages?: (messages: readonly AgentMessage[]) => void;
   onState?: (state: AgentRunState) => void;
   onRunRecord?: (record: AgentRunRecord) => void;
@@ -74,8 +82,19 @@ export class AgentRuntime {
   private idCounter = 0;
   private runCounter = 0;
 
+  /** Adaptive routing: tracks run metrics and decides tier escalation. */
+  private readonly routingMonitor =
+    new ReasoningComplexityMonitor();
+  /** The active model tier — starts at the initial estimate, may escalate. */
+  private currentTier: ModelTier = 'fast';
+
   constructor(private readonly options: AgentRuntimeOptions) {
     this.maxSteps = options.maxSteps ?? MAX_AGENT_STEPS;
+  }
+
+  /** Returns the current tier (diagnostics / status line). */
+  getCurrentTier(): ModelTier {
+    return this.currentTier;
   }
 
   /**
@@ -142,6 +161,13 @@ export class AgentRuntime {
       engine: this.options.model.id,
     };
 
+    // Adaptive routing: boot based on the user's request and reset the
+    // monitor from any previous run.
+    this.routingMonitor.reset();
+    this.currentTier =
+      estimateInitialTier(text).suggestedTier;
+    this.routingMonitor.currentTier = this.currentTier;
+
     try {
       this.pushMessage({
         id: this.nextId('msg'),
@@ -159,13 +185,18 @@ export class AgentRuntime {
         step += 1;
         this.throwIfAborted(controller.signal);
 
+        this.routingMonitor.recordStep();
+
         this.setState({ type: 'thinking' });
         const result = await this.options.model.run({
           messages: [...this.messages],
           tools,
           connections: this.options.connections,
           signal: controller.signal,
+          routing: this.routingMonitor.buildRoutingContext(),
         });
+
+        this.routingMonitor.recordModelResponse(result);
 
         if (result.kind === 'final') {
           finalAnswer = result.text;
@@ -194,6 +225,8 @@ export class AgentRuntime {
             safePreview: truncateStrings(call.args),
           });
 
+          this.routingMonitor.recordToolCall(call);
+
           let toolResult = await executeToolCall(
             this.options.mcp,
             call,
@@ -203,6 +236,13 @@ export class AgentRuntime {
           if (toolResult.status === 'approval_required') {
             toolResult = await this.handleApproval(call, toolResult, steps);
           }
+
+          const toolDef = tools.find((tool) => tool.name === call.toolName);
+          this.routingMonitor.recordToolResult(
+            call,
+            toolResult,
+            toolDef?.risk,
+          );
 
           steps.push({
             type: 'tool_result',
@@ -217,6 +257,14 @@ export class AgentRuntime {
             toolName: call.toolName,
             result: toolResult,
           });
+        }
+
+        // Check whether the current tier needs escalation after this tool batch.
+        const routingDecision = this.routingMonitor.chooseTier();
+        if (routingDecision.tier !== this.currentTier) {
+          this.currentTier = routingDecision.tier;
+          this.routingMonitor.applyDecision(routingDecision);
+          this.options.onTierChange?.(this.currentTier, routingDecision);
         }
       }
 

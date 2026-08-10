@@ -1,0 +1,196 @@
+[
+  {
+    "id": "many-tools-simple-broadcast",
+    "description": "Search 5 contacts and message each — long but trivial reasoning",
+    "expectedMaxTier": "fast",
+    "input": {
+      "currentTier": "fast",
+      "signals": {
+        "toolCalls": 10,
+        "connectorCount": 1,
+        "stepCount": 5,
+        "largeUnstructuredContext": false,
+        "crossSourceSynthesis": false,
+        "conflictingEvidence": false,
+        "constraintSolving": false,
+        "rankingOrOptimization": false,
+        "failedPlans": 0,
+        "replans": 0
+      }
+    }
+  },
+  {
+    "id": "few-tools-hard-reasoning",
+    "description": "Read Telegram + Calendar, find best meeting time with constraints",
+    "expectedMaxTier": "expert",
+    "input": {
+      "currentTier": "fast",
+      "signals": {
+        "toolCalls": 2,
+        "connectorCount": 2,
+        "stepCount": 2,
+        "crossSourceSynthesis": true,
+        "constraintSolving": true,
+        "rankingOrOptimization": true,
+        "temporalReconciliation": true,
+        "failedPlans": 0,
+        "replans": 0
+      }
+    }
+  },
+  {
+    "id": "cross-source-sequential-not-synthesis",
+    "description": "Send Telegram then create calendar — sequential, not synthesis",
+    "expectedMaxTier": "fast",
+    "input": {
+      "currentTier": "fast",
+      "signals": {
+        "toolCalls": 2,
+        "connectorCount": 2,
+        "stepCount": 2,
+        "crossSourceSynthesis": false,
+        "conflictingEvidence": false,
+        "failedPlans": 0,
+        "replans": 0
+      }
+    }
+  },
+  {
+    "id": "cross-source-synthesis",
+    "description": "Read Telegram, Gmail, Calendar — combine to decide meeting time",
+    "expectedMaxTier": "expert",
+    "input": {
+      "currentTier": "normal",
+      "signals": {
+        "toolCalls": 3,
+        "connectorCount": 3,
+        "stepCount": 3,
+        "largeUnstructuredContext": true,
+        "crossSourceSynthesis": true,
+        "conflictingEvidence": true,
+        "failedPlans": 0,
+        "replans": 0
+      }
+    }
+  },
+  {
+    "id": "constraint-solving",
+    "description": "Find 1-hour slot next week: after 15:00, before 18:00, not Friday, both free, prefer earliest",
+    "expectedMaxTier": "expert",
+    "input": {
+      "currentTier": "normal",
+      "signals": {
+        "toolCalls": 2,
+        "connectorCount": 1,
+        "stepCount": 2,
+        "crossSourceSynthesis": true,
+        "constraintSolving": true,
+        "rankingOrOptimization": true,
+        "temporalReconciliation": true,
+        "failedPlans": 0,
+        "replans": 0
+      }
+    }
+  },
+  {
+    "id": "conflicting-evidence",
+    "description": "Telegram says 16:00, Email says 17:00, Calendar says neither — resolve conflict",
+    "expectedMaxTier": "expert",
+    "input": {
+      "currentTier": "normal",
+      "signals": {
+        "toolCalls": 3,
+        "connectorCount": 3,
+        "stepCount": 3,
+        "crossSourceSynthesis": true,
+        "conflictingEvidence": true,
+        "failedPlans": 0,
+        "replans": 0
+      }
+    }
+  },
+  {
+    "id": "clarification-required",
+    "description": "Two contacts named Daniyar — just ask which one",
+    "expectedMaxTier": "fast",
+    "input": {
+      "currentTier": "fast",
+      "signals": {
+        "toolCalls": 1,
+        "connectorCount": 1,
+        "stepCount": 1,
+        "unresolvedAmbiguity": true,
+        "modelUncertain": true,
+        "failedPlans": 0,
+        "replans": 0
+      }
+    }
+  },
+  {
+    "id": "planner-loop",
+    "description": "Same search repeated 3 times with no progress",
+    "expectedMaxTier": "expert",
+    "input": {
+      "currentTier": "fast",
+      "signals": {
+        "toolCalls": 4,
+        "connectorCount": 1,
+        "stepCount": 4,
+        "repeatedToolPattern": true,
+        "failedPlans": 0,
+        "replans": 0
+      }
+    }
+  },
+  {
+    "id": "failed-replan",
+    "description": "Two consecutive failed plans — planner is stuck",
+    "expectedMaxTier": "expert",
+    "input": {
+      "currentTier": "fast",
+      "signals": {
+        "toolCalls": 3,
+        "connectorCount": 1,
+        "stepCount": 3,
+        "failedPlans": 2,
+        "replans": 2,
+        "crossSourceSynthesis": false
+      }
+    }
+  },
+  {
+    "id": "large-structured-context",
+    "description": "Large file listing, no reasoning required",
+    "expectedMaxTier": "fast",
+    "input": {
+      "currentTier": "fast",
+      "signals": {
+        "toolCalls": 1,
+        "connectorCount": 1,
+        "stepCount": 1,
+        "largeStructuredContext": true,
+        "largeUnstructuredContext": false,
+        "crossSourceSynthesis": false,
+        "failedPlans": 0,
+        "replans": 0
+      }
+    }
+  },
+  {
+    "id": "large-unstructured-context-with-synthesis",
+    "description": "Large chat transcript + email thread — need to synthesize",
+    "expectedMaxTier": "normal",
+    "input": {
+      "currentTier": "fast",
+      "signals": {
+        "toolCalls": 2,
+        "connectorCount": 2,
+        "stepCount": 2,
+        "largeUnstructuredContext": true,
+        "crossSourceSynthesis": true,
+        "failedPlans": 0,
+        "replans": 0
+      }
+    }
+  }
+]

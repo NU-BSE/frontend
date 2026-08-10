@@ -33,3 +33,21 @@ export {
   type LlmCapabilities,
   type PendingApproval,
 } from './types';
+
+export {
+  chooseTier,
+  estimateInitialTier,
+  hasEmergencyExpertTrigger,
+  hasHardReasoningSignal,
+  LoopDetector,
+  ReasoningComplexityMonitor,
+  ROUTING_CONFIG,
+  calculateReasoningScore,
+  type AgentRunMetrics,
+  type InitialRoutingEstimate,
+  type LlmRoutingContext,
+  type ModelTier,
+  type ReasoningSignals,
+  type RoutingDecision,
+  type RoutingTelemetry,
+} from './routing';

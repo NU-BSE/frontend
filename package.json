@@ -87,7 +87,8 @@
     "verify:mcp": "esbuild scripts/verify-mcp.mts --bundle --platform=node --format=cjs --external:react-native --external:expo-modules-core --outfile=node_modules/.cache/verify-mcp.cjs --log-level=error && node node_modules/.cache/verify-mcp.cjs",
     "verify:agent": "esbuild scripts/verify-agent.mts --bundle --platform=node --format=cjs --external:react-native --external:expo-modules-core --outfile=node_modules/.cache/verify-agent.cjs --log-level=error && node node_modules/.cache/verify-agent.cjs",
     "verify:connections": "esbuild scripts/verify-connections.mts --bundle --platform=node --format=cjs --external:react-native --external:expo-modules-core --outfile=node_modules/.cache/verify-connections.cjs --log-level=error && node node_modules/.cache/verify-connections.cjs",
-    "verify": "npm run typecheck && npm run lint && npm run verify:ai && npm run verify:logic && npm run verify:layout && npm run verify:device && npm run verify:mcp && npm run verify:agent && npm run verify:connections",
+    "verify:routing": "esbuild scripts/verify-agent-routing.mts --bundle --platform=node --format=cjs --external:react-native --external:expo-modules-core --outfile=node_modules/.cache/verify-agent-routing.cjs --log-level=error && node node_modules/.cache/verify-agent-routing.cjs",
+    "verify": "npm run typecheck && npm run lint && npm run verify:ai && npm run verify:logic && npm run verify:layout && npm run verify:device && npm run verify:mcp && npm run verify:agent && npm run verify:connections && npm run verify:routing",
     "deploy": "node deploy.js",
     "preview": "npx expo export --platform web && wrangler dev"
   },

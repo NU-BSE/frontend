@@ -16,6 +16,8 @@ export interface AgentToolDefinition {
   description: string;
   /** JSON Schema published by the MCP server. */
   inputSchema: Record<string, unknown>;
+  /** MCP tool risk level — used by the routing monitor to track action risk. */
+  risk?: 'read' | 'write' | 'external_side_effect' | 'destructive';
 }
 
 export interface AgentToolCall {
@@ -75,6 +77,12 @@ export interface AgentModelInput {
   tools: AgentToolDefinition[];
   connections: ConnectionSummary[];
   signal?: AbortSignal;
+  /**
+   * Adaptive routing metadata sent to the model/backend so it can select
+   * the right variant. Undefined when routing is not in use (tests keep it
+   * optional so existing call-sites remain unchanged).
+   */
+  routing?: import('./routing/types').LlmRoutingContext;
 }
 
 /**

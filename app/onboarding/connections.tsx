@@ -10,9 +10,13 @@ import { gutter, palette, radius, shadow, spacing } from "@/theme/tokens";
 
 export default function OnboardingConnections() {
   const router = useRouter();
-  const [connectedIds, setConnectedIds] = useState<Set<string>>(() => {
-    return new Set(AUTH_PROVIDERS.filter((p) => p.enabled).map((p) => p.id));
-  });
+  /*
+   * Starts empty. Seeding this from `AUTH_PROVIDERS.filter(p => p.enabled)`
+   * confused "can be connected" with "is connected", so Google and Telegram
+   * announced themselves as Connected the moment the screen opened — before
+   * the user had done anything, and with no account behind the claim.
+   */
+  const [connectedIds, setConnectedIds] = useState<Set<string>>(() => new Set());
 
   const toggleConnector = (providerId: string) => {
     setConnectedIds((prev) => {

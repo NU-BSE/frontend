@@ -18,11 +18,12 @@ export default function Account() {
   const router = useRouter();
   const queryClient = useQueryClient();
   const { origin, status, degradedReason, deactivateEngine } = useAi();
-  const [connectedIds, setConnectedIds] = useState<Set<string>>(() => {
-    return new Set(
-      AUTH_PROVIDERS.filter((p) => p.enabled).map((p) => p.id),
-    );
-  });
+  /*
+   * Starts empty — see the note in app/onboarding/connections.tsx. Seeding
+   * from the enabled providers made every account show Google and Telegram as
+   * Connected regardless of whether they were.
+   */
+  const [connectedIds, setConnectedIds] = useState<Set<string>>(() => new Set());
 
   const { data: email } = useQuery({
     queryKey: ["authenticated-email"],

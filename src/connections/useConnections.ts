@@ -10,6 +10,10 @@ import {
 
 export const CONNECTIONS_QUERY_KEY = ['connections'] as const;
 
+import {
+  MCP_RUNTIME_QUERY_KEY,
+} from '@/mcp/queryKeys';
+
 /**
  * UI synchronization with the persistent connection store. Every mutation
  * invalidates the connection queries, so onboarding, Account → Connectors
@@ -34,33 +38,44 @@ export function useConnection(connectorId: ConnectorId) {
 
 export function useConnectConnector() {
   const queryClient = useQueryClient();
+
   return useMutation({
     mutationFn: connectConnector,
-    onSuccess: () =>
-      queryClient.invalidateQueries({ queryKey: CONNECTIONS_QUERY_KEY }),
-    onError: () =>
-      queryClient.invalidateQueries({ queryKey: CONNECTIONS_QUERY_KEY }),
+    onSettled: () =>
+      invalidateConnectionRuntime(queryClient),
   });
 }
 
 export function useDisconnectConnection() {
   const queryClient = useQueryClient();
+
   return useMutation({
     mutationFn: disconnectConnection,
-    onSuccess: () =>
-      queryClient.invalidateQueries({ queryKey: CONNECTIONS_QUERY_KEY }),
-    onError: () =>
-      queryClient.invalidateQueries({ queryKey: CONNECTIONS_QUERY_KEY }),
+
+    onSettled: () => invalidateConnectionRuntime(queryClient),
   });
 }
 
 export function useReconnectConnection() {
   const queryClient = useQueryClient();
+
   return useMutation({
     mutationFn: reconnectConnection,
-    onSuccess: () =>
-      queryClient.invalidateQueries({ queryKey: CONNECTIONS_QUERY_KEY }),
-    onError: () =>
-      queryClient.invalidateQueries({ queryKey: CONNECTIONS_QUERY_KEY }),
+
+    onSettled: () => invalidateConnectionRuntime(queryClient),
   });
+}
+
+async function invalidateConnectionRuntime(
+  queryClient: ReturnType<typeof useQueryClient>,
+) {
+  await Promise.all([
+    queryClient.invalidateQueries({
+      queryKey: CONNECTIONS_QUERY_KEY,
+    }),
+
+    queryClient.invalidateQueries({
+      queryKey: MCP_RUNTIME_QUERY_KEY,
+    }),
+  ]);
 }

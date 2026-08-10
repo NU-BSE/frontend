@@ -32,6 +32,11 @@ export interface AgentRunMetrics {
   externalSideEffectCalls: number;
   destructiveCalls: number;
   failedToolCalls: number;
+  plannerFailures: number;
+  infrastructureFailures: number;
+  authFailures: number;
+  permissionFailures: number;
+  userDenials: number;
   invalidToolCalls: number;
   planRevisionCount: number;
   failedPlanCount: number;
@@ -42,6 +47,16 @@ export interface AgentRunMetrics {
   repeatedToolPatternCount: number;
   currentTier: ModelTier;
   escalationCount: number;
+}
+
+export interface TierTransition {
+  from: ModelTier;
+  to: ModelTier;
+
+  reason: string;
+  score: number;
+
+  step: number;
 }
 
 /**
@@ -138,6 +153,8 @@ export interface RoutingTelemetry {
   replans: number;
   completedSuccessfully: boolean;
   durationMs: number;
+  escalationCount: number;
+  transitions: TierTransition[];
 }
 
 /** Lightweight plan identity for detecting replanning. */

@@ -1,4 +1,4 @@
-import type { RoutingTelemetry } from './types';
+import type { RoutingTelemetry, ModelTier } from './types';
 
 /**
  * Bare-bones telemetry collector. Currently in-memory only — wire it to an
@@ -6,15 +6,18 @@ import type { RoutingTelemetry } from './types';
  * private source content (messages, tool data); only aggregate counts and
  * tier decisions.
  */
-export function createRunTelemetry(runId: string): RoutingTelemetry {
+export function createRunTelemetry(
+  runId: string,
+  initialTier: ModelTier,
+): RoutingTelemetry {
   return {
     runId,
-    initialTier: 'fast',
-    finalTier: 'fast',
+    initialTier,
+    finalTier: initialTier,
     fastCalls: 0,
     normalCalls: 0,
     expertCalls: 0,
-    expertTriggered: false,
+    expertTriggered: initialTier === 'expert',
     finalReasoningScore: 0,
     hardReasoningSignals: [],
     totalToolCalls: 0,
@@ -22,6 +25,8 @@ export function createRunTelemetry(runId: string): RoutingTelemetry {
     failedPlans: 0,
     replans: 0,
     completedSuccessfully: false,
+    escalationCount: 0,
+    transitions: [],
     durationMs: 0,
   };
 }

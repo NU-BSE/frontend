@@ -13,6 +13,9 @@ import type {
   ReasoningSignals,
   RoutingDecision,
 } from './types';
+import {
+  classifyRoutingFailure,
+} from './failureClassification';
 
 function createMetrics(): AgentRunMetrics {
   return {
@@ -25,6 +28,11 @@ function createMetrics(): AgentRunMetrics {
     externalSideEffectCalls: 0,
     destructiveCalls: 0,
     failedToolCalls: 0,
+    plannerFailures: 0,
+    infrastructureFailures: 0,
+    authFailures: 0,
+    permissionFailures: 0,
+    userDenials: 0,
     invalidToolCalls: 0,
     planRevisionCount: 0,
     failedPlanCount: 0,
@@ -117,17 +125,45 @@ export class ReasoningComplexityMonitor {
           break;
       }
     }
+    const failureKind =
+      classifyRoutingFailure(result);
+
+    switch (failureKind) {
+      case 'planner':
+        this.metrics.plannerFailures += 1;
+        this.consecutiveFailedPlans += 1;
+        break;
+
+      case 'infrastructure':
+        this.metrics.infrastructureFailures += 1;
+        this.consecutiveFailedPlans = 0;
+        break;
+
+      case 'auth':
+        this.metrics.authFailures += 1;
+        this.consecutiveFailedPlans = 0;
+        break;
+
+      case 'permission':
+        this.metrics.permissionFailures += 1;
+        this.consecutiveFailedPlans = 0;
+        break;
+
+      case 'user':
+        this.metrics.userDenials += 1;
+        this.consecutiveFailedPlans = 0;
+        break;
+
+      case 'unknown':
+        this.consecutiveFailedPlans = 0;
+        break;
+    }
 
     if (result.status === 'error') {
       this.metrics.failedToolCalls += 1;
-      this.consecutiveFailedPlans += 1;
-    } else {
-      this.consecutiveFailedPlans = 0;
     }
 
     if (result.status === 'user_denied') {
-      this.consecutiveReplans += 1;
-    } else {
       this.consecutiveReplans = 0;
     }
 

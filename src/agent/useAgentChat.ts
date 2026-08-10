@@ -22,6 +22,8 @@ import type {
   PendingApproval,
 } from './types';
 
+import { MCP_RUNTIME_QUERY_KEY } from '@/mcp/queryKeys';
+
 export interface UseAgentChatOptions {
   threadId?: string;
   category?: string;
@@ -58,7 +60,7 @@ export function useAgentChat(options: UseAgentChatOptions = {}): AgentChat {
   const textChat = useCreepyChat({ threadId: options.threadId });
 
   const runtimeQuery = useQuery({
-    queryKey: ['mcp-runtime'],
+    queryKey: MCP_RUNTIME_QUERY_KEY,
     queryFn: () => getLocalMcpRuntime(),
     staleTime: Infinity,
   });
@@ -89,6 +91,16 @@ export function useAgentChat(options: UseAgentChatOptions = {}): AgentChat {
         setPendingApproval(
           state.type === 'awaiting_approval' ? state.approval : null,
         );
+      },
+      onRoutingTelemetry: (
+        telemetry,
+      ) => {
+        if (__DEV__) {
+          console.log(
+            '[agent-routing]',
+            telemetry,
+          );
+        }
       },
       onRunRecord: (record) => {
         void appendHistory({

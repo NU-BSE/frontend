@@ -21,6 +21,15 @@ import {
   type ModelTier,
   type RoutingDecision,
 } from './routing';
+import {
+  createRunTelemetry,
+  recordModelCall,
+  finalizeTelemetry,
+} from './routing/telemetry';
+
+import type {
+  RoutingTelemetry,
+} from './routing/types';
 
 export interface AgentRuntimeOptions {
   model: AgentModel;
@@ -36,6 +45,7 @@ export interface AgentRuntimeOptions {
   approveApproval: (approvalId: string) => Promise<void>;
   /** Called when the tier changes (diagnostics / status line). */
   onTierChange?: (tier: ModelTier, decision: RoutingDecision) => void;
+  onRoutingTelemetry?: (telemetry: RoutingTelemetry) => void;
   onMessages?: (messages: readonly AgentMessage[]) => void;
   onState?: (state: AgentRunState) => void;
   onRunRecord?: (record: AgentRunRecord) => void;
@@ -149,6 +159,13 @@ export class AgentRuntime {
     this.abortController = controller;
     this.runCounter += 1;
     const runId = `run_${Date.now().toString(36)}_${this.runCounter}`;
+    const routingStartedAt = Date.now();
+
+    const routingTelemetry =
+      createRunTelemetry(
+        runId,
+        this.currentTier,
+      );
     const steps: AgentRunStep[] = [];
     let finalAnswer: string | undefined;
 
@@ -164,8 +181,12 @@ export class AgentRuntime {
     // Adaptive routing: boot based on the user's request and reset the
     // monitor from any previous run.
     this.routingMonitor.reset();
-    this.currentTier =
-      estimateInitialTier(text).suggestedTier;
+
+    const initialEstimate =
+      estimateInitialTier(text);
+
+    this.currentTier = initialEstimate.suggestedTier;
+
     this.routingMonitor.currentTier = this.currentTier;
 
     try {
@@ -188,17 +209,27 @@ export class AgentRuntime {
         this.routingMonitor.recordStep();
 
         this.setState({ type: 'thinking' });
-        const result = await this.options.model.run({
-          messages: [...this.messages],
-          tools,
-          connections: this.options.connections,
-          signal: controller.signal,
-          routing: this.routingMonitor.buildRoutingContext(),
-        });
+        recordModelCall(
+          routingTelemetry,
+          this.currentTier,
+        );
+
+        const result =
+          await this.options.model.run({
+            messages: [...this.messages],
+            tools,
+            connections:
+              this.options.connections,
+            signal: controller.signal,
+            routing:
+              this.routingMonitor
+                .buildRoutingContext(),
+          });
 
         this.routingMonitor.recordModelResponse(result);
 
         if (result.kind === 'final') {
+          routingTelemetry.completedSuccessfully = true;
           finalAnswer = result.text;
           this.pushMessage({
             id: this.nextId('msg'),
@@ -264,6 +295,12 @@ export class AgentRuntime {
         if (routingDecision.tier !== this.currentTier) {
           this.currentTier = routingDecision.tier;
           this.routingMonitor.applyDecision(routingDecision);
+
+          if (this.currentTier === 'expert') {
+            routingTelemetry.expertTriggered = true;
+            routingTelemetry.expertTriggerReason = routingDecision.reason;
+          }
+
           this.options.onTierChange?.(this.currentTier, routingDecision);
         }
       }
@@ -298,6 +335,19 @@ export class AgentRuntime {
         this.setState({ type: 'failed', error: agentError });
       }
     } finally {
+      const metrics = this.routingMonitor.getMetrics();
+      const signals = this.routingMonitor.snapshot();
+      const routingContext = this.routingMonitor.buildRoutingContext();
+      routingTelemetry.finalTier = this.currentTier;
+      routingTelemetry.finalReasoningScore = routingContext.reasoningScore;
+      routingTelemetry.hardReasoningSignals = routingContext.hardReasoningSignals;
+      routingTelemetry.totalToolCalls = metrics.toolCalls;
+      routingTelemetry.totalSteps = metrics.stepCount;
+      routingTelemetry.failedPlans = signals.failedPlans;
+      routingTelemetry.replans = signals.replans;
+      routingTelemetry.escalationCount = metrics.escalationCount;
+      finalizeTelemetry(routingTelemetry, routingStartedAt);
+      this.options.onRoutingTelemetry?.(routingTelemetry);
       record.finalAnswer = finalAnswer;
       this.options.onRunRecord?.(record);
       this.abortController = null;

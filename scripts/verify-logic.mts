@@ -11,6 +11,12 @@ import {
   nextOrder,
 } from '../src/features/history/sort.js';
 import type { HistoryEntry } from '../src/storage/history.js';
+import {
+  NAME_MIN_LENGTH,
+  canonicalName,
+  isValidName,
+  nameLength,
+} from '../src/features/onboarding/name.js';
 
 function assert(condition: unknown, message: string): asserts condition {
   if (!condition) throw new Error(`FAIL: ${message}`);
@@ -144,5 +150,56 @@ assert(
   oldPair * OLD_MAX_PERCENT * 2 + GAP > oldPair,
   'the previous 48.5% + 16pt gap genuinely overflowed — regression reproduced',
 );
+
+console.log('\nonboarding name field:');
+
+// Any script is acceptable; the rule is length, not alphabet.
+for (const name of ['Ilia', 'Илья', '花子', 'Ægir', 'Zoë', "O'Brien", 'Ali A']) {
+  assert(isValidName(name), `accepts "${name}"`);
+}
+
+assert(!isValidName(''), 'rejects an empty name');
+assert(!isValidName('   '), 'rejects whitespace only');
+assert(!isValidName(' A '), 'rejects a single letter after trimming');
+
+/*
+ * The UTF-16 trap. `.length` counts surrogate halves, so each of these reports
+ * 2 while being a single character — a naive check would wave them through as
+ * if two characters had been typed.
+ */
+assert('😀'.length === 2, 'a single emoji is 2 UTF-16 code units');
+assert(nameLength('😀') === 1, 'but counts as 1 code point');
+assert(!isValidName('😀'), 'so one emoji is correctly rejected');
+
+assert('𠀋'.length === 2, 'a single astral CJK glyph is 2 UTF-16 code units');
+assert(nameLength('𠀋') === 1, 'but counts as 1 code point');
+assert(!isValidName('𠀋'), 'so one astral glyph is correctly rejected');
+
+assert(isValidName('😀😀'), 'two emoji satisfy the minimum');
+
+/*
+ * Composed vs decomposed input. "é" typed as e + U+0301 is 2 code points but
+ * one visible character; NFC folds it to 1 so the check matches what is on
+ * screen, and the backend receives one spelling rather than two.
+ */
+const decomposed = 'Jose\u0301';
+assert(decomposed.length === 5, 'decomposed "José" is 5 code units before NFC');
+assert(nameLength(canonicalName(decomposed)) === 4, 'NFC composes it to 4');
+assert(
+  canonicalName(decomposed) === canonicalName('Jos\u00e9'),
+  'both spellings of "José" canonicalise identically',
+);
+
+const decomposedE = 'e\u0301';
+assert(
+  nameLength(canonicalName(decomposedE)) === 1,
+  'a lone decomposed "é" is 1 character after NFC, not 2',
+);
+assert(
+  !isValidName(decomposedE),
+  `so it does not sneak past the ${NAME_MIN_LENGTH}-character minimum`,
+);
+
+assert(canonicalName('  Ilia  ') === 'Ilia', 'surrounding whitespace is trimmed');
 
 console.log('\nlogic verified.');

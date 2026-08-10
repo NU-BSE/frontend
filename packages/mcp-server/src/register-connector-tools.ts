@@ -27,13 +27,28 @@ function mayRequireApproval(risk: string): boolean {
 
 /**
  * Add `approvalId` to a connector's input schema without disturbing its own
- * fields. Only object schemas can be extended; anything else is passed
- * through untouched and simply won't accept an approval on the wire.
+ * fields.
+ *
+ * `.extend` exists only on ZodObject. Connectors that compose their schema —
+ * Telegram builds every tool as `connId.and(z.object({...}))`, a
+ * ZodIntersection — have no `.extend`, and the previous version silently
+ * returned those unchanged. The field was then absent from the published
+ * schema, so zod stripped `approvalId` before the handler ever saw it: the
+ * call re-entered the "needs approval" branch and issued a *fresh* approval
+ * every time. Confirming one did nothing, and the tool could never execute.
+ *
+ * Intersecting is the shape-agnostic equivalent of extending, so both forms
+ * now accept the field.
  */
 function withApprovalId(schema: unknown): unknown {
   const objectSchema = schema as { extend?: (shape: Record<string, unknown>) => unknown };
-  if (typeof objectSchema?.extend !== 'function') return schema;
-  return objectSchema.extend({ approvalId: approvalIdField });
+  if (typeof objectSchema?.extend === 'function') {
+    return objectSchema.extend({ approvalId: approvalIdField });
+  }
+  return z.intersection(
+    schema as z.ZodType,
+    z.object({ approvalId: approvalIdField }),
+  );
 }
 
 export async function registerConnectorTools(

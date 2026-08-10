@@ -20,6 +20,11 @@ function assert(condition: unknown, message: string): asserts condition {
   console.log(`  ok — ${message}`);
 }
 
+/** Same check, but silent on success — for assertions run in a loop. */
+function assertQuiet(condition: unknown, message: string): asserts condition {
+  if (!condition) throw new Error(`FAIL: ${message}`);
+}
+
 /** Every connector namespace that must reach the agent. */
 const CONNECTOR_NAMESPACES = [
   'android',
@@ -197,6 +202,84 @@ async function main(): Promise<void> {
     replayed !== null && /already consumed/iu.test(replayed),
     'an approval cannot be replayed a second time',
   );
+
+  console.log('connector tool schemas are agent-readable:');
+
+  /*
+   * Every tool must publish its arguments as top-level `properties`. Telegram
+   * previously composed schemas with `connId.and(...)`, which serialises to
+   * JSON Schema `allOf` with nothing at the top level — a model doing
+   * tool-calling cannot see the arguments at all.
+   */
+  for (const tool of allTools) {
+    const schema = tool.inputSchema as {
+      properties?: Record<string, unknown>;
+      allOf?: unknown[];
+    };
+    assertQuiet(
+      schema.allOf === undefined,
+      `${tool.name} publishes no allOf wrapper`,
+    );
+  }
+  console.log(`  ok — all ${allTools.length} tools expose top-level properties`);
+
+  console.log('approval round-trip works for every gated tool:');
+
+  /*
+   * Regression for the approval loop: `approvalId` was only added to schemas
+   * that had `.extend` (ZodObject). Composed schemas silently dropped it, so
+   * the field never reached the handler and each confirmed call minted a new
+   * approval instead of consuming the old one -- the tool could never run.
+   */
+  const gated = allTools.filter((tool) =>
+    /^telegram\./u.test(tool.name) &&
+    Boolean(
+      (tool.inputSchema as { properties?: Record<string, unknown> })
+        .properties?.approvalId,
+    ),
+  );
+
+  assert(gated.length > 0, 'telegram exposes gated tools to test');
+
+  for (const tool of gated) {
+    const args: Record<string, unknown> = {
+      connectionId: tool.name.startsWith('telegram.bot')
+        ? 'telegram-bot-default'
+        : 'telegram-user-default',
+      chatId: 1,
+      text: 'x',
+      messageId: 1,
+      document: 'x',
+      query: 'x',
+    };
+
+    const first = await runtimeWithConnectors.mcp.callTool({
+      name: tool.name,
+      arguments: args,
+    });
+    const pendingApproval = first.structuredContent as {
+      status?: string;
+      approvalId?: string;
+    };
+
+    assertQuiet(
+      pendingApproval?.status === 'approval_required',
+      `${tool.name} asks for approval`,
+    );
+
+    await approveConnectorTool(pendingApproval.approvalId as string);
+
+    const second = await runtimeWithConnectors.mcp.callTool({
+      name: tool.name,
+      arguments: { ...args, approvalId: pendingApproval.approvalId },
+    });
+
+    assertQuiet(
+      (second.structuredContent as { status?: string })?.status === 'success',
+      `${tool.name} executes once approved (did not loop)`,
+    );
+  }
+  console.log(`  ok — ${gated.length} composed-schema tools complete the round-trip`);
 
   console.log('runtime shutdown:');
 

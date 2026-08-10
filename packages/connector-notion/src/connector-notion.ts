@@ -1,8 +1,6 @@
 import * as z from 'zod/v4';
-import type { Connector, ConnectionRecord, ConnectorTool } from '@mobile-agent/connector-core';
-import { connId, mockConn, opt, str, t } from '@mobile-agent/connector-core';
-
-const CONN = mockConn('notion', 'Notion');
+import type { ConnectionRecord, ConnectorTool } from '@mobile-agent/connector-core';
+import { StoreBackedConnector, connId, opt, str, t } from '@mobile-agent/connector-core';
 
 const tools: ConnectorTool[] = [
   t('notion.search', 'Search', 'Search Notion', 'read',
@@ -25,11 +23,9 @@ const tools: ConnectorTool[] = [
     { id: 'c1', created: true }),
 ];
 
-export class NotionConnector implements Connector {
+export class NotionConnector extends StoreBackedConnector {
   readonly id = 'notion' as const;
   readonly displayName = 'Notion';
-  async listConnections() { return [CONN]; }
-  async getConnection(id: string) { return id === CONN.id ? CONN : null; }
+  readonly implementationStatus = 'mock' as const;
   async getTools(_c: ConnectionRecord) { return tools; }
-  async disconnect(_id: string) {}
 }

@@ -10,16 +10,18 @@ import {
   View,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import type { UIMessage } from '@tanstack/ai/client';
 
 import { Screen } from '@/components/Screen';
 import { Text } from '@/components/Text';
-import { useCreepyChat } from '@/ai/useCreepyChat';
+import { useAi } from '@/ai/AiProvider';
+import { useAgentChat } from '@/agent/useAgentChat';
+import type { AgentMessage } from '@/agent/types';
+import { AgentMessageItem } from '@/features/chat/AgentMessageItem';
 import { Composer } from '@/features/chat/Composer';
 import { DeepLinkBar } from '@/features/chat/DeepLinkBar';
-import { MessageBubble, messageText } from '@/features/chat/MessageBubble';
 import { SuggestionChips } from '@/features/chat/SuggestionChips';
-import { McpDebugButton } from '@/mcp/McpDebugButton';
+import { toolActivityLabel } from '@/features/chat/toolLabels';
+import { ApprovalSheet } from '@/features/approvals/ApprovalSheet';
 import {
   GENERAL_SUGGESTIONS,
   getScenario,
@@ -37,7 +39,9 @@ export default function Chat() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const queryClient = useQueryClient();
-  const listRef = useRef<FlatList<UIMessage>>(null);
+  const listRef = useRef<FlatList<AgentMessage>>(null);
+
+  const { origin, status: engineStatus, degradedReason } = useAi();
 
   const { scenario: scenarioParam } = useLocalSearchParams<{
     scenario?: string;
@@ -45,42 +49,45 @@ export default function Chat() {
   const scenario = getScenario(scenarioParam);
 
   const {
+    mode,
     messages,
+    runState,
+    pendingApproval,
+    isRunning,
     sendMessage,
-    stop,
-    isLoading,
-    error,
-    engineOrigin,
-    engineStatus,
-    degradedReason,
-  } = useCreepyChat({ threadId: scenario?.id });
+    approvePendingApproval,
+    rejectPendingApproval,
+    cancel,
+  } = useAgentChat({
+    threadId: scenario?.id,
+    category: scenario?.title,
+  });
 
+  // Text-only fallback persists here; agent runs persist through the
+  // runtime's run records (which also capture tool/approval steps).
   const save = useMutation({
     mutationFn: appendHistory,
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ['history'] }),
   });
-
-  // Persist each completed exchange once. Keyed on the assistant message id
-  // so a re-render mid-stream cannot write a partial reply.
   const savedIds = useRef(new Set<string>());
   useEffect(() => {
-    if (isLoading) return;
+    if (mode !== 'text-only' || isRunning) return;
     const last = messages[messages.length - 1];
-    if (!last || last.role !== 'assistant' || savedIds.current.has(last.id)) return;
-
-    const reply = messageText(last).trim();
+    if (!last || last.role !== 'assistant' || savedIds.current.has(last.id)) {
+      return;
+    }
+    const reply = last.content.trim();
     if (!reply) return;
-
     const prompt = [...messages].reverse().find((m) => m.role === 'user');
     savedIds.current.add(last.id);
     save.mutate({
       threadId: scenario?.id ?? 'general',
       category: scenario?.title ?? 'General',
-      prompt: prompt ? messageText(prompt) : '',
+      prompt: prompt && prompt.role === 'user' ? prompt.content : '',
       reply,
-      engine: engineOrigin,
+      engine: origin,
     });
-  }, [engineOrigin, isLoading, messages, save, scenario]);
+  }, [isRunning, messages, mode, origin, save, scenario]);
 
   const scrollToEnd = useCallback(() => {
     listRef.current?.scrollToEnd({ animated: true });
@@ -88,7 +95,7 @@ export default function Chat() {
 
   const handleSend = useCallback(
     (text: string) => {
-      void sendMessage(text);
+      sendMessage(text);
       requestAnimationFrame(scrollToEnd);
     },
     [scrollToEnd, sendMessage],
@@ -99,14 +106,35 @@ export default function Chat() {
     [scenario],
   );
 
+  const agentStatusLine = useMemo(() => {
+    switch (runState.type) {
+      case 'thinking':
+        return 'Thinking…';
+      case 'calling_tool':
+        return `${toolActivityLabel(runState.toolName)}…`;
+      case 'executing_tool':
+        return `${toolActivityLabel(runState.toolName)}…`;
+      case 'awaiting_approval':
+        return 'Waiting for your confirmation…';
+      case 'responding':
+        return 'Replying…';
+      case 'failed':
+        return runState.error.message;
+      default:
+        return null;
+    }
+  }, [runState]);
+
   const statusLine =
     engineStatus === 'preparing'
       ? 'Waking up…'
-      : engineStatus === 'degraded'
-        ? (degradedReason ?? 'Fell back to offline preview')
-        : ORIGIN_LABEL[engineOrigin];
+      : (agentStatusLine ??
+        (engineStatus === 'degraded'
+          ? (degradedReason ?? 'Fell back to offline preview')
+          : ORIGIN_LABEL[origin]));
 
   const isEmpty = messages.length === 0;
+  const awaitingApproval = pendingApproval !== null;
 
   return (
     <Screen>
@@ -117,7 +145,11 @@ export default function Chat() {
           </Text>
           <Text
             variant="tag"
-            tone={engineStatus === 'degraded' ? 'danger' : 'faint'}
+            tone={
+              engineStatus === 'degraded' || runState.type === 'failed'
+                ? 'danger'
+                : 'faint'
+            }
             uppercase
           >
             {statusLine}
@@ -125,8 +157,6 @@ export default function Chat() {
         </View>
 
         <View style={styles.headerActions}>
-          <McpDebugButton />
-
           <Pressable
             accessibilityRole="button"
             accessibilityLabel="Close chat"
@@ -147,7 +177,7 @@ export default function Chat() {
       >
         <FlatList
           ref={listRef}
-          data={messages}
+          data={[...messages]}
           keyExtractor={(message) => message.id}
           contentContainerStyle={styles.listContent}
           ItemSeparatorComponent={() => <View style={styles.gap} />}
@@ -155,10 +185,10 @@ export default function Chat() {
           keyboardShouldPersistTaps="handled"
           showsVerticalScrollIndicator={false}
           renderItem={({ item, index }) => (
-            <MessageBubble
+            <AgentMessageItem
               message={item}
               streaming={
-                isLoading &&
+                isRunning &&
                 index === messages.length - 1 &&
                 item.role === 'assistant'
               }
@@ -176,29 +206,31 @@ export default function Chat() {
         />
 
         <View style={styles.tray}>
-          {/* Suggestions stay available after the first exchange — a
-              conversation that has started still benefits from a nudge. */}
-          <SuggestionChips
-            suggestions={suggestions}
-            onSelect={handleSend}
-            disabled={isLoading || engineStatus === 'preparing'}
-          />
-
-          {scenario ? <DeepLinkBar links={scenario.deepLinks} /> : null}
-
-          {error ? (
-            <Text variant="bodySmall" tone="danger">
-              {error.message}
-            </Text>
-          ) : null}
+          {awaitingApproval && pendingApproval ? (
+            <ApprovalSheet
+              approval={pendingApproval}
+              busy={runState.type === 'executing_tool'}
+              onApprove={approvePendingApproval}
+              onReject={rejectPendingApproval}
+            />
+          ) : (
+            <>
+              <SuggestionChips
+                suggestions={suggestions}
+                onSelect={handleSend}
+                disabled={isRunning || engineStatus === 'preparing'}
+              />
+              {scenario ? <DeepLinkBar links={scenario.deepLinks} /> : null}
+            </>
+          )}
         </View>
 
         <View style={{ paddingBottom: insets.bottom }}>
           <Composer
             onSend={handleSend}
-            onStop={stop}
-            busy={isLoading}
-            disabled={engineStatus === 'preparing'}
+            onStop={cancel}
+            busy={isRunning}
+            disabled={engineStatus === 'preparing' || awaitingApproval}
           />
         </View>
       </KeyboardAvoidingView>

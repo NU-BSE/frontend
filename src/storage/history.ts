@@ -1,7 +1,19 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
-const HISTORY_KEY = 'creepyim.history.v2';
+const HISTORY_KEY = 'creepyim.history.v3';
 const MAX_ENTRIES = 200;
+
+/**
+ * Privacy-safe summary of one agent step. Never raw secrets, never full
+ * message bodies — safe previews of what the agent did.
+ */
+export interface HistoryStep {
+  type: 'tool_call' | 'tool_result' | 'approval';
+  toolName: string;
+  safePreview?: unknown;
+  success?: boolean;
+  approved?: boolean;
+}
 
 export interface HistoryEntry {
   id: string;
@@ -15,6 +27,8 @@ export interface HistoryEntry {
   createdAt: number;
   /** Which engine produced it, so the privacy claim stays auditable. */
   engine: string;
+  /** Agent runs additionally persist their tool/approval steps. */
+  steps?: HistoryStep[];
 }
 
 async function readAll(): Promise<HistoryEntry[]> {

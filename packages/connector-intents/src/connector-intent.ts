@@ -1,8 +1,6 @@
 import * as z from 'zod/v4';
-import type { Connector, ConnectionRecord, ConnectorTool } from '@mobile-agent/connector-core';
-import { connId, mockConn, opt, str, t } from '@mobile-agent/connector-core';
-
-const CONN = mockConn('intent', 'Android Intents');
+import type { ConnectionRecord, ConnectorTool } from '@mobile-agent/connector-core';
+import { StoreBackedConnector, connId, opt, str, t } from '@mobile-agent/connector-core';
 
 const tools: ConnectorTool[] = [
   t('intent.open_uri', 'Open URI', 'Open a URI in an external app', 'write',
@@ -28,11 +26,9 @@ const tools: ConnectorTool[] = [
     { success: true }),
 ];
 
-export class IntentConnector implements Connector {
+export class IntentConnector extends StoreBackedConnector {
   readonly id = 'intent' as const;
   readonly displayName = 'Android Intents';
-  async listConnections() { return [CONN]; }
-  async getConnection(id: string) { return id === CONN.id ? CONN : null; }
+  readonly implementationStatus = 'mock' as const;
   async getTools(_c: ConnectionRecord) { return tools; }
-  async disconnect(_id: string) {}
 }

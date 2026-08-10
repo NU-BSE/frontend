@@ -1,8 +1,6 @@
 import * as z from 'zod/v4';
-import type { Connector, ConnectionRecord, ConnectorTool } from '@mobile-agent/connector-core';
-import { connId, mockConn, opt, str, t } from '@mobile-agent/connector-core';
-
-const CONN = mockConn('spotify', 'Spotify');
+import type { ConnectionRecord, ConnectorTool } from '@mobile-agent/connector-core';
+import { StoreBackedConnector, connId, opt, str, t } from '@mobile-agent/connector-core';
 
 const tools: ConnectorTool[] = [
   t('spotify.user.profile', 'Get profile', 'Get current user profile', 'read',
@@ -40,11 +38,9 @@ const tools: ConnectorTool[] = [
     { snapshot_id: 'snap1' }),
 ];
 
-export class SpotifyConnector implements Connector {
+export class SpotifyConnector extends StoreBackedConnector {
   readonly id = 'spotify' as const;
   readonly displayName = 'Spotify';
-  async listConnections() { return [CONN]; }
-  async getConnection(id: string) { return id === CONN.id ? CONN : null; }
+  readonly implementationStatus = 'mock' as const;
   async getTools(_c: ConnectionRecord) { return tools; }
-  async disconnect(_id: string) {}
 }

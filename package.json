@@ -84,8 +84,10 @@
     "verify:logic": "esbuild scripts/verify-logic.mts --bundle --platform=node --format=cjs --outfile=node_modules/.cache/verify-logic.cjs --log-level=error && node node_modules/.cache/verify-logic.cjs",
     "verify:layout": "esbuild scripts/verify-layout.mts --bundle --platform=node --format=esm --outfile=node_modules/.cache/verify-layout.mjs --log-level=error && node node_modules/.cache/verify-layout.mjs",
     "verify:device": "esbuild scripts/verify-device-selection.mts --bundle --platform=node --format=cjs --outfile=node_modules/.cache/verify-device-selection.cjs --log-level=error && node node_modules/.cache/verify-device-selection.cjs",
-    "verify:mcp": "esbuild scripts/verify-mcp.mts --bundle --platform=node --format=cjs --outfile=node_modules/.cache/verify-mcp.cjs --log-level=error && node node_modules/.cache/verify-mcp.cjs",
-    "verify": "npm run typecheck && npm run lint && npm run verify:ai && npm run verify:logic && npm run verify:layout && npm run verify:device && npm run verify:mcp",
+    "verify:mcp": "esbuild scripts/verify-mcp.mts --bundle --platform=node --format=cjs --external:react-native --external:expo-modules-core --outfile=node_modules/.cache/verify-mcp.cjs --log-level=error && node node_modules/.cache/verify-mcp.cjs",
+    "verify:agent": "esbuild scripts/verify-agent.mts --bundle --platform=node --format=cjs --external:react-native --external:expo-modules-core --outfile=node_modules/.cache/verify-agent.cjs --log-level=error && node node_modules/.cache/verify-agent.cjs",
+    "verify:connections": "esbuild scripts/verify-connections.mts --bundle --platform=node --format=cjs --external:react-native --external:expo-modules-core --outfile=node_modules/.cache/verify-connections.cjs --log-level=error && node node_modules/.cache/verify-connections.cjs",
+    "verify": "npm run typecheck && npm run lint && npm run verify:ai && npm run verify:logic && npm run verify:layout && npm run verify:device && npm run verify:mcp && npm run verify:agent && npm run verify:connections",
     "deploy": "node deploy.js",
     "preview": "npx expo export --platform web && wrangler dev"
   },

@@ -1,5 +1,22 @@
 # LOCAL_MCP_SETUP.md
 
+> **Текущее состояние (после реализации agent loop).** Этот документ описывает
+> исходную настройку локального MCP runtime и остаётся точным в части
+> транспорта (client + server в одном JS-процессе через `InMemoryTransport`).
+> Сверху построено:
+>
+> - `src/agent/` — оркестрация LLM ↔ MCP (bounded loop, approval пауза,
+>   cancellation, MAX_AGENT_STEPS);
+> - approval для connector-инструментов через `ApprovalService`
+>   (`approval_required` → UI подтверждение → повторный вызов с `approvalId`);
+> - `ConnectionStore` как единственный источник правды о подключениях
+>   (UI, MCP и auth-флоу читают один store);
+> - режимы runtime: `development` (mock-подключения для демо) и `production`
+>   (только реальные коннекторы, mock-инструменты не регистрируются);
+> - `npm run verify:mcp`, `verify:agent`, `verify:connections` — регрессии.
+>
+> Детали — в README.md ("The agent architecture") и FINISH_FRONTEND_AGENT.md.
+
 ## Задача
 
 Настроить в мобильном TypeScript-приложении локальный MCP runtime:

@@ -10,12 +10,35 @@ from the Creepy.IM Figma file.
 | Onboarding (categories → memory config) | Built from Figma |
 | Feed / Home (tabs, scenario cards) | Built from Figma |
 | History (search, sort, filters, entries) | Built from Figma |
-| Auth (screen 3) | Built; providers stubbed |
+| Auth (email code) | Built and wired to the backend |
 | Ask Creepy chat | Built — **no Figma frame existed**, designed to match |
 | Deep links | Live code paths, **stub targets** |
 | AI layer (on-device, swappable) | Done, verified against a real `ChatClient` |
+| Agent orchestration (LLM ↔ MCP tool loop) | Done, verified end-to-end |
+| Approvals UI (human confirmation gate) | Done, verified |
+| Connection model (persistent store + registry) | Done, verified |
+| Telegram personal connector | **Mock adapter**; native TDLib bridge stubbed (needs dev build) |
+| Google / Microsoft / Slack / … connectors | **Mock** — hidden in production until real |
 
 `tsc` clean · `expo lint` clean · `expo-doctor` 20/20 · Android bundle exports.
+
+### Implementation status legend
+
+Every connector package exports an honest `implementationStatus`, and the
+production registry refuses to register `mock` connectors, so the model can
+never be shown tools that would report fake success.
+
+- **Implemented and real** — agent orchestration, approval flow, connection
+  store/registry, email auth, MCP runtime.
+- **Implemented but mock** — all provider connectors (Telegram, Google,
+  Android, …) plus the built-in calendar. They exercise the full loop in
+  development and tests but are not registered in production.
+- **Requires native development build** — Telegram personal-account support
+  (TDLib via the `TelegramTdlibModule` native module, Phase D). The
+  TypeScript adapter seam and auth state machine exist; the Kotlin/TDLib side
+  does not yet.
+- **Requires backend / OAuth broker** — real Google OAuth token exchange and
+  any provider with a confidential client secret. Never bundled in the APK.
 
 ## Run
 
@@ -30,10 +53,14 @@ Verification:
 ```bash
 npm run typecheck
 npm run lint
-npm run verify         # everything below, in order
-npm run verify:ai      # drives a real ChatClient through the custom connection
-npm run verify:logic   # history sort / filter / search pipeline
-npm run verify:layout  # runs Yoga over the category grid's real node tree
+npm run verify               # everything below, in order
+npm run verify:ai            # drives a real ChatClient through the custom connection
+npm run verify:logic         # history sort / filter / search pipeline
+npm run verify:layout        # runs Yoga over the category grid's real node tree
+npm run verify:device        # attested device → model-profile selection
+npm run verify:mcp           # in-process MCP runtime + approval round-trips
+npm run verify:agent         # the full agent loop: plan → tool → approve → execute
+npm run verify:connections   # connection truthfulness (no fake connections)
 ```
 
 `verify:layout` matters more than it looks. The category grid collapsed to one
@@ -179,37 +206,106 @@ The Memory Config onboarding step already collects the user's intended size
 selection when you ship real weights. Start with Q4_K_M; `n_gpu_layers` defaults
 to 0 because GPU offload is inconsistent across Android GPUs.
 
+## The agent architecture
+
+Chat is not text-in/text-out. `app/chat.tsx` talks to one hook —
+`useAgentChat` — and the agent layer (`src/agent/`) owns the loop:
+
+```
+user message
+   ↓
+AgentRuntime (bounded loop, ≤ MAX_AGENT_STEPS)
+   ├─► AgentModel (planner)            → validated tool call
+   ├─► MCP client → MCP server          → policy + approval gate
+   ├─► ConnectorRegistry → connector    → provider (Telegram, …)
+   └─► tool result back to the planner  → final answer
+```
+
+Division of labor, enforced by construction:
+
+- **The LLM plans actions.** It never executes anything and never sees
+  credentials. Tool calls are Zod-validated before MCP.
+- **MCP executes tools.** `registerConnectorTools` resolves the connection
+  from `input.connectionId` at execution time, so one tool name serves many
+  accounts (Google personal + work).
+- **The UI owns human approval.** External side effects and destructive
+  actions pause the run and surface `ApprovalSheet`. Approving re-invokes the
+  tool with the byte-identical payload plus the approval id — the approval
+  service hashes the arguments, so a tampered or replayed payload fails. The
+  model has no tool that approves actions; it cannot approve its own side
+  effect. Cancelling returns a structured `user_denied` result.
+- **Credentials stay outside the model.** Connection records carry a
+  `credentialReference`, never a secret. Secrets live in the CredentialVault
+  (expo-secure-store / Android Keystore on-device).
+
+### Planners
+
+| Planner | When | Notes |
+| --- | --- | --- |
+| Structured planner | on-device engine | Strict JSON protocol over the text engine; every response Zod-validated. Unparseable output degrades to a text answer — never a guessed tool call. |
+| Deterministic planner | offline-preview stub | Drives the full loop (search chat → send → approve → confirm) so the vertical slice is demoable without weights. |
+| Text-only | remote engine | No tool contract with the backend yet; chat degrades honestly instead of faking tool use. |
+
+### Connections are real
+
+`src/connections/` reads and writes the persistent `ConnectionStore`
+(AsyncStorage metadata; versioned document). The UI, the MCP registry and
+connector auth flows all share it — there is no separate "UI connection
+state". A fresh install exposes **no** external tools; only a completed auth
+flow creates `status: connected`; disconnect removes the record and revokes
+the stored credential; the MCP runtime restarts so the tool list always
+matches reality. `npm run verify:connections` proves all of it.
+
+In development mode the runtime seeds clearly labeled `(development mock)`
+accounts so the loop is exercisable; production never seeds anything.
+
 ## Layout
 
 ```
 app/
-  _layout.tsx            Fonts + providers: Gesture → SafeArea → Query → Ai
+  _layout.tsx            Fonts + providers: Gesture → SafeArea → Query → Ai → Agent
   index.tsx              Gate: onboarding vs feed
   onboarding/
     index.tsx            Support categories (multi-select grid)
+    connections.tsx      Connect services (real connection state)
     memory.tsx           Memory config (radio rows)
   (tabs)/
     feed.tsx             Home: tab selector + scenario cards
     history.tsx          Search, category filters, entry cards
-    auth.tsx             Providers + engine status
-  chat.tsx               Ask Creepy — modal over the tabs
+    auth.tsx             Account + connectors + engine status
+  chat.tsx               Ask Creepy — modal over the tabs (agent chat)
+  dev/diagnostics.tsx    MCP health, tools, connections, model capabilities
 src/
+  agent/                 AgentRuntime, planners, tool mapper/executor, hooks
   ai/                    Engines, connection adapter, provider, hook
   components/            Text, Screen, Button, Icon, TopAppBar, TabSelector
+  connections/           ConnectionService + TanStack Query hooks
   features/
+    approvals/           ApprovalSheet + human-readable previews
     scenarios/registry   ← one file drives four surfaces
-    chat/                Bubbles, chips, composer, deep links
+    chat/                Bubbles, chips, composer, deep links, tool labels
+    connections/         ConnectorList (shared by onboarding + account)
+  mcp/                   Runtime singleton, registry factory, dev seed, app deps
   storage/               AsyncStorage repositories
-  auth/providers.ts      Registry for the Telegram/Google/Facebook work
+  auth/providers.ts      Registry mapping providers → connector ids
   theme/tokens.ts        ← the whole design system
+packages/                @mobile-agent/* workspace packages (MCP + connectors)
 assets/icons/            23 Figma SVG exports
 ```
 
 ## Still to do
 
-**Auth.** `src/auth/providers.ts` defines the shape; buttons render disabled with
-the reason. Implementing one means writing `signIn` and flipping `enabled`.
-Tokens go in `expo-secure-store` (installed), never AsyncStorage.
+**Telegram TDLib native bridge (Phase D).** The TypeScript seam
+(`packages/connector-telegram/src/tdlib/`) and the phone/code/2FA auth state
+machine are in place; the Kotlin `TelegramTdlibModule` + TDLib build is not.
+Until then, `connect('telegram-user')` in production reports exactly that.
+
+**Interactive Telegram auth screen.** The state machine lives in the adapter;
+the phone/code/2FA UI flow needs a screen (Phase D).
+
+**Real provider implementations.** Google (OAuth → Calendar → Gmail → People →
+Drive → Tasks) is next, per `FINISH_FRONTEND_AGENT.md`. Everything else stays
+mock until it is real — never a fake success.
 
 **Real deep-link targets.** Replace the `url` values in the registry.
 

@@ -51,6 +51,13 @@ function withApprovalId(schema: unknown): unknown {
   );
 }
 
+function errorResult(message: string) {
+  return {
+    isError: true,
+    content: [{ type: 'text' as const, text: message }],
+  };
+}
+
 export async function registerConnectorTools(
   server: McpServer,
   registry: ConnectorRegistry,
@@ -61,37 +68,43 @@ export async function registerConnectorTools(
 
   /*
    * The registry yields one entry per (connection, tool) pair, but MCP tool
-   * names are global — registering the same name twice throws and would take
-   * the whole runtime down at startup. Today no two active connections share a
-   * connector id, so this never fires; it exists so that the day a user
-   * connects two Google accounts, the second one degrades to "not separately
-   * addressable" instead of crashing the app on launch.
-   *
-   * Making both reachable is a schema change, not a guard: the handler would
-   * have to resolve the connection from `connectionId` in the arguments rather
-   * than capturing one here.
+   * names are global. Entries sharing a name are grouped and registered once;
+   * the handler resolves the actual connection from `input.connectionId` at
+   * execution time instead of capturing one connection here. That is what
+   * lets one tool name serve many accounts — Google personal and Google work
+   * are both addressable, selected by the connectionId argument.
    */
-  const registered = new Set<string>();
+  const byName = new Map<string, typeof items>();
 
-  for (const { connection, tool } of items) {
-    if (registered.has(tool.name)) continue;
-    registered.add(tool.name);
+  for (const item of items) {
+    const group = byName.get(item.tool.name);
+    if (group) {
+      group.push(item);
+    } else {
+      byName.set(item.tool.name, [item]);
+    }
+  }
 
-    const gated = mayRequireApproval(tool.risk);
+  for (const [toolName, entries] of byName) {
+    // The published schema comes from the first entry; entries from the same
+    // connector always agree, and cross-connector name collisions are
+    // resolved at execution time below.
+    const primary = entries[0].tool;
+    const gated = mayRequireApproval(primary.risk);
 
     // registerTool overloads are narrow; cast the config to avoid type conflicts
     // with the generic ZodType from connector-core.
     server.registerTool(
-      tool.name,
+      toolName,
       {
-        title: tool.title,
-        description: tool.description,
-        inputSchema: (gated ? withApprovalId(tool.inputSchema) : tool.inputSchema) as any,
-        outputSchema: tool.outputSchema as any,
+        title: primary.title,
+        description: primary.description,
+        inputSchema: (gated ? withApprovalId(primary.inputSchema) : primary.inputSchema) as any,
+        outputSchema: primary.outputSchema as any,
         annotations: {
-          readOnlyHint: tool.risk === 'read',
-          destructiveHint: tool.risk === 'destructive',
-          idempotentHint: tool.risk === 'read',
+          readOnlyHint: primary.risk === 'read',
+          destructiveHint: primary.risk === 'destructive',
+          idempotentHint: primary.risk === 'read',
           openWorldHint: true,
         },
       } as any,
@@ -106,13 +119,61 @@ export async function registerConnectorTools(
           approvalId?: string;
         } & Record<string, unknown>;
 
+        const connectionId =
+          typeof input.connectionId === 'string' && input.connectionId.length > 0
+            ? input.connectionId
+            : null;
+
+        if (!connectionId) {
+          return errorResult(
+            'connectionId is required. Use the connection discovery context ' +
+              'to pick an available connection.',
+          );
+        }
+
+        const resolved = await registry.getConnection(connectionId);
+        if (!resolved) {
+          return errorResult(
+            `Connection "${connectionId}" was not found. Only use connection ` +
+              'ids from the connection discovery context.',
+          );
+        }
+
+        const { connection } = resolved;
+
+        if (connection.status !== 'connected') {
+          return errorResult(
+            `Connection "${connection.displayName}" is ${connection.status}. ` +
+              'The user must reconnect it before this tool can run.',
+          );
+        }
+
+        const entry = entries.find(
+          (candidate) =>
+            candidate.connection.connectorId === connection.connectorId,
+        );
+        if (!entry) {
+          return errorResult(
+            `Tool ${toolName} is not provided by connector ${connection.connectorId}.`,
+          );
+        }
+
+        const tool = entry.tool;
+
+        const missingScopes = tool.requiredScopes.filter(
+          (scope) => !connection.scopes.includes(scope),
+        );
+        if (missingScopes.length > 0) {
+          return errorResult(
+            `Connection "${connection.displayName}" is missing required ` +
+              `scopes: ${missingScopes.join(', ')}.`,
+          );
+        }
+
         const policy = await policyEngine.authorize({ connection, tool, input });
 
         if (!policy.allowed) {
-          return {
-            isError: true,
-            content: [{ type: 'text', text: policy.reason ?? 'Action not allowed' }],
-          };
+          return errorResult(policy.reason ?? 'Action not allowed');
         }
 
         if (policy.requiresApproval) {
@@ -138,24 +199,31 @@ export async function registerConnectorTools(
           try {
             await approvalService.consume(approvalId, hashArgs(input));
           } catch (error) {
-            return {
-              isError: true,
-              content: [
-                {
-                  type: 'text',
-                  text: error instanceof Error ? error.message : 'Approval could not be used',
-                },
-              ],
-            };
+            return errorResult(
+              error instanceof Error ? error.message : 'Approval could not be used',
+            );
           }
         }
 
-        const output = await tool.execute(input, {
-          taskId: policy.taskId,
-          agentId: policy.agentId,
-          connection,
-          idempotencyKey: policy.idempotencyKey,
-        });
+        /*
+         * Connector failures become structured tool errors the model can
+         * reason about ("chat not found", "authorization expired", ...) —
+         * never an unhandled throw that would take down the transport, and
+         * never a stack trace or secret leaked into the message.
+         */
+        let output: unknown;
+        try {
+          output = await tool.execute(input, {
+            taskId: policy.taskId,
+            agentId: policy.agentId,
+            connection,
+            idempotencyKey: policy.idempotencyKey,
+          });
+        } catch (error) {
+          return errorResult(
+            error instanceof Error ? error.message : 'Tool execution failed',
+          );
+        }
 
         return {
           content: [{ type: 'text', text: JSON.stringify(output) }],

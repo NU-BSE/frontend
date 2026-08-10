@@ -14,8 +14,14 @@ import { GestureHandlerRootView } from "react-native-gesture-handler";
 import { SafeAreaProvider } from "react-native-safe-area-context";
 
 import { AiProvider } from "@/ai/AiProvider";
+import { AgentProvider } from "@/agent/AgentProvider";
 import { AuthRouteGuard } from "@/auth/AuthRouteGuard";
+import { registerAppMcpDependencies } from "@/mcp/app-dependencies";
 import { palette } from "@/theme/tokens";
+
+// Wire the persistent ConnectionStore + Keystore-backed CredentialVault
+// before anything can touch the MCP runtime.
+registerAppMcpDependencies();
 
 void SplashScreen.preventAutoHideAsync();
 
@@ -54,25 +60,27 @@ export default function RootLayout() {
           {/* Legacy WebAuthGate (login/password) intentionally disabled. */}
           <AuthRouteGuard>
             <AiProvider>
-              <StatusBar style="dark" />
-              <Stack
-                screenOptions={{
-                  headerShown: false,
-                  contentStyle: { backgroundColor: palette.canvas },
-                }}
-              >
-                <Stack.Screen name="index" />
-                <Stack.Screen name="onboarding" />
-                <Stack.Screen name="auth" />
-                <Stack.Screen name="(tabs)" />
-                <Stack.Screen
-                  name="chat"
-                  options={{
-                    presentation: "modal",
-                    animation: "slide_from_bottom",
+              <AgentProvider>
+                <StatusBar style="dark" />
+                <Stack
+                  screenOptions={{
+                    headerShown: false,
+                    contentStyle: { backgroundColor: palette.canvas },
                   }}
-                />
-              </Stack>
+                >
+                  <Stack.Screen name="index" />
+                  <Stack.Screen name="onboarding" />
+                  <Stack.Screen name="auth" />
+                  <Stack.Screen name="(tabs)" />
+                  <Stack.Screen
+                    name="chat"
+                    options={{
+                      presentation: "modal",
+                      animation: "slide_from_bottom",
+                    }}
+                  />
+                </Stack>
+              </AgentProvider>
             </AiProvider>
           </AuthRouteGuard>
         </QueryClientProvider>

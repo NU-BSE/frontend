@@ -1,8 +1,6 @@
 import * as z from 'zod/v4';
-import type { Connector, ConnectionRecord, ConnectorTool } from '@mobile-agent/connector-core';
-import { connId, mockConn, opt, str, t } from '@mobile-agent/connector-core';
-
-const CONN = mockConn('github', 'GitHub');
+import type { ConnectionRecord, ConnectorTool } from '@mobile-agent/connector-core';
+import { StoreBackedConnector, connId, opt, str, t } from '@mobile-agent/connector-core';
 
 const tools: ConnectorTool[] = [
   t('github.user.get', 'Get user', 'Get authenticated user', 'read',
@@ -46,11 +44,9 @@ const tools: ConnectorTool[] = [
     { workflow_runs: [{ id: 300, name: 'CI', status: 'completed', conclusion: 'success' }] }),
 ];
 
-export class GithubConnector implements Connector {
+export class GithubConnector extends StoreBackedConnector {
   readonly id = 'github' as const;
   readonly displayName = 'GitHub';
-  async listConnections() { return [CONN]; }
-  async getConnection(id: string) { return id === CONN.id ? CONN : null; }
+  readonly implementationStatus = 'mock' as const;
   async getTools(_c: ConnectionRecord) { return tools; }
-  async disconnect(_id: string) {}
 }

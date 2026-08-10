@@ -47,6 +47,14 @@ export interface LocalMcpConnectors {
   approvalService: ApprovalService;
 }
 
+export interface LocalMcpRuntimeOptions {
+  /**
+   * Built-in calendar tools are mock-backed today; production runtimes turn
+   * them off so the model never acts against `mock-personal`.
+   */
+  builtInCalendar?: boolean;
+}
+
 /**
  * Поднимает MCP client и MCP server
  * внутри одного JavaScript-процесса
@@ -62,9 +70,12 @@ export interface LocalMcpConnectors {
 export async function createLocalMcpRuntime(
   dependencies: MobileAgentDependencies,
   connectors?: LocalMcpConnectors,
+  options: LocalMcpRuntimeOptions = {},
 ): Promise<LocalMcpRuntime> {
   const server =
-    createMobileAgentMcpServer(dependencies);
+    createMobileAgentMcpServer(dependencies, {
+      builtInCalendar: options.builtInCalendar,
+    });
 
   /*
    * Строго до server.connect:

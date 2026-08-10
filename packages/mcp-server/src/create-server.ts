@@ -62,8 +62,18 @@ function sanitizeError(error: unknown): string {
   return "Unknown connector error";
 }
 
+export interface MobileAgentMcpServerOptions {
+  /**
+   * The built-in calendar tools run against the injected CalendarConnector —
+   * today a mock. Production disables them so the model can never act
+   * against `mock-personal`; a real calendar backend re-enables them.
+   */
+  builtInCalendar?: boolean;
+}
+
 export function createMobileAgentMcpServer(
   dependencies: MobileAgentDependencies,
+  options: MobileAgentMcpServerOptions = {},
 ): McpServer {
   const server = new McpServer({
     name: "mobile-agent-local-server",
@@ -103,6 +113,7 @@ export function createMobileAgentMcpServer(
     },
   );
 
+  if (options.builtInCalendar !== false) {
   /*
    * Получение событий.
    * Это read-only операция, подтверждение не нужно.
@@ -304,6 +315,7 @@ export function createMobileAgentMcpServer(
       }
     },
   );
+  }
 
   return server;
 }

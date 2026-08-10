@@ -1,8 +1,6 @@
 import * as z from 'zod/v4';
-import type { Connector, ConnectionRecord, ConnectorTool } from '@mobile-agent/connector-core';
-import { connId, mockConn, opt, str, t } from '@mobile-agent/connector-core';
-
-const CONN = mockConn('dropbox', 'Dropbox');
+import type { ConnectionRecord, ConnectorTool } from '@mobile-agent/connector-core';
+import { StoreBackedConnector, connId, opt, str, t } from '@mobile-agent/connector-core';
 
 const tools: ConnectorTool[] = [
   t('dropbox.files.list', 'List files', 'List files in a folder', 'read',
@@ -31,11 +29,9 @@ const tools: ConnectorTool[] = [
     { deleted: true, path: '/report.pdf' }),
 ];
 
-export class DropboxConnector implements Connector {
+export class DropboxConnector extends StoreBackedConnector {
   readonly id = 'dropbox' as const;
   readonly displayName = 'Dropbox';
-  async listConnections() { return [CONN]; }
-  async getConnection(id: string) { return id === CONN.id ? CONN : null; }
+  readonly implementationStatus = 'mock' as const;
   async getTools(_c: ConnectionRecord) { return tools; }
-  async disconnect(_id: string) {}
 }

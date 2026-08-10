@@ -1,6 +1,16 @@
 import * as z from 'zod/v4';
-import type { ConnectorTool, ConnectionRecord, ToolRisk, ConnectorId } from '@mobile-agent/connector-core';
+import type {
+  ConnectionRecord,
+  ConnectorId,
+  ConnectorTool,
+  ToolRisk,
+} from './types';
 
+/**
+ * Development/test-only helpers. Production runtime code must never call
+ * these: connections in production come from real auth flows and live in the
+ * ConnectionStore.
+ */
 export function mockConn(
   connectorId: ConnectorId,
   displayName: string,
@@ -33,6 +43,7 @@ export function t(
     risk,
     capabilities: [],
     requiredScopes: [],
+    implementationStatus: 'development_mock',
     execute: async () => mockResult,
   };
 }

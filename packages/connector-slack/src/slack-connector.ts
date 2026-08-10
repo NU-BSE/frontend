@@ -1,8 +1,6 @@
 import * as z from 'zod/v4';
-import type { Connector, ConnectionRecord, ConnectorTool } from '@mobile-agent/connector-core';
-import { connId, mockConn, opt, str, t } from '@mobile-agent/connector-core';
-
-const CONN = mockConn('slack', 'Slack');
+import type { ConnectionRecord, ConnectorTool } from '@mobile-agent/connector-core';
+import { StoreBackedConnector, connId, opt, str, t } from '@mobile-agent/connector-core';
 
 const conversations = [
   t('slack.conversations.list', 'List conversations', 'List Slack channels and DMs', 'read',
@@ -34,13 +32,11 @@ const reactions = [
     { ok: true }),
 ];
 
-export class SlackConnector implements Connector {
+export class SlackConnector extends StoreBackedConnector {
   readonly id = 'slack' as const;
   readonly displayName = 'Slack';
-  async listConnections() { return [CONN]; }
-  async getConnection(id: string) { return id === CONN.id ? CONN : null; }
+  readonly implementationStatus = 'mock' as const;
   async getTools(_c: ConnectionRecord) {
     return [...conversations, ...messages, ...reactions];
   }
-  async disconnect(_id: string) {}
 }

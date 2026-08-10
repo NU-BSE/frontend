@@ -30,6 +30,11 @@ interface AiContextValue {
   status: EngineStatus;
   /** Set when the preferred engine failed and a fallback took over. */
   degradedReason: string | null;
+  /**
+   * The current in-process engine, or null when generation happens remotely
+   * (the agent layer then cannot use it for tool planning).
+   */
+  engine: LlmEngine | null;
   /** Starts the selected engine only after device assessment and user choice. */
   activateSelectedEngine(
     profile: MemoryProfile,
@@ -58,6 +63,8 @@ export function AiProvider({ children }: { children: React.ReactNode }) {
 
   const engineRef = useRef<LlmEngine>(initial.engine);
   const activationRef = useRef(0);
+  // Render-facing mirror of engineRef: refs must not be read during render.
+  const [engineValue, setEngineValue] = useState<LlmEngine>(initial.engine);
 
   const activateSelectedEngine = useCallback(
     async (
@@ -72,6 +79,7 @@ export function AiProvider({ children }: { children: React.ReactNode }) {
       const previous = engineRef.current;
 
       engineRef.current = descriptor.engine;
+      setEngineValue(descriptor.engine);
       setConnection(nextConnection.connection);
       setOrigin(nextConnection.origin);
       setDegradedReason(descriptor.degradedReason ?? null);
@@ -97,6 +105,7 @@ export function AiProvider({ children }: { children: React.ReactNode }) {
         if (activation !== activationRef.current) return;
         const fallback = createStubEngine();
         engineRef.current = fallback;
+        setEngineValue(fallback);
         setConnection(
           engineConnection(fallback, { systemPrompt: SYSTEM_PROMPT }),
         );
@@ -116,6 +125,7 @@ export function AiProvider({ children }: { children: React.ReactNode }) {
     const previous = engineRef.current;
     const idle = createStubEngine();
     engineRef.current = idle;
+    setEngineValue(idle);
     try {
       await previous.dispose?.();
     } catch {
@@ -152,6 +162,8 @@ export function AiProvider({ children }: { children: React.ReactNode }) {
       origin,
       status,
       degradedReason,
+      // Remote generation has no in-process engine the agent can plan with.
+      engine: origin === 'remote' ? null : engineValue,
       activateSelectedEngine,
       deactivateEngine,
     }),
@@ -160,6 +172,7 @@ export function AiProvider({ children }: { children: React.ReactNode }) {
       connection,
       deactivateEngine,
       degradedReason,
+      engineValue,
       origin,
       status,
     ],

@@ -46,6 +46,17 @@ export interface LlmEngine {
  *  whether their words left the device. */
 export type EngineOrigin = 'on-device' | 'remote' | 'stub';
 
+/**
+ * What a model can actually do. Tool use must never be pretended: an engine
+ * without `toolCalling` gets no tools, and a plain text completion is never
+ * passed off as a native tool call.
+ */
+export interface LlmCapabilities {
+  textGeneration: boolean;
+  toolCalling: boolean;
+  structuredOutput: boolean;
+}
+
 export interface EngineDescriptor {
   engine: LlmEngine;
   origin: EngineOrigin;

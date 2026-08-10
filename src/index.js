@@ -1,54 +1,18 @@
-import { dispatch } from './api/router.js';
-
-const API_SECRET = 'dev-secret-change-in-production';
-
+/**
+ * Cloudflare Worker entry: static SPA hosting only.
+ *
+ * The API used to be dispatched here via `./api/router.js`, which no longer
+ * exists — the backend moved to the FastAPI service (see EXPO_PUBLIC_API_URL
+ * in .env.example). The dead routing code and its hard-coded fallback secret
+ * were removed rather than restored; this worker now only serves the
+ * exported web app.
+ */
 export default {
   async fetch(request, env) {
     try {
       const url = new URL(request.url);
 
-      // API routes
-      if (url.pathname.startsWith('/auth/') ||
-          url.pathname.startsWith('/user/') ||
-          url.pathname.startsWith('/connectors') ||
-          url.pathname.startsWith('/tools/')) {
-
-        if (request.method === 'OPTIONS') {
-          return new Response(null, {
-            status: 204,
-            headers: {
-              'Access-Control-Allow-Origin': '*',
-              'Access-Control-Allow-Methods': 'POST, GET, PUT, DELETE, OPTIONS',
-              'Access-Control-Allow-Headers': 'Content-Type, Authorization',
-            },
-          });
-        }
-
-        let body = {};
-        try {
-          body = await request.json();
-        } catch {
-          // no body
-        }
-
-        const headers = Object.fromEntries(request.headers.entries());
-        const secret = env?.JWT_SECRET || API_SECRET;
-
-        const result = await dispatch(
-          request.method,
-          url.pathname,
-          body,
-          headers,
-          secret,
-        );
-
-        return new Response(result.body, {
-          status: result.status,
-          headers: result.headers,
-        });
-      }
-
-      // SPA static asset serving
+      // SPA static asset serving under /app
       if (url.pathname === '/app' || url.pathname === '/app/') {
         url.pathname = '/index.html';
       } else {
@@ -70,14 +34,13 @@ export default {
       }
 
       return await fetch(modifiedRequest);
-    } catch (err) {
+    } catch {
       return new Response(
         JSON.stringify({ message: 'Internal server error' }),
         {
           status: 500,
           headers: {
             'Content-Type': 'application/json; charset=utf-8',
-            'Access-Control-Allow-Origin': '*',
           },
         }
       );

@@ -1,8 +1,6 @@
 import * as z from 'zod/v4';
-import type { Connector, ConnectionRecord, ConnectorTool } from '@mobile-agent/connector-core';
-import { connId, mockConn, opt, str, t } from '@mobile-agent/connector-core';
-
-const CONN = mockConn('discord', 'Discord');
+import type { ConnectionRecord, ConnectorTool } from '@mobile-agent/connector-core';
+import { StoreBackedConnector, connId, opt, str, t } from '@mobile-agent/connector-core';
 
 const tools: ConnectorTool[] = [
   t('discord.guilds.list', 'List guilds', 'List Discord servers', 'read',
@@ -25,11 +23,9 @@ const tools: ConnectorTool[] = [
     { id: 'th1', name: 'Discussion thread' }),
 ];
 
-export class DiscordConnector implements Connector {
+export class DiscordConnector extends StoreBackedConnector {
   readonly id = 'discord' as const;
   readonly displayName = 'Discord';
-  async listConnections() { return [CONN]; }
-  async getConnection(id: string) { return id === CONN.id ? CONN : null; }
+  readonly implementationStatus = 'mock' as const;
   async getTools(_c: ConnectionRecord) { return tools; }
-  async disconnect(_id: string) {}
 }

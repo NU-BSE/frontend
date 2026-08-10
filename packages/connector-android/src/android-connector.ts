@@ -1,20 +1,43 @@
 import * as z from 'zod/v4';
-import type { Connector, ConnectionRecord, ConnectorTool, ToolExecutionContext } from '@mobile-agent/connector-core';
-import { ConnectorError } from '@mobile-agent/connector-core';
+import type {
+  ConnectionRecord,
+  ConnectorTool,
+  ToolImplementationStatus,
+} from '@mobile-agent/connector-core';
+import { StoreBackedConnector } from '@mobile-agent/connector-core';
 
-const MOCK_CONNECTION: ConnectionRecord = {
-  id: 'android-device', connectorId: 'android', displayName: 'This device',
-  status: 'connected', scopes: [], capabilities: [
-    'android.contacts.read', 'android.calendar.read', 'android.files.read',
-    'android.notifications.read', 'android.location.read', 'android.clipboard.read',
-    'android.apps.read', 'android.media.control',
-  ],
-  createdAt: Date.now(), updatedAt: Date.now(),
-};
-
-function tool(name: string, title: string, desc: string, risk: ConnectorTool['risk'],
-               inputSchema: z.ZodType<any>, mock: (i: any) => any): ConnectorTool {
-  return { name, title, description: desc, inputSchema, risk, capabilities: [], requiredScopes: [], execute: async (i: any) => mock(i) };
+/**
+ * Android on-device capabilities.
+ *
+ * Every tool is explicitly marked with its real implementation status —
+ * never implicitly. Until the native bridges land, all of them are
+ * `development_mock`: the production registry hides them, so the model can
+ * never receive a fake "done" from a device API we do not actually call.
+ *
+ * Native-bridge priority (Phase D+): contacts search, calendar read/write,
+ * share intent, open/deep-link intent, notifications, clipboard, file
+ * picker. Android permissions get added together with each real bridge.
+ */
+function tool(
+  name: string,
+  title: string,
+  desc: string,
+  risk: ConnectorTool['risk'],
+  inputSchema: z.ZodType<any>,
+  mock: (input: any) => unknown,
+  implementationStatus: ToolImplementationStatus = 'development_mock',
+): ConnectorTool {
+  return {
+    name,
+    title,
+    description: desc,
+    inputSchema,
+    risk,
+    capabilities: [],
+    requiredScopes: [],
+    implementationStatus,
+    execute: async (input: any) => mock(input),
+  };
 }
 
 const tools: ConnectorTool[] = [
@@ -68,11 +91,12 @@ const tools: ConnectorTool[] = [
     () => ({ playing: false })),
 ];
 
-export class AndroidConnector implements Connector {
+export class AndroidConnector extends StoreBackedConnector {
   readonly id = 'android' as const;
   readonly displayName = 'Android Device';
-  async listConnections() { return [MOCK_CONNECTION]; }
-  async getConnection(id: string) { return id === MOCK_CONNECTION.id ? MOCK_CONNECTION : null; }
-  async getTools(_c: ConnectionRecord) { return tools; }
-  async disconnect(_id: string) {}
+  readonly implementationStatus = 'mock' as const;
+
+  async getTools(_connection: ConnectionRecord) {
+    return tools;
+  }
 }

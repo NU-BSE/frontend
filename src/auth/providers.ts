@@ -1,9 +1,12 @@
+import type { ConnectorId } from '@mobile-agent/connector-core';
+
 /**
  * Auth provider registry.
  *
- * Each provider connects to an external service through the backend API.
- * OAuth tokens are stored on the backend — the frontend only holds a
- * connection reference.
+ * Each entry maps a UI-facing provider to the connector that owns its
+ * connection. Connection state is read from the shared persistent
+ * ConnectionStore — never from local component state — so "Connected" always
+ * means a real, authorized account.
  */
 export type ProviderId = 'telegram' | 'google' | 'facebook' | 'apple';
 
@@ -12,22 +15,22 @@ export interface AuthProvider {
   label: string;
   enabled: boolean;
   note?: string;
-  /** Backend connector id for connect/disconnect API calls. */
-  connectorId?: string;
+  /** Connector that owns this connection. */
+  connectorId?: ConnectorId;
 }
 
 export const AUTH_PROVIDERS: AuthProvider[] = [
   {
-    id: 'google',
-    label: 'Continue with Google',
+    id: 'telegram',
+    label: 'Connect Telegram',
     enabled: true,
-    connectorId: 'google-calendar',
+    connectorId: 'telegram-user',
   },
   {
-    id: 'telegram',
-    label: 'Continue with Telegram',
+    id: 'google',
+    label: 'Connect Google',
     enabled: true,
-    connectorId: 'telegram',
+    connectorId: 'google',
   },
   {
     id: 'facebook',

@@ -1,8 +1,6 @@
 import * as z from 'zod/v4';
-import type { Connector, ConnectionRecord, ConnectorTool } from '@mobile-agent/connector-core';
-import { connId, dt, mockConn, opt, str, t } from '@mobile-agent/connector-core';
-
-const CONN = mockConn('microsoft', 'Microsoft Account');
+import type { ConnectionRecord, ConnectorTool } from '@mobile-agent/connector-core';
+import { StoreBackedConnector, connId, dt, opt, str, t } from '@mobile-agent/connector-core';
 
 const mailRead = [
   t('microsoft.mail.search', 'Search mail', 'Search Outlook messages', 'read',
@@ -97,13 +95,11 @@ const todoWrite = [
     { id: 't1', status: 'completed' }),
 ];
 
-export class MicrosoftConnector implements Connector {
+export class MicrosoftConnector extends StoreBackedConnector {
   readonly id = 'microsoft' as const;
   readonly displayName = 'Microsoft';
-  async listConnections() { return [CONN]; }
-  async getConnection(id: string) { return id === CONN.id ? CONN : null; }
+  readonly implementationStatus = 'mock' as const;
   async getTools(_c: ConnectionRecord) {
     return [...mailRead, ...mailWrite, ...mailExt, ...calRead, ...calWrite, ...contactsRead, ...contactsWrite, ...driveRead, ...driveWrite, ...driveExt, ...todoRead, ...todoWrite];
   }
-  async disconnect(_id: string) {}
 }

@@ -1,8 +1,6 @@
 import * as z from 'zod/v4';
-import type { Connector, ConnectionRecord, ConnectorTool } from '@mobile-agent/connector-core';
-import { connId, dt, mockConn, opt, str, t } from '@mobile-agent/connector-core';
-
-const CONN = mockConn('google', 'Google Account');
+import type { ConnectionRecord, ConnectorTool } from '@mobile-agent/connector-core';
+import { StoreBackedConnector, connId, dt, opt, str, t } from '@mobile-agent/connector-core';
 
 const calRead = [
   t('google.calendar.list_events', 'List events', 'List calendar events in a range', 'read',
@@ -124,13 +122,11 @@ const tasks = [
     { deleted: true }),
 ];
 
-export class GoogleConnector implements Connector {
+export class GoogleConnector extends StoreBackedConnector {
   readonly id = 'google' as const;
   readonly displayName = 'Google';
-  async listConnections() { return [CONN]; }
-  async getConnection(id: string) { return id === CONN.id ? CONN : null; }
+  readonly implementationStatus = 'mock' as const;
   async getTools(_c: ConnectionRecord) {
     return [...calRead, ...calWrite, ...gmailRead, ...gmailWrite, ...gmailExt, ...drive, ...people, ...tasks];
   }
-  async disconnect(_id: string) {}
 }

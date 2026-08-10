@@ -31,6 +31,15 @@ function createMetrics(): AgentRunMetrics {
     plannerFailures: 0,
     infrastructureFailures: 0,
     authFailures: 0,
+    crossSourceSynthesis: false,
+    conflictingEvidence: false,
+    constraintSolving: false,
+    temporalReconciliation: false,
+    rankingOrOptimization: false,
+    dependentMultiStageReasoning: false,
+
+    unresolvedAmbiguity: false,
+    modelUncertain: false,
     permissionFailures: 0,
     userDenials: 0,
     invalidToolCalls: 0,
@@ -73,15 +82,35 @@ export class ReasoningComplexityMonitor {
 
   /** Called after the model produces a response. */
   recordModelResponse(response: AgentModelResult): void {
-    if (response.kind === 'final') {
-      // No tool calls — the planner decided to answer directly.
-    } else if (response.kind === 'tool_calls') {
-      // Check for replanning: when the planner changed course from a prior
-      // step (new tools or a different tool). A heuristic: if the first tool
-      // call in this step differs from the previous step's first tool call,
-      // treat it as a plan revision. Not perfect, but useful for loop
-      // detection and struggle scoring.
-      this.metrics.planRevisionCount += 1;
+    const reasoning = response.reasoning;
+
+    if (reasoning) {
+      this.metrics.crossSourceSynthesis ||= reasoning.crossSourceSynthesis === true;
+
+      this.metrics.conflictingEvidence ||= reasoning.conflictingEvidence === true;
+
+      this.metrics.constraintSolving ||= reasoning.constraintSolving === true;
+
+      this.metrics.temporalReconciliation ||= reasoning.temporalReconciliation === true;
+
+      this.metrics.rankingOrOptimization ||= reasoning.rankingOrOptimization === true;
+
+      this.metrics.dependentMultiStageReasoning ||=
+        reasoning.dependentMultiStageReasoning ===
+        true;
+
+      this.metrics.unresolvedAmbiguity ||= reasoning.unresolvedAmbiguity === true;
+
+      if ( reasoning.needsDeeperReasoning === true 
+        || ( typeof reasoning.confidence === 'number' && reasoning.confidence < 0.5 )
+      ) {
+        this.metrics.modelUncertain = true;
+      }
+    }
+
+    if ( response.kind === 'tool_calls' ) {
+      // Пока ничего автоматически не считаем replan.
+      // Это отдельная логика.
     }
   }
 

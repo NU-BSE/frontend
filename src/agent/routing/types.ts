@@ -37,6 +37,14 @@ export interface AgentRunMetrics {
   authFailures: number;
   permissionFailures: number;
   userDenials: number;
+  crossSourceSynthesis: boolean;
+  conflictingEvidence: boolean;
+  constraintSolving: boolean;
+  temporalReconciliation: boolean;
+  rankingOrOptimization: boolean;
+  dependentMultiStageReasoning: boolean;
+  unresolvedAmbiguity: boolean;
+  modelUncertain: boolean;
   invalidToolCalls: number;
   planRevisionCount: number;
   failedPlanCount: number;

@@ -60,9 +60,32 @@ export type AgentMessage =
       result: AgentToolResult;
     };
 
+export interface AgentReasoningMetadata {
+  crossSourceSynthesis?: boolean;
+  conflictingEvidence?: boolean;
+  constraintSolving?: boolean;
+  temporalReconciliation?: boolean;
+  rankingOrOptimization?: boolean;
+  dependentMultiStageReasoning?: boolean;
+
+  unresolvedAmbiguity?: boolean;
+
+  /**
+   * Planner self-assessment only.
+   * Must never directly select a model tier.
+   */
+  confidence?: number;
+
+  /**
+   * Advisory signal only.
+   * Router decides whether escalation is justified.
+   */
+  needsDeeperReasoning?: boolean;
+}
+
 export type AgentModelResult =
-  | { kind: 'final'; text: string }
-  | { kind: 'tool_calls'; text?: string; toolCalls: AgentToolCall[] };
+  | { kind: 'final'; text: string; reasoning?: AgentReasoningMetadata; }
+  | { kind: 'tool_calls'; text?: string; toolCalls: AgentToolCall[]; reasoning?: AgentReasoningMetadata; };
 
 /** Compact, secret-free description of what the user has connected. */
 export interface ConnectionSummary {

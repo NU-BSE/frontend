@@ -24,20 +24,19 @@ export function buildSignals(
       metrics.totalToolResultItems >= ROUTING_CONFIG.largeContextItemThreshold,
 
     // Hard reasoning signals — false until planner metadata is available.
-    crossSourceSynthesis: false,
-    conflictingEvidence: false,
-    constraintSolving: false,
-    temporalReconciliation: false,
-    rankingOrOptimization: false,
-    dependentMultiStageReasoning: false,
+    crossSourceSynthesis: metrics.crossSourceSynthesis,
+    conflictingEvidence: metrics.conflictingEvidence,
+    constraintSolving: metrics.constraintSolving,
+    temporalReconciliation: metrics.temporalReconciliation,
+    rankingOrOptimization: metrics.rankingOrOptimization,
+    dependentMultiStageReasoning: metrics.dependentMultiStageReasoning,
+    unresolvedAmbiguity: metrics.unresolvedAmbiguity,
+    modelUncertain: metrics.modelUncertain,
 
     failedPlans: consecutiveFailedPlans,
     replans: consecutiveReplans,
     repeatedToolPattern: isRepeating,
     invalidToolCalls: metrics.invalidToolCalls,
     repeatedToolFailures: metrics.failedToolCalls,
-
-    unresolvedAmbiguity: false,
-    modelUncertain: false,
   };
 }

@@ -40,13 +40,17 @@ export class LoopDetector {
    */
   record(call: AgentToolCall, result: AgentToolResult): void {
     if (result.status === 'error') {
-      const kind = classifyRoutingFailure(result);
+      const kind =
+        classifyRoutingFailure(result);
+
       if (kind !== 'planner') {
+        this.fingerprints.length = 0;
         return;
       }
     }
 
     if (result.status === 'user_denied') {
+      this.fingerprints.length = 0;
       return;
     }
 

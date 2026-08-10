@@ -8,6 +8,36 @@ import type {
   AgentModelResult,
 } from '../types';
 
+const plannerReasoningSchema = z
+  .object({
+    crossSourceSynthesis:
+      z.boolean().optional(),
+
+    conflictingEvidence:
+      z.boolean().optional(),
+
+    constraintSolving:
+      z.boolean().optional(),
+
+    temporalReconciliation:
+      z.boolean().optional(),
+
+    rankingOrOptimization:
+      z.boolean().optional(),
+
+    dependentMultiStageReasoning:
+      z.boolean().optional(),
+
+    unresolvedAmbiguity:
+      z.boolean().optional(),
+
+    confidence:
+      z.number().min(0).max(1).optional(),
+
+    needsDeeperReasoning:
+      z.boolean().optional(),
+  })
+  .strict();
 /**
  * Strict structured-planner protocol for local text models without native
  * function calling. The model must answer with exactly one JSON object; every
@@ -15,17 +45,29 @@ import type {
  * prose is never parsed as a tool call — an unparseable answer degrades to
  * a final text reply, never to a guessed action.
  */
-const plannerResponseSchema = z.discriminatedUnion('type', [
-  z.object({
-    type: z.literal('final'),
-    content: z.string().min(1),
-  }),
-  z.object({
-    type: z.literal('tool_call'),
-    tool: z.string().min(1),
-    arguments: z.record(z.string(), z.unknown()),
-  }),
-]);
+const plannerResponseSchema =
+  z.discriminatedUnion('type', [
+    z.object({
+      type: z.literal('final'),
+      content: z.string().min(1),
+
+      reasoning:
+        plannerReasoningSchema.optional(),
+    }),
+
+    z.object({
+      type: z.literal('tool_call'),
+      tool: z.string().min(1),
+
+      arguments: z.record(
+        z.string(),
+        z.unknown(),
+      ),
+
+      reasoning:
+        plannerReasoningSchema.optional(),
+    }),
+  ]);
 
 const MAX_TOOL_RESULT_CHARS = 2000;
 
@@ -66,11 +108,17 @@ function protocolInstructions(input: AgentModelInput): string {
     'To call one tool: {"type":"tool_call","tool":"<name>","arguments":{...}}',
     'To answer the user: {"type":"final","content":"<text>"}',
     'Rules:',
-    '- Call one tool at a time, then wait for the tool result shown in the conversation.',
-    '- Never invent tool names, connection ids or chat ids — use only values present in this prompt or in tool results.',
-    '- Always pass the connectionId of a connected account from the list below.',
-    '- Actions with side effects (sending messages, creating events) require user approval; just call the tool, the app handles confirmation.',
-    '- If the needed service is not connected, reply with {"type":"final"} saying so.',
+    '- You may include an optional "reasoning" object describing the reasoning required for the current task.',
+    '- Set reasoning flags to true only when they genuinely apply.',
+    '- crossSourceSynthesis: information from multiple sources must be combined to reach one conclusion.',
+    '- conflictingEvidence: sources or constraints conflict and must be reconciled.',
+    '- constraintSolving: several requirements must all be satisfied together.',
+    '- temporalReconciliation: dates, times, ordering, recency, or relative time require reconciliation.',
+    '- rankingOrOptimization: several valid options must be ranked or optimized.',
+    '- dependentMultiStageReasoning: later actions depend materially on interpreting earlier results.',
+    '- unresolvedAmbiguity: important ambiguity remains and may require user clarification.',
+    '- confidence is between 0 and 1.',
+    '- needsDeeperReasoning is advisory only. Never choose or name a model tier.',
     '',
     'Available tools:',
     ...toolLines,
@@ -237,7 +285,7 @@ export function createStructuredPlanner(engine: LlmEngine): AgentModel {
       }
 
       if (parsed.type === 'final') {
-        return { kind: 'final', text: parsed.content };
+        return { kind: 'final', text: parsed.content, reasoning: parsed.reasoning };
       }
 
       const known = input.tools.some((tool) => tool.name === parsed.tool);
@@ -264,6 +312,7 @@ export function createStructuredPlanner(engine: LlmEngine): AgentModel {
             args: parsed.arguments,
           },
         ],
+        reasoning: parsed.reasoning,
       };
     },
   };

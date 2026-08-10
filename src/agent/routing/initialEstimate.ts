@@ -93,11 +93,6 @@ export function estimateInitialTier(userText: string): InitialRoutingEstimate {
     }
   }
 
-  // Multiple explicit constraints with optimization → strong signal
-  if (score >= 3 && optimizationKeywords.some((kw) => lower.includes(kw))) {
-    return { suggestedTier: 'normal', score, reasons };
-  }
-
   // Strong constraint + optimization + synthesis → expert candidate
   if (
     score >= 5 &&
@@ -106,6 +101,11 @@ export function estimateInitialTier(userText: string): InitialRoutingEstimate {
     synthesisKeywords.some((kw) => lower.includes(kw))
   ) {
     return { suggestedTier: 'expert', score, reasons };
+  }
+  
+  // Multiple explicit constraints with optimization → strong signal
+  if (score >= 3 && optimizationKeywords.some((kw) => lower.includes(kw))) {
+    return { suggestedTier: 'normal', score, reasons };
   }
 
   if (score >= 3) {

@@ -288,7 +288,6 @@ function calculateReasoningScoreForMonitor(s: ReasoningSignals): number {
   score += Math.min(s.replans, 2) * 2;
   if (s.repeatedToolPattern) score += 4;
   if (s.invalidToolCalls >= 2) score += 3;
-  if (s.repeatedToolFailures >= 2) score += 2;
   if (s.unresolvedAmbiguity) score += 1;
   if (s.modelUncertain) score += 1;
   return score;

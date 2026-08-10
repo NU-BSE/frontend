@@ -98,11 +98,6 @@ export function calculateReasoningScore(
     reasons.push('repeated_invalid_tool_calls');
   }
 
-  if (s.repeatedToolFailures >= 2) {
-    score += 2;
-    reasons.push('repeated_tool_failures');
-  }
-
   if (s.unresolvedAmbiguity) {
     score += 1;
     reasons.push('unresolved_ambiguity');

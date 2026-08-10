@@ -3,6 +3,7 @@ import type {
   AgentToolResult,
 } from '../types';
 import type { ToolCallFingerprint } from './types';
+import { classifyRoutingFailure } from './failureClassification';
 import { ROUTING_CONFIG } from './config';
 
 /**
@@ -37,7 +38,18 @@ export class LoopDetector {
    * Call after every tool call. The detector maintains a sliding window of
    * recent fingerprints.
    */
-  record(call: AgentToolCall, _result: AgentToolResult): void {
+  record(call: AgentToolCall, result: AgentToolResult): void {
+    if (result.status === 'error') {
+      const kind = classifyRoutingFailure(result);
+      if (kind !== 'planner') {
+        return;
+      }
+    }
+
+    if (result.status === 'user_denied') {
+      return;
+    }
+
     this.fingerprints.push({
       toolName: call.toolName,
       normalizedArgsHash: normalizeArgs(call.args),

@@ -1,5 +1,4 @@
 import type {
-  AgentErrorCode,
   AgentToolResult,
 } from '../types';
 

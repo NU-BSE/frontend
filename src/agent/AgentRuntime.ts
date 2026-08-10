@@ -161,11 +161,6 @@ export class AgentRuntime {
     const runId = `run_${Date.now().toString(36)}_${this.runCounter}`;
     const routingStartedAt = Date.now();
 
-    const routingTelemetry =
-      createRunTelemetry(
-        runId,
-        this.currentTier,
-      );
     const steps: AgentRunStep[] = [];
     let finalAnswer: string | undefined;
 
@@ -188,6 +183,12 @@ export class AgentRuntime {
     this.currentTier = initialEstimate.suggestedTier;
 
     this.routingMonitor.currentTier = this.currentTier;
+
+    const routingTelemetry =
+      createRunTelemetry(
+        runId,
+        this.currentTier,
+      );
 
     try {
       this.pushMessage({
@@ -293,8 +294,18 @@ export class AgentRuntime {
         // Check whether the current tier needs escalation after this tool batch.
         const routingDecision = this.routingMonitor.chooseTier();
         if (routingDecision.tier !== this.currentTier) {
+          const previousTier = this.currentTier;
+
           this.currentTier = routingDecision.tier;
           this.routingMonitor.applyDecision(routingDecision);
+
+          routingTelemetry.transitions.push({
+            from: previousTier,
+            to: this.currentTier,
+            reason: routingDecision.reason,
+            score: routingDecision.score,
+            step,
+          });
 
           if (this.currentTier === 'expert') {
             routingTelemetry.expertTriggered = true;

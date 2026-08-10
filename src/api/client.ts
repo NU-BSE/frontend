@@ -34,8 +34,57 @@ const REQUEST_TIMEOUT_MS = 15_000;
  */
 function baseUrl(): string {
   const configured = (process.env.EXPO_PUBLIC_API_URL ?? 'http://localhost:8000').replace(/\/+$/u, '');
+  if (__DEV__) warnAboutBaseUrl(configured);
   if (Platform.OS !== 'android') return configured;
   return configured.replace(/^(https?:\/\/)(localhost|127\.0\.0\.1)(?=[:/]|$)/u, '$110.0.2.2');
+}
+
+/** Hosts that are genuinely reachable over cleartext during development. */
+const LOCAL_HOSTS = /^(localhost|127\.0\.0\.1|10\.0\.2\.2|192\.168\.|10\.|172\.(1[6-9]|2\d|3[01])\.)/u;
+
+/**
+ * Flag base URLs that produce misleading failures rather than honest ones.
+ *
+ * Both cases below surface as an error that points at the backend when the
+ * fault is in this one environment variable, so they are worth naming loudly
+ * at the point of misconfiguration. Development only — this never runs in a
+ * release build, and it never throws, because a wrong URL should still make
+ * the request and let the real error speak.
+ */
+function warnAboutBaseUrl(configured: string): void {
+  const match = /^(https?):\/\/([^/]*)(\/.*)?$/u.exec(configured);
+
+  if (!match || !match[2]) {
+    console.warn(
+      `[api] EXPO_PUBLIC_API_URL is malformed: "${configured}". Expected an ` +
+        'origin like https://api.creepy.im — check for a missing or extra slash.',
+    );
+    return;
+  }
+
+  const [, scheme, host, path] = match;
+
+  /*
+   * A 301 from http to https turns a POST into a GET, so the redirected call
+   * lands on a POST-only route as a GET and the server answers 405. That reads
+   * as "the endpoint is broken" when the only problem is the scheme.
+   */
+  if (scheme === 'http' && !LOCAL_HOSTS.test(host)) {
+    console.warn(
+      `[api] EXPO_PUBLIC_API_URL uses http:// for remote host "${host}". A ` +
+        'redirect to https downgrades POST to GET, which returns 405 from ' +
+        'POST-only routes. Use https://.',
+    );
+  }
+
+  // The backend mounts /auth, /users and friends at the root.
+  if (path && path !== '/') {
+    console.warn(
+      `[api] EXPO_PUBLIC_API_URL has a path suffix ("${path}"). The backend ` +
+        'serves routes from the root, so this makes every request 404. Use ' +
+        'the origin only.',
+    );
+  }
 }
 
 function apiUrl(path: string): string {
@@ -128,9 +177,7 @@ export async function verifyEmailCode(input: VerifyCodeInput): Promise<AuthToken
 export async function refreshAccessToken(refreshToken: string): Promise<{ accessToken: string }> {
   return post('/auth/refresh', { refreshToken });
 }
-export async function getSession(): Promise<{ email: string; profile: UserProfile | null }> {
-  return get('/auth/session');
-}
+/** Backed by `GET /users/me`. The backend exposes no `/auth/session` route. */
 export async function getUserProfile(): Promise<UserProfile> {
   return get('/users/me');
 }

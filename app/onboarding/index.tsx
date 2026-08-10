@@ -11,6 +11,11 @@ import {
 } from "react-native";
 
 import { requestEmailCode } from "@/auth/emailAuth";
+import {
+  canonicalName,
+  isValidName,
+  NAME_MIN_LENGTH,
+} from "@/features/onboarding/name";
 import { OnboardingNavBar } from "@/components/OnboardingNavBar";
 import { Screen } from "@/components/Screen";
 import { Text } from "@/components/Text";
@@ -27,13 +32,31 @@ export default function OnboardingProfile() {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const normalizedName = name.trim();
+  const normalizedName = useMemo(() => canonicalName(name), [name]);
   const normalizedEmail = email.trim().toLowerCase();
+  const nameIsValid = useMemo(() => isValidName(name), [name]);
   const emailIsValid = useMemo(
     () => EMAIL_PATTERN.test(normalizedEmail),
     [normalizedEmail],
   );
-  const canContinue = normalizedName.length >= 2 && emailIsValid && !saving;
+  const canContinue = nameIsValid && emailIsValid && !saving;
+
+  /**
+   * Why Continue is unavailable, in words.
+   *
+   * Both fields are required, but only the email announced itself — a missing
+   * or one-character name left the button inert with nothing on screen to
+   * explain it, which reads as "the app is broken" rather than "finish the
+   * form". Stated as guidance rather than an error, since not-yet-filled is
+   * the normal starting state.
+   */
+  const blockedReason = saving
+    ? null
+    : !nameIsValid
+      ? 'Enter your name to continue.'
+      : !emailIsValid
+        ? 'Enter a valid email address to continue.'
+        : null;
 
   const advance = useCallback(async () => {
     if (!canContinue) return;
@@ -108,6 +131,11 @@ export default function OnboardingProfile() {
                 style={styles.input}
                 value={name}
               />
+              {name.length > 0 && !nameIsValid ? (
+                <Text variant="bodySmall" tone="danger">
+                  Enter at least {NAME_MIN_LENGTH} characters.
+                </Text>
+              ) : null}
             </View>
 
             <View style={styles.field}>
@@ -140,6 +168,14 @@ export default function OnboardingProfile() {
                 tone="danger"
               >
                 {error}
+              </Text>
+            ) : blockedReason ? (
+              <Text
+                accessibilityLiveRegion="polite"
+                variant="bodySmall"
+                tone="secondary"
+              >
+                {blockedReason}
               </Text>
             ) : null}
             <Pressable

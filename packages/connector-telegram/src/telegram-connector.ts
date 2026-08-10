@@ -1,5 +1,5 @@
 import * as z from 'zod/v4';
-import { connId, mockConn, str, t } from '@mobile-agent/connector-core';
+import { mockConn, str, t } from '@mobile-agent/connector-core';
 import type { Connector, ConnectionRecord, ConnectorTool } from '@mobile-agent/connector-core';
 
 const botConn = mockConn('telegram-bot', 'Telegram Bot');
@@ -17,7 +17,7 @@ const botTools: ConnectorTool[] = [
     'Send Message',
     'Send a text message via the bot',
     'external_side_effect',
-    connId.and(z.object({ chatId, text: str })),
+    z.object({ connectionId: str, chatId, text: str }),
     { ok: true },
   ),
   t(
@@ -25,7 +25,7 @@ const botTools: ConnectorTool[] = [
     'Edit Message',
     'Edit a previously sent message',
     'external_side_effect',
-    connId.and(z.object({ chatId, messageId: z.number(), text: str })),
+    z.object({ connectionId: str, chatId, messageId: z.number(), text: str }),
     { ok: true },
   ),
   t(
@@ -33,7 +33,7 @@ const botTools: ConnectorTool[] = [
     'Delete Message',
     'Delete a message sent by the bot',
     'external_side_effect',
-    connId.and(z.object({ chatId, messageId: z.number() })),
+    z.object({ connectionId: str, chatId, messageId: z.number() }),
     { ok: true },
   ),
   t(
@@ -41,7 +41,7 @@ const botTools: ConnectorTool[] = [
     'Send Document',
     'Send a document via the bot',
     'external_side_effect',
-    connId.and(z.object({ chatId, document: str })),
+    z.object({ connectionId: str, chatId, document: str }),
     { ok: true },
   ),
 ];
@@ -52,7 +52,7 @@ const userTools: ConnectorTool[] = [
     'Search Chats',
     'Search user chats and contacts',
     'read',
-    connId.and(z.object({ query: str })),
+    z.object({ connectionId: str, query: str }),
     [],
   ),
   t(
@@ -60,7 +60,7 @@ const userTools: ConnectorTool[] = [
     'Get Recent Messages',
     'Retrieve recent messages from a chat',
     'read',
-    connId.and(z.object({ chatId, limit: z.number().optional().default(20) })),
+    z.object({ connectionId: str, chatId, limit: z.number().optional().default(20) }),
     [],
   ),
   t(
@@ -68,7 +68,7 @@ const userTools: ConnectorTool[] = [
     'Send Message',
     'Send a text message as the user',
     'external_side_effect',
-    connId.and(z.object({ chatId, text: str })),
+    z.object({ connectionId: str, chatId, text: str }),
     { ok: true },
   ),
 ];

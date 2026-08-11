@@ -1,4 +1,5 @@
 import { ConnectorRegistry } from '@mobile-agent/connector-registry';
+import type { ConnectionStore } from '@mobile-agent/connector-core';
 import { AndroidConnector } from '@mobile-agent/connector-android';
 import { GoogleConnector } from '@mobile-agent/connector-google';
 import { TelegramConnector } from '@mobile-agent/connector-telegram';
@@ -12,8 +13,14 @@ import { DiscordConnector } from '@mobile-agent/connector-discord';
 import { SpotifyConnector } from '@mobile-agent/connector-spotify';
 import { IntentConnector } from '@mobile-agent/connector-intents';
 
-export function createConnectorRegistry(): ConnectorRegistry {
-  const registry = new ConnectorRegistry();
+/**
+ * Registers every connector, but tools only reach the agent for accounts the
+ * `connections` store says are actually linked.
+ */
+export function createConnectorRegistry(
+  connections: ConnectionStore,
+): ConnectorRegistry {
+  const registry = new ConnectorRegistry(connections);
 
   registry.register(new AndroidConnector());
   registry.register(new GoogleConnector());

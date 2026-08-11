@@ -10,6 +10,7 @@ import {
 } from '@mobile-agent/mcp-client';
 
 import { createConnectorRegistry } from './create-connector-registry';
+import { PersistentConnectionStore } from '@/connectors/connection-store';
 
 let runtimePromise: Promise<LocalMcpRuntime> | null = null;
 let approvalStore: InMemoryApprovalStore | null = null;
@@ -30,6 +31,12 @@ let approvalService: InMemoryApprovalService | null = null;
 export function getLocalMcpRuntime(): Promise<LocalMcpRuntime> {
   if (!runtimePromise) {
     const store = new InMemoryApprovalStore();
+    /*
+     * Connectedness comes from here, not from the connectors. Until an
+     * authorization completes and writes a record, listActiveTools() is empty
+     * and the agent is told about no third-party tools at all.
+     */
+    const connectionStore = new PersistentConnectionStore();
     const service = new InMemoryApprovalService();
 
     runtimePromise = createLocalMcpRuntime(
@@ -38,7 +45,7 @@ export function getLocalMcpRuntime(): Promise<LocalMcpRuntime> {
         approvals: store,
       },
       {
-        registry: createConnectorRegistry(),
+        registry: createConnectorRegistry(connectionStore),
         policyEngine: new DefaultPolicyEngine(),
         approvalService: service,
       },
@@ -92,6 +99,20 @@ export async function approveConnectorTool(approvalId: string): Promise<void> {
   }
 
   await approvalService.approve(approvalId);
+}
+
+/**
+ * Rebuild the runtime so a newly linked (or unlinked) account takes effect.
+ *
+ * Connector tools are registered once, while the MCP server is being
+ * constructed — the published tool list is a snapshot of what was connected at
+ * that moment. That is what keeps unconnected services invisible to the agent,
+ * but it also means a connection made later is not visible until the runtime
+ * is rebuilt. Call this after any change to the connection store.
+ */
+export async function rebuildLocalMcpRuntime(): Promise<LocalMcpRuntime> {
+  await closeLocalMcpRuntime();
+  return getLocalMcpRuntime();
 }
 
 export async function closeLocalMcpRuntime(): Promise<void> {

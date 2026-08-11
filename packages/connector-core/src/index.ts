@@ -23,4 +23,6 @@ export { ConnectorError, RateLimitError } from "./errors";
 
 export type { ConnectionStore } from "./store";
 
+export { InMemoryConnectionStore } from "./memory-connection-store";
+
 export { connId, dt, mockConn, opt, str, t } from "./mock-helper";

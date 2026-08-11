@@ -76,6 +76,8 @@ const userTools: ConnectorTool[] = [
 export class TelegramConnector implements Connector {
   readonly id = 'telegram-bot' as const;
   readonly displayName = 'Telegram';
+  /** One connector, two account kinds: the Bot API and a personal TDLib session. */
+  readonly ownedConnectorIds = ['telegram-bot', 'telegram-user'] as const;
 
   async listConnections(): Promise<ConnectionRecord[]> {
     return [botConn, userConn];

@@ -69,6 +69,13 @@ export interface ConnectorTool<
 export interface Connector {
   readonly id: ConnectorId;
   readonly displayName: string;
+  /**
+   * Connection namespaces this connector serves, when it serves more than its
+   * own id. Telegram is one connector backing two distinct account kinds —
+   * a bot and a personal TDLib session — with different tools for each.
+   * Defaults to `[id]`.
+   */
+  readonly ownedConnectorIds?: readonly ConnectorId[];
   listConnections(): Promise<ConnectionRecord[]>;
   getConnection(connectionId: string): Promise<ConnectionRecord | null>;
   getTools(connection: ConnectionRecord): Promise<ConnectorTool<any, any>[]>;

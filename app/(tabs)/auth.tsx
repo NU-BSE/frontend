@@ -3,13 +3,14 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useRouter } from "expo-router";
 import { ScrollView, StyleSheet, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { AUTH_PROVIDERS } from "@/auth/providers";
 import { clearAuthSession, getAuthenticatedEmail } from "@/auth/emailAuth";
 import { useAi } from "@/ai/AiProvider";
 import { Button } from "@/components/Button";
 import { Screen } from "@/components/Screen";
 import { Text } from "@/components/Text";
 import { TopAppBar } from "@/components/TopAppBar";
+import { ConnectorGrid } from "@/features/connectors/ConnectorGrid";
+import { connectUnavailableMessage } from "@/features/connectors/connect";
 import { getMemoryProfile, resetOnboarding } from "@/storage/prefs";
 import { gutter, palette, radius, shadow, spacing } from "@/theme/tokens";
 
@@ -18,12 +19,15 @@ export default function Account() {
   const router = useRouter();
   const queryClient = useQueryClient();
   const { origin, status, degradedReason, deactivateEngine } = useAi();
+  const [notice, setNotice] = useState<string | null>(null);
+
   /*
-   * Starts empty — see the note in app/onboarding/connections.tsx. Seeding
-   * from the enabled providers made every account show Google and Telegram as
-   * Connected regardless of whether they were.
+   * Always empty — see src/features/connectors/connect.ts. Nothing can be
+   * legitimately connected until the OAuth flow exists, and the previous code
+   * seeded this from the enabled providers, so every account displayed Google
+   * and Telegram as Connected regardless of whether they were.
    */
-  const [connectedIds, setConnectedIds] = useState<Set<string>>(() => new Set());
+  const connectedIds = new Set<string>();
 
   const { data: email } = useQuery({
     queryKey: ["authenticated-email"],
@@ -52,15 +56,6 @@ export default function Account() {
     },
   });
 
-  const toggleConnector = (providerId: string) => {
-    setConnectedIds((prev) => {
-      const next = new Set(prev);
-      if (next.has(providerId)) next.delete(providerId);
-      else next.add(providerId);
-      return next;
-    });
-  };
-
   return (
     <Screen>
       <TopAppBar />
@@ -79,22 +74,19 @@ export default function Account() {
 
         <View style={styles.section}>
           <Text variant="headline">Connectors</Text>
-          {AUTH_PROVIDERS.map((provider) => {
-            const connected = connectedIds.has(provider.id);
-            return (
-              <View key={provider.id} style={styles.provider}>
-                <Button
-                  label={connected ? `${provider.label} — Connected` : provider.label}
-                  variant={connected ? "primary" : "secondary"}
-                  disabled={!provider.enabled}
-                  onPress={() => toggleConnector(provider.id)}
-                />
-                {!provider.enabled && provider.note ? (
-                  <Text variant="bodySmall" tone="muted" style={styles.note}>{provider.note}</Text>
-                ) : null}
-              </View>
-            );
-          })}
+          <ConnectorGrid
+            connectedIds={connectedIds}
+            onConnect={(entry) => setNotice(connectUnavailableMessage(entry))}
+          />
+          {notice ? (
+            <Text
+              accessibilityLiveRegion="polite"
+              variant="bodySmall"
+              tone="secondary"
+            >
+              {notice}
+            </Text>
+          ) : null}
         </View>
 
         <View style={styles.section}>
@@ -130,6 +122,4 @@ const styles = StyleSheet.create({
   section: { gap: spacing.md },
   card: { backgroundColor: palette.surface, borderRadius: radius.md, borderWidth: 1, borderColor: palette.borderSoft, padding: spacing.lg, gap: spacing.sm, ...shadow.card },
   cardRow: { flexDirection: "row", justifyContent: "space-between", gap: spacing.md },
-  provider: { gap: spacing.xs },
-  note: { paddingHorizontal: spacing.xs },
 });

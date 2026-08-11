@@ -1,5 +1,14 @@
 import { ROUTING_CONFIG } from './config';
 import type { StepProgress } from './types';
+import type { AgentToolCall, AgentToolResult } from '../types';
+
+/** A single tool invocation result collected during one planning step. */
+export interface StepToolResult {
+  call: AgentToolCall;
+  result: AgentToolResult;
+  /** True when the execution was blocked by the idempotency ledger. */
+  deduplicated?: boolean;
+}
 
 /**
  * Tracks meaningful progress across planning turns.  Raw step / tool-call
@@ -8,7 +17,6 @@ import type { StepProgress } from './types';
  */
 export class ProgressTracker {
   private consecutiveNoProgressSteps = 0;
-  private lastProgress: StepProgress | null = null;
 
   /** Call after each batch of tool results. */
   recordProgress(progress: StepProgress): void {
@@ -23,8 +31,6 @@ export class ProgressTracker {
     } else {
       this.consecutiveNoProgressSteps += 1;
     }
-
-    this.lastProgress = progress;
   }
 
   /**
@@ -45,35 +51,67 @@ export class ProgressTracker {
 
   reset(): void {
     this.consecutiveNoProgressSteps = 0;
-    this.lastProgress = null;
   }
 }
 
 /**
- * Heuristic progress detector.  Does not model the planner — it looks at
- * the observable effects of tool calls.
+ * Determines whether a planning step made meaningful progress.
+ *
+ * Inspects actual tool results — not the idempotency ledger.
+ *
+ * Progress exists when at least one tool call:
+ *   - successfully returned new data (new entity resolved, new source read);
+ *   - successfully completed a side-effect (actionCompleted);
+ *   - resolved a previous constraint/ambiguity.
+ *
+ * No progress:
+ *   - deduplicated side-effects (ledger blocked execution);
+ *   - network / auth / permission / user-denied failures;
+ *   - tool validation errors (planner-level failures);
+ *   - repeating the same tool with identical args and identical outcome.
  */
 export function detectStepProgress(
-  toolNames: string[],
-  previousToolNames: string[],
-  hadNewResults: boolean,
-  actionFailed: boolean,
+  results: StepToolResult[],
+  previousSuccessResults: StepToolResult[],
+  wasReplan: boolean,
 ): StepProgress {
-  const toolsChanged =
-    toolNames.length > 0 &&
-    previousToolNames.length > 0 &&
-    !arraysMatch(toolNames, previousToolNames);
+  let newEntityResolved = false;
+  let newSourceRead = false;
+  let actionCompleted = false;
+
+  for (const { call, result, deduplicated } of results) {
+    if (deduplicated) {
+      // Already-executed action — not new progress.
+      continue;
+    }
+
+    if (result.status === 'success') {
+      // Successful read with data = new entity or new source.
+      if (result.data !== undefined) {
+        newEntityResolved = true;
+        newSourceRead = true;
+      }
+
+      // Is this a successful outcome that was NOT seen before?
+      const prevMatch = previousSuccessResults.find(
+        (prev) =>
+          prev.call.toolName === call.toolName &&
+          JSON.stringify(prev.call.args) === JSON.stringify(call.args),
+      );
+
+      if (!prevMatch) {
+        actionCompleted = true;
+      }
+    }
+
+    // Failures are never treated as progress.
+  }
 
   return {
-    newEntityResolved: hadNewResults && !actionFailed,
+    newEntityResolved,
     newConstraintResolved: false,
-    newSourceRead: hadNewResults,
-    actionCompleted: hadNewResults && !actionFailed,
-    planChanged: toolsChanged,
+    newSourceRead,
+    actionCompleted,
+    planChanged: wasReplan,
   };
-}
-
-function arraysMatch(a: string[], b: string[]): boolean {
-  if (a.length !== b.length) return false;
-  return a.every((item, index) => item === b[index]);
 }

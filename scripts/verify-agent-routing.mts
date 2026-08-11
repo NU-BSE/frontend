@@ -590,7 +590,44 @@ async function main(): Promise<void> {
 
     const signals = monitor.snapshot();
     // search → send is a normal planned sequence, not a replan.
-    assert(signals.replans >= 1, 'tool change triggers auto replan');
+    assertEq(signals.replans, 0, 'search to send is not a replan');
+  }
+
+  console.log('real replan after planner failure:');
+  {
+    const monitor = new ReasoningComplexityMonitor();
+    monitor.currentTier = 'fast';
+
+    // Step 1: model tries contacts.search — planner failure.
+    monitor.recordModelResponse({
+      kind: 'tool_calls',
+      toolCalls: [
+        { id: 'c1', toolName: 'contacts.search',
+          args: { query: 'Daniyar' } },
+      ],
+    });
+
+    monitor.recordToolCall({
+      id: 'c1', toolName: 'contacts.search',
+      args: { query: 'Daniyar' },
+    });
+    monitor.recordToolResult(
+      { id: 'c1', toolName: 'contacts.search',
+        args: { query: 'Daniyar' } },
+      { status: 'error', error: 'Tool not available', errorCode: 'TOOL_VALIDATION_ERROR' },
+    );
+
+    // Step 2: model switches to a different approach — real replan.
+    monitor.recordModelResponse({
+      kind: 'tool_calls',
+      toolCalls: [
+        { id: 'c2', toolName: 'telegram.user.search_chats',
+          args: { connectionId: 'test', query: 'Daniyar' } },
+      ],
+    });
+
+    const signals = monitor.snapshot();
+    assertEq(signals.replans, 1, 'planner failure + different tool = replan');
   }
 
   console.log('side-effect dedup: same action not executed twice:');

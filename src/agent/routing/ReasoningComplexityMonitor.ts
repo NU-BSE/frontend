@@ -73,8 +73,10 @@ export class ReasoningComplexityMonitor {
   private consecutiveReplans = 0;
   /** Tracks repeated failures of the same pattern. */
   private failurePatterns = new Map<string, number>();
-  /** Tool names from the previous planning turn. */
+  /** Tool names from the previous planning turn, used for progress tracking. */
   private previousStepToolNames: string[] = [];
+  /** Was the previous step a planner failure? Used for replan detection. */
+  private previousStepFailed = false;
 
   /** The current tier (updated when the runtime escalates). */
   get currentTier(): ModelTier {
@@ -119,23 +121,18 @@ export class ReasoningComplexityMonitor {
     }
 
     if ( response.kind === 'tool_calls' ) {
+      // Detect replan: a planner failure in the previous step followed by
+      // a different tool choice means the model revised its approach.
       const currentToolNames = response.toolCalls.map((tc) => tc.toolName);
 
-      // Auto-detect replan: the tool set changed materially from the
-      // previous step (new tool added, or a different tool entirely).
-      const previousTools = new Set(this.previousStepToolNames);
-      const hasNewTool = currentToolNames.some(
-        (name) => !previousTools.has(name),
-      );
-      const hasDroppedTool = this.previousStepToolNames.some(
-        (name) => !currentToolNames.includes(name),
-      );
-
-      if (
-        this.previousStepToolNames.length > 0 &&
-        (hasNewTool || hasDroppedTool)
-      ) {
-        this.recordReplan();
+      if (this.previousStepFailed && this.previousStepToolNames.length > 0) {
+        const previousTools = new Set(this.previousStepToolNames);
+        const changedApproach = currentToolNames.some(
+          (name) => !previousTools.has(name),
+        );
+        if (changedApproach) {
+          this.recordReplan();
+        }
       }
 
       this.previousStepToolNames = currentToolNames;
@@ -194,6 +191,7 @@ export class ReasoningComplexityMonitor {
       case 'planner':
         this.metrics.plannerFailures += 1;
         this.consecutiveFailedPlans += 1;
+        this.previousStepFailed = true;
         break;
 
       case 'infrastructure':
@@ -219,6 +217,10 @@ export class ReasoningComplexityMonitor {
       case 'unknown':
         this.consecutiveFailedPlans = 0;
         break;
+    }
+
+    if (result.status === 'success') {
+      this.previousStepFailed = false;
     }
 
     if (result.status === 'error') {
@@ -296,6 +298,11 @@ export class ReasoningComplexityMonitor {
     this.consecutiveReplans += 1;
   }
 
+  /** True if a replan was detected in this planning turn. */
+  hadReplan(): boolean {
+    return this.consecutiveReplans > 0;
+  }
+
   /**
    * Privacy-safe context the backend can use for routing. No private message
    * bodies — only aggregate metadata.
@@ -339,6 +346,7 @@ export class ReasoningComplexityMonitor {
     this.consecutiveReplans = 0;
     this.failurePatterns.clear();
     this.previousStepToolNames = [];
+    this.previousStepFailed = false;
   }
 }
 

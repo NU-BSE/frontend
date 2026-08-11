@@ -4,6 +4,7 @@ import { mapMcpTools } from './toolMapper';
 import { executeApprovedToolCall, executeToolCall } from './toolExecutor';
 import { ToolExecutionLedger } from './toolExecutionLedger';
 import { detectStepProgress } from './routing/progressTracker';
+import type { StepToolResult } from './routing/progressTracker';
 import {
   AgentError,
   MAX_AGENT_STEPS,
@@ -209,7 +210,7 @@ export class AgentRuntime {
       const tools = mapMcpTools(mcpTools);
 
       let step = 0;
-      let previousStepToolNames: string[] = [];
+      let previousStepResults: StepToolResult[] = [];
       while (step < this.maxSteps) {
         step += 1;
         this.throwIfAborted(controller.signal);
@@ -277,7 +278,13 @@ export class AgentRuntime {
           }
         }
 
+        const replanBefore = this.routingMonitor.hadReplan();
+
         this.routingMonitor.recordModelResponse(result);
+
+        const wasReplan =
+          !replanBefore &&
+          this.routingMonitor.hadReplan();
 
         if (result.kind === 'final') {
           routingTelemetry.completedSuccessfully = true;
@@ -297,6 +304,8 @@ export class AgentRuntime {
           content: result.text ?? '',
           toolCalls: result.toolCalls,
         });
+
+        const stepToolResults: StepToolResult[] = [];
 
         for (const call of result.toolCalls) {
           this.throwIfAborted(controller.signal);
@@ -325,6 +334,12 @@ export class AgentRuntime {
                 status: 'success',
                 data: { deduplicated: true, originalCallId: duplicate.toolCallId },
               };
+
+              stepToolResults.push({
+                call,
+                result: dedupResult,
+                deduplicated: true,
+              });
 
               this.routingMonitor.recordToolResult(
                 call,
@@ -362,6 +377,11 @@ export class AgentRuntime {
 
           this.toolLedger.record(call, toolResult);
 
+          stepToolResults.push({
+            call,
+            result: toolResult,
+          });
+
           this.routingMonitor.recordToolResult(
             call,
             toolResult,
@@ -384,18 +404,13 @@ export class AgentRuntime {
         }
 
         // Progress tracking: detect whether this step moved the run forward.
-        const currentStepToolNames = result.toolCalls.map((tc) => tc.toolName);
-        const hadNewResults = result.toolCalls.some(
-          (tc) => !this.toolLedger.findDuplicate(tc),
-        );
         const stepProgress = detectStepProgress(
-          currentStepToolNames,
-          previousStepToolNames,
-          hadNewResults,
-          false,
+          stepToolResults,
+          previousStepResults,
+          wasReplan,
         );
         this.routingMonitor.recordProgress(stepProgress);
-        previousStepToolNames = currentStepToolNames;
+        previousStepResults = stepToolResults;
 
         // Check whether the current tier needs escalation after this tool batch.
         const routingDecision = this.routingMonitor.chooseTier();

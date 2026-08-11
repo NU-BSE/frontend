@@ -21,6 +21,7 @@ import { createConnectorRegistry } from './create-connector-registry';
 import type { ConnectorRegistry } from '@mobile-agent/connector-registry';
 import { seedDevelopmentConnections, removeDevelopmentConnections } from './dev-seed';
 import { resolveDefaultRuntimeMode, type McpRuntimeMode } from './runtime-mode';
+import { resolveTelegramAdapterMode } from './telegram-adapter-mode';
 
 export interface AppMcpDependencies {
   connectionStore: ConnectionStore;
@@ -104,7 +105,15 @@ export function getLocalMcpRuntime(
       if (mode === 'production') {
         await removeDevelopmentConnections(connectionStore);
       } else if (!devConnectionsSeeded) {
-        await seedDevelopmentConnections(connectionStore);
+        const telegramMode = resolveTelegramAdapterMode(mode);
+        await seedDevelopmentConnections(connectionStore, {
+          skipTelegramSeed: telegramMode === 'native',
+        });
+        // Also clean up any leftover mock Telegram record from a previous
+        // run with a different adapter mode.
+        if (telegramMode === 'native') {
+          await connectionStore.remove('telegram-user-default');
+        }
         devConnectionsSeeded = true;
       }
 

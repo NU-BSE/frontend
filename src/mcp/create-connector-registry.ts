@@ -4,6 +4,7 @@ import { AndroidConnector } from '@mobile-agent/connector-android';
 import { GoogleConnector } from '@mobile-agent/connector-google';
 import {
   MockTdlibAdapter,
+  NativeTdlibAdapter,
   TelegramBotConnector,
   TelegramUserConnector,
 } from '@mobile-agent/connector-telegram';
@@ -18,6 +19,7 @@ import { SpotifyConnector } from '@mobile-agent/connector-spotify';
 import { IntentConnector } from '@mobile-agent/connector-intents';
 
 import type { McpRuntimeMode } from './runtime-mode';
+import { resolveTelegramAdapterMode } from './telegram-adapter-mode';
 
 export interface AppRegistryOptions {
   mode: McpRuntimeMode;
@@ -47,12 +49,17 @@ export function createConnectorRegistry(
     allowDevelopmentMocks: development,
   });
 
+  const telegramAdapterMode = resolveTelegramAdapterMode(mode);
+
   const connectors = [
     new AndroidConnector(store),
     new GoogleConnector(store),
     new TelegramUserConnector({
       store: connectionStore,
-      adapterFactory: development ? () => new MockTdlibAdapter() : undefined,
+      adapterFactory:
+        telegramAdapterMode === 'mock'
+          ? () => new MockTdlibAdapter()
+          : () => new NativeTdlibAdapter(),
     }),
     new TelegramBotConnector(store),
     new MicrosoftConnector(store),

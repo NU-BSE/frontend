@@ -3,6 +3,7 @@ import {
   ActivityIndicator,
   KeyboardAvoidingView,
   Platform,
+  ScrollView,
   StyleSheet,
   TextInput,
   View,
@@ -100,6 +101,10 @@ export default function TelegramAuthScreen() {
         unsub = adapter.setAuthStateListener((state) => {
           setAuthState(state);
           setLoading(false);
+
+          if (state.type !== 'wait_registration') {
+            setTermsAccepted(false);
+          }
 
           if (state.type === 'ready' && !cancelled) {
             void completeConnect();
@@ -245,6 +250,12 @@ export default function TelegramAuthScreen() {
           {getStepTitle(authState.type)}
         </Text>
 
+        {__DEV__ ? (
+          <Text variant="tag" tone="secondary" style={styles.title}>
+            TDLib: {adapter.kind}
+          </Text>
+        ) : null}
+
         {authState.type === 'wait_phone_number' ? (
           <>
             <Text variant="body" tone="secondary" style={styles.description}>
@@ -386,18 +397,23 @@ export default function TelegramAuthScreen() {
             ) : null}
             {authState.termsOfServiceText ? (
               <>
-                <View style={styles.termsBox}>
+                <ScrollView
+                  style={styles.termsBox}
+                  nestedScrollEnabled
+                >
                   <Text variant="bodySmall" tone="secondary">
                     {authState.termsOfServiceText}
                   </Text>
-                </View>
-                <View style={styles.checkRow}>
-                  <Button
-                    label={termsAccepted ? '☑ I accept the Terms of Service' : '☐ I accept the Terms of Service'}
-                    variant="ghost"
-                    onPress={() => setTermsAccepted(!termsAccepted)}
-                  />
-                </View>
+                </ScrollView>
+                {authState.showTermsPopup !== false ? (
+                  <View style={styles.checkRow}>
+                    <Button
+                      label={termsAccepted ? '☑ I accept the Terms of Service' : '☐ I accept the Terms of Service'}
+                      variant="ghost"
+                      onPress={() => setTermsAccepted(!termsAccepted)}
+                    />
+                  </View>
+                ) : null}
               </>
             ) : null}
             <TextInput

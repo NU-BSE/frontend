@@ -61,10 +61,17 @@ const DEV_CONNECTIONS: ConnectionRecord[] = [
   devConnection('intent-default', 'intent', 'Android Intents'),
 ];
 
+export interface SeedOptions {
+  /** When true, skip seeding the mock Telegram connection. */
+  skipTelegramSeed?: boolean;
+}
+
 export async function seedDevelopmentConnections(
   store: ConnectionStore,
+  options: SeedOptions = {},
 ): Promise<void> {
   for (const connection of DEV_CONNECTIONS) {
+    if (options.skipTelegramSeed && connection.connectorId === 'telegram-user') continue;
     const existing = await store.get(connection.id);
     if (existing) continue;
     await store.save(connection);

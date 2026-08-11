@@ -95,6 +95,17 @@ export class NativeTdlibAdapter implements TdlibAdapter {
         application_version: config.applicationVersion,
       });
     } catch (error) {
+      // Clean up so the next initialize() can retry from scratch.
+      if (this.emitterSubscription) {
+        this.emitterSubscription.remove();
+        this.emitterSubscription = null;
+      }
+      this.tdlib = null;
+      this.config = null;
+      this.transition({
+        type: 'error',
+        message: 'Failed to initialize Telegram.',
+      });
       throw mapTdlibError(error, 'initialization');
     }
 
@@ -389,8 +400,16 @@ export class NativeTdlibAdapter implements TdlibAdapter {
       try {
         const raw = await tdlib.getAuthorizationState();
         const parsed = JSON.parse(raw) as Record<string, unknown>;
+
+        // Feed the same state machine used by events and reconciliation.
+        if (isTdlibReadyState(parsed)) {
+          await this.resolveReadyUser(tdlib);
+          return;
+        }
+
         const next = mapAuthorizationState(parsed);
         if (next.type !== before) {
+          this.transition(next);
           return;
         }
       } catch {
@@ -540,12 +559,9 @@ export class NativeTdlibAdapter implements TdlibAdapter {
     this.earlySendResults.set(oldId, {
       type: 'succeeded',
       message: message as Record<string, unknown>,
+      createdAt: Date.now(),
     });
-    // Cleanup stale early results.
-    if (this.earlySendResults.size > 20) {
-      const firstKey = this.earlySendResults.keys().next().value as string | undefined;
-      if (firstKey) this.earlySendResults.delete(firstKey);
-    }
+    this.cleanupStaleEarlyResults();
   }
 
   private handleSendFailed(update: Record<string, unknown>): void {
@@ -565,7 +581,23 @@ export class NativeTdlibAdapter implements TdlibAdapter {
     }
 
     // Early arrival.
-    this.earlySendResults.set(oldId, { type: 'failed', error: errorMsg });
+    this.earlySendResults.set(oldId, {
+      type: 'failed',
+      error: errorMsg,
+      createdAt: Date.now(),
+    });
+    this.cleanupStaleEarlyResults();
+  }
+
+  private cleanupStaleEarlyResults(): void {
+    const now = Date.now();
+    const maxAge = 60_000; // 60 seconds
+    for (const [key, value] of this.earlySendResults) {
+      if (now - value.createdAt > maxAge) {
+        this.earlySendResults.delete(key);
+      }
+    }
+    // Also keep the map bounded.
     if (this.earlySendResults.size > 20) {
       const firstKey = this.earlySendResults.keys().next().value as string | undefined;
       if (firstKey) this.earlySendResults.delete(firstKey);
@@ -613,6 +645,7 @@ interface EarlySendResult {
   type: 'succeeded' | 'failed';
   message?: Record<string, unknown>;
   error?: string;
+  createdAt: number;
 }
 
 interface TdRawResultLike {

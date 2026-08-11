@@ -7,7 +7,7 @@ import { Platform } from 'react-native';
 
 const ACCESS_TOKEN_KEY = 'creepyim.auth.access-token.v1';
 
-async function getToken(): Promise<string | null> {
+export async function getToken(): Promise<string | null> {
   if (Platform.OS === 'web') return sessionStorage.getItem(ACCESS_TOKEN_KEY);
   return SecureStore.getItemAsync(ACCESS_TOKEN_KEY);
 }
@@ -32,7 +32,7 @@ const REQUEST_TIMEOUT_MS = 15_000;
  * `EXPO_PUBLIC_API_URL`; there is nothing to rewrite it to, so it is left
  * alone and the timeout reports it honestly.
  */
-function baseUrl(): string {
+export function baseUrl(): string {
   const configured = (process.env.EXPO_PUBLIC_API_URL ?? 'http://localhost:8000').replace(/\/+$/u, '');
   if (__DEV__) warnAboutBaseUrl(configured);
   if (Platform.OS !== 'android') return configured;

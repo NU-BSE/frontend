@@ -93,14 +93,16 @@ export function estimateInitialTier(userText: string): InitialRoutingEstimate {
     }
   }
 
-  // Strong constraint + optimization + synthesis → expert candidate
+  // Strong constraint + optimization + synthesis → normal.
+  // EXPERT is only reachable through runtime escalation after the planner
+  // has produced real reasoning metadata — never from keyword inspection alone.
   if (
     score >= 5 &&
     constraintKeywords.some((kw) => lower.includes(kw)) &&
     optimizationKeywords.some((kw) => lower.includes(kw)) &&
     synthesisKeywords.some((kw) => lower.includes(kw))
   ) {
-    return { suggestedTier: 'expert', score, reasons };
+    return { suggestedTier: 'normal', score, reasons };
   }
   
   // Multiple explicit constraints with optimization → strong signal

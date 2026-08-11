@@ -2,8 +2,10 @@ import React, { createContext, useContext, useMemo } from 'react';
 
 import { useAi } from '@/ai/AiProvider';
 import type { LlmCapabilities } from '@/ai/types';
+import { baseUrl, getToken } from '@/api/client';
 import { createDeterministicPlanner } from './models/deterministicPlanner';
 import { createStructuredPlanner } from './models/structuredPlanner';
+import { createRemoteAgentModel } from './models/remoteAgentModel';
 import type { AgentModel } from './types';
 
 interface AgentContextValue {
@@ -28,20 +30,33 @@ const TEXT_ONLY_CAPABILITIES: LlmCapabilities = {
 /**
  * Chooses the agent-facing model for the active engine:
  *
- * - on-device text engine → strict structured planner (JSON protocol, every
- *   response Zod-validated before MCP);
+ * - remote → tool-capable remote agent (POST /agent/step on the backend);
  * - offline-preview stub → deterministic planner, so the full loop
  *   (plan → MCP → approval → execute → confirm) stays demoable;
- * - remote → null (text-only) until the backend exposes a tool contract.
+ * - on-device text engine → strict structured planner (JSON protocol, every
+ *   response Zod-validated before MCP).
  */
 export function AgentProvider({ children }: { children: React.ReactNode }) {
   const { engine, origin } = useAi();
 
   const value = useMemo<AgentContextValue>(() => {
-    if (origin === 'remote' || !engine) {
+    if (origin === 'remote') {
+      const model = createRemoteAgentModel({
+        baseUrl: baseUrl(),
+        getAccessToken: () => getToken(),
+      });
+
+      return {
+        model,
+        modelId: model.id,
+        capabilities: model.capabilities,
+      };
+    }
+
+    if (!engine) {
       return {
         model: null,
-        modelId: origin === 'remote' ? 'remote-text' : 'none',
+        modelId: 'none',
         capabilities: TEXT_ONLY_CAPABILITIES,
       };
     }

@@ -205,7 +205,7 @@ export default function TelegramAuthScreen() {
           {getStepTitle(authState.type)}
         </Text>
 
-        {authState.type === 'wait_phone_number' || authState.type === 'initializing' ? (
+        {authState.type === 'wait_phone_number' ? (
           <>
             <Text variant="body" tone="secondary" style={styles.description}>
               Enter your phone number in international format.
@@ -286,9 +286,18 @@ export default function TelegramAuthScreen() {
             <Button label="Back" onPress={handleCancel} />
           </>
         ) : (
-          <Text variant="body" tone="secondary" style={styles.description}>
-            Waiting for Telegram…
-          </Text>
+          <View style={styles.centered}>
+            <ActivityIndicator size="large" color={palette.brand} />
+            <Text variant="body" tone="secondary" style={styles.status}>
+              {authState.type === 'initializing'
+                ? 'Initializing Telegram…'
+                : authState.type === 'logging_out'
+                  ? 'Logging out…'
+                  : authState.type === 'closed'
+                    ? 'Session ended'
+                    : 'Waiting for Telegram…'}
+            </Text>
+          </View>
         )}
 
         {error ? (

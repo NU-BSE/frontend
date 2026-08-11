@@ -90,7 +90,8 @@
     "verify:connections": "esbuild scripts/verify-connections.mts --bundle --platform=node --format=cjs --external:react-native --external:expo-modules-core --outfile=node_modules/.cache/verify-connections.cjs --log-level=error && node node_modules/.cache/verify-connections.cjs",
     "verify:routing": "esbuild scripts/verify-agent-routing.mts --bundle --platform=node --format=cjs --external:react-native --external:expo-modules-core --outfile=node_modules/.cache/verify-agent-routing.cjs --log-level=error && node node_modules/.cache/verify-agent-routing.cjs",
     "verify:remote-agent": "esbuild scripts/verify-remote-agent.mts --bundle --platform=node --format=cjs --outfile=node_modules/.cache/verify-remote-agent.cjs --log-level=error && node node_modules/.cache/verify-remote-agent.cjs",
-    "verify": "npm run typecheck && npm run lint && npm run verify:ai && npm run verify:logic && npm run verify:layout && npm run verify:device && npm run verify:mcp && npm run verify:agent && npm run verify:connections && npm run verify:routing && npm run verify:remote-agent",
+    "verify:telegram": "esbuild scripts/verify-telegram-tdlib.mts --bundle --platform=node --format=cjs --outfile=node_modules/.cache/verify-telegram.cjs --log-level=error && node node_modules/.cache/verify-telegram.cjs",
+    "verify": "npm run typecheck && npm run lint && npm run verify:ai && npm run verify:logic && npm run verify:layout && npm run verify:device && npm run verify:mcp && npm run verify:agent && npm run verify:connections && npm run verify:routing && npm run verify:remote-agent && npm run verify:telegram",
     "deploy": "node deploy.js",
     "preview": "npx expo export --platform web && wrangler dev"
   },

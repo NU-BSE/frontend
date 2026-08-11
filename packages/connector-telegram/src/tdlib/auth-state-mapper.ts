@@ -58,14 +58,29 @@ export function mapAuthorizationState(
       return { type: 'closed' };
 
     case 'Closing':
+      return { type: 'logging_out' };
+
     case 'WaitTdlibParameters':
     case 'WaitEncryptionKey':
-      // Intermediate states handled internally by react-native-tdlib.
+      // Handled internally by react-native-tdlib during startup.
       return { type: 'initializing' };
+
+    case 'WaitEmailAddress':
+    case 'WaitEmailCode':
+    case 'WaitRegistration':
+    case 'WaitOtherDeviceConfirmation':
+    case 'WaitPremiumPurchase':
+      return {
+        type: 'error',
+        message: 'This Telegram authorization method is not supported yet.',
+      };
 
     default:
       return typeStr
-        ? { type: 'error', message: 'Telegram requested an authorization step that is not supported yet.' }
+        ? {
+            type: 'error',
+            message: `Unsupported authorization step: ${typeStr}.`,
+          }
         : { type: 'initializing' };
   }
 }

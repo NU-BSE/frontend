@@ -7,6 +7,8 @@ import type {
 } from '../types';
 import { AgentError } from '../types';
 
+const REMOTE_AGENT_TIMEOUT_MS = 90_000;
+
 const reasoningSchema = z.object({
   crossSourceSynthesis: z.boolean().optional(),
   conflictingEvidence: z.boolean().optional(),
@@ -28,7 +30,7 @@ const agentResultSchema = z
     }),
     z.object({
       kind: z.literal('tool_calls'),
-      text: z.string().optional(),
+      text: z.string().nullish(),
       toolCalls: z.array(
         z.object({
           id: z.string(),
@@ -76,6 +78,24 @@ export function createRemoteAgentModel(
         headers['Authorization'] = `Bearer ${token}`;
       }
 
+      const controller = new AbortController();
+      let timedOut = false;
+
+      const timeout = setTimeout(() => {
+        timedOut = true;
+        controller.abort();
+      }, REMOTE_AGENT_TIMEOUT_MS);
+
+      const cancelFromCaller = () => {
+        controller.abort();
+      };
+
+      input.signal?.addEventListener(
+        'abort',
+        cancelFromCaller,
+        { once: true },
+      );
+
       let response: Response;
       try {
         response = await fetch(
@@ -85,12 +105,13 @@ export function createRemoteAgentModel(
             headers,
             body: JSON.stringify({
               requestId,
+              runId: input.runId,
               routing: input.routing,
               messages: input.messages,
               tools: input.tools,
               connections: input.connections,
             }),
-            signal: input.signal,
+            signal: controller.signal,
           },
         );
       } catch (error) {
@@ -98,12 +119,28 @@ export function createRemoteAgentModel(
           throw new AgentError(
             'CANCELLED',
             'The request was cancelled',
+            error,
           );
         }
+
+        if (timedOut) {
+          throw new AgentError(
+            'NETWORK_ERROR',
+            'The remote agent request timed out.',
+            error,
+          );
+        }
+
         throw new AgentError(
           'NETWORK_ERROR',
           `Could not reach the server at ${options.baseUrl}`,
           error,
+        );
+      } finally {
+        clearTimeout(timeout);
+        input.signal?.removeEventListener(
+          'abort',
+          cancelFromCaller,
         );
       }
 
@@ -132,9 +169,26 @@ export function createRemoteAgentModel(
       }
 
       const json = await response.json();
-      const parsed = agentStepResponseSchema.parse(json);
+      const parsed = agentStepResponseSchema.safeParse(json);
 
-      return parsed.result as AgentModelResult;
+      if (!parsed.success) {
+        throw new AgentError(
+          'MODEL_ERROR',
+          'The server returned an invalid agent response.',
+          parsed.error,
+        );
+      }
+
+      const result = parsed.data.result;
+
+      if (result.kind === 'tool_calls') {
+        return {
+          ...result,
+          text: result.text ?? undefined,
+        } as AgentModelResult;
+      }
+
+      return result as AgentModelResult;
     },
   };
 }

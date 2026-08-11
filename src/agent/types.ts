@@ -96,6 +96,7 @@ export interface ConnectionSummary {
 }
 
 export interface AgentModelInput {
+  runId: string;
   messages: AgentMessage[];
   tools: AgentToolDefinition[];
   connections: ConnectionSummary[];

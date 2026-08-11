@@ -217,6 +217,7 @@ export class AgentRuntime {
 
         const result =
           await this.options.model.run({
+            runId,
             messages: [...this.messages],
             tools,
             connections:

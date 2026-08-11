@@ -1,6 +1,19 @@
 import * as z from 'zod/v4';
-import type { ConnectionRecord, ConnectorTool } from '@mobile-agent/connector-core';
-import { StoreBackedConnector, connId, dt, opt, str, t } from '@mobile-agent/connector-core';
+import type {
+  ConnectionRecord,
+  ConnectorTool,
+  StoreBackedConnectorOptions,
+} from '@mobile-agent/connector-core';
+import {
+  ConnectorError,
+  StoreBackedConnector,
+  connId,
+  dt,
+  opt,
+  str,
+  t,
+} from '@mobile-agent/connector-core';
+import type { CredentialVault } from '@mobile-agent/credential-vault';
 
 const calRead = [
   t('google.calendar.list_events', 'List events', 'List calendar events in a range', 'read',
@@ -122,11 +135,120 @@ const tasks = [
     { deleted: true }),
 ];
 
+/**
+ * What a completed Google authorization hands back.
+ *
+ * Kept as a plain shape so this package stays free of Expo and React Native
+ * imports — it is bundled for Node by the verification scripts, and importing
+ * `expo-auth-session` here would break them. The app injects the real
+ * implementation; tests inject a fake.
+ */
+export interface GoogleAuthorization {
+  accessToken: string;
+  refreshToken?: string;
+  accessTokenExpiresAt?: number;
+  scopes: string[];
+  tokenType?: string;
+  email?: string;
+  name?: string;
+}
+
+export interface GoogleConnectorOptions extends StoreBackedConnectorOptions {
+  /** Runs the OAuth flow. Absent in Node and in tests. */
+  authorize?: () => Promise<GoogleAuthorization>;
+  /** Where the tokens go. Absent means "do not persist secrets". */
+  vault?: CredentialVault;
+  /** Best-effort revocation on disconnect. */
+  revoke?: (token: string) => Promise<void>;
+}
+
+export const GOOGLE_CONNECTION_ID = 'google-account';
+
 export class GoogleConnector extends StoreBackedConnector {
   readonly id = 'google' as const;
   readonly displayName = 'Google';
+
+  private readonly authorize?: () => Promise<GoogleAuthorization>;
+  private readonly vault?: CredentialVault;
+  private readonly revoke?: (token: string) => Promise<void>;
+
+  constructor(options: GoogleConnectorOptions) {
+    super(options);
+    if (options.authorize) this.authorize = options.authorize;
+    if (options.vault) this.vault = options.vault;
+    if (options.revoke) this.revoke = options.revoke;
+  }
+
+  /*
+   * Still `mock` until the tools call the real API: the connector can now
+   * obtain a genuine grant, but every tool below returns a fixture. Claiming
+   * `implemented` here would let the production registry publish tools that
+   * report fake success, which is the exact failure this flag exists to stop.
+   */
   readonly implementationStatus = 'mock' as const;
+
   async getTools(_c: ConnectionRecord) {
     return [...calRead, ...calWrite, ...gmailRead, ...gmailWrite, ...gmailExt, ...drive, ...people, ...tasks];
+  }
+
+  /**
+   * Sign in with Google and persist the connection.
+   *
+   * Tokens are written to the credential vault, which on Android wraps them
+   * with a non-exportable Keystore key; only ciphertext is stored. They are
+   * never sent to the Creepy.IM backend, so the server never learns which
+   * Google account — or indeed whether any — is linked. The ConnectionRecord
+   * itself holds no secret, only the account label and granted scopes.
+   */
+  async connect(): Promise<ConnectionRecord> {
+    if (!this.authorize) {
+      throw new ConnectorError(
+        'Google sign-in is unavailable in this runtime.',
+        'UNSUPPORTED',
+      );
+    }
+
+    const grant = await this.authorize();
+    const now = Date.now();
+
+    if (this.vault) {
+      await this.vault.save(GOOGLE_CONNECTION_ID, {
+        kind: 'oauth',
+        accessToken: grant.accessToken,
+        scopes: grant.scopes,
+        ...(grant.refreshToken ? { refreshToken: grant.refreshToken } : {}),
+        ...(grant.accessTokenExpiresAt
+          ? { accessTokenExpiresAt: grant.accessTokenExpiresAt }
+          : {}),
+        ...(grant.tokenType ? { tokenType: grant.tokenType } : {}),
+      });
+    }
+
+    const existing = await this.store.get(GOOGLE_CONNECTION_ID);
+    const record: ConnectionRecord = {
+      id: GOOGLE_CONNECTION_ID,
+      connectorId: this.id,
+      displayName: grant.email ?? grant.name ?? 'Google',
+      status: 'connected',
+      scopes: grant.scopes,
+      capabilities: ['google.read'],
+      createdAt: existing?.createdAt ?? now,
+      updatedAt: now,
+    };
+
+    await this.store.save(record);
+    return record;
+  }
+
+  /** Revoke at Google and delete the local credential before forgetting it. */
+  async disconnect(connectionId: string): Promise<void> {
+    if (this.vault && this.revoke) {
+      const stored = await this.vault.get(connectionId);
+      if (stored?.kind === 'oauth') {
+        await this.revoke(stored.refreshToken ?? stored.accessToken);
+      }
+    }
+    await this.vault?.remove(connectionId);
+    await super.disconnect(connectionId);
   }
 }

@@ -1,100 +1,181 @@
-import React from 'react';
-import { StyleSheet, View } from 'react-native';
+import React, { useMemo } from 'react';
+import { Pressable, StyleSheet, View } from 'react-native';
 
-import { AUTH_PROVIDERS } from '@/auth/providers';
-import { Button } from '@/components/Button';
 import { Text } from '@/components/Text';
+import {
+  CONNECTOR_CATALOG,
+  type ConnectorCatalogEntry,
+} from '@/features/connections/catalog';
+import { chunkRows } from '@/features/scenarios/chunkRows';
 import {
   useConnectConnector,
   useConnections,
   useDisconnectConnection,
 } from '@/connections/useConnections';
-import { palette, radius, shadow, spacing } from '@/theme/tokens';
+import { palette, radius, spacing } from '@/theme/tokens';
+
+const COLUMNS = 3;
+const GRID_GAP = spacing.md;
 
 /**
- * The connector list shared by onboarding and Account → Connectors.
+ * The connector catalogue shared by onboarding and Account → Connectors.
  *
  * State comes from the persistent ConnectionStore via TanStack Query — a tap
- * never fakes a connection. "Connected" shows the real account identity and
- * offers Disconnect; connecting runs the connector's actual auth flow.
+ * never fakes a connection. "Connected" reflects a real ConnectionRecord and
+ * a second tap disconnects; connecting runs the connector's actual auth flow
+ * and surfaces its error verbatim when there isn't one yet.
+ *
+ * Columns are structural: explicit rows of `flex: 1` cells rather than
+ * `flexWrap`. Wrapping derives the column count from measured width, so a rule
+ * that overflows by a fraction of a point silently collapses the grid to one
+ * column — which this screen family has already shipped twice. Three cells
+ * plus two gaps leave less slack than two, so the risk is higher here.
+ * `verify:layout` runs Yoga over this exact tree across eight device widths.
  */
 export function ConnectorList() {
   const { data: connections, isPending } = useConnections();
   const connect = useConnectConnector();
   const disconnect = useDisconnectConnection();
 
+  const rows = useMemo(() => chunkRows(CONNECTOR_CATALOG, COLUMNS), []);
+
+  const failed =
+    connect.isError && typeof connect.variables === 'string'
+      ? {
+          connectorId: connect.variables,
+          message:
+            connect.error instanceof Error
+              ? connect.error.message
+              : 'Could not connect',
+        }
+      : null;
+
   return (
-    <View style={styles.card}>
-      {AUTH_PROVIDERS.map((provider) => {
-        const connection = provider.connectorId
-          ? connections?.find(
-              (record) =>
-                record.connectorId === provider.connectorId &&
-                record.status === 'connected',
-            )
-          : undefined;
+    <View style={styles.wrapper}>
+      <View style={styles.grid}>
+        {rows.map((row, rowIndex) => (
+          <View key={`row-${rowIndex}`} style={styles.row}>
+            {row.map((entry: ConnectorCatalogEntry | null, columnIndex) => {
+              if (!entry) {
+                // Keeps a short final row's cells at full width instead of
+                // stretching them across the row.
+                return (
+                  <View
+                    key={`spacer-${rowIndex}-${columnIndex}`}
+                    style={styles.cellSlot}
+                  />
+                );
+              }
 
-        const connected = Boolean(connection);
-        const isBusy =
-          (connect.isPending && connect.variables === provider.connectorId) ||
-          (disconnect.isPending &&
-            disconnect.variables === connection?.id);
+              const connection = entry.connectorId
+                ? connections?.find(
+                    (record) =>
+                      record.connectorId === entry.connectorId &&
+                      record.status === 'connected',
+                  )
+                : undefined;
 
-        const shortLabel = provider.label.replace(/^Connect /u, '');
-        const label = connected
-          ? `${shortLabel} — Connected`
-          : provider.label;
+              const connected = Boolean(connection);
+              const connectable = Boolean(entry.connectorId);
+              const busy =
+                (connect.isPending && connect.variables === entry.connectorId) ||
+                (disconnect.isPending && disconnect.variables === connection?.id);
 
-        return (
-          <View key={provider.id} style={styles.provider}>
-            <Button
-              label={label}
-              variant={connected ? 'primary' : 'secondary'}
-              disabled={!provider.enabled || isBusy || isPending}
-              loading={isBusy}
-              onPress={() => {
-                if (connected && connection) {
-                  disconnect.mutate(connection.id);
-                } else if (provider.connectorId) {
-                  connect.mutate(provider.connectorId);
-                }
-              }}
-            />
-            {connected && connection ? (
-              <Text variant="bodySmall" tone="muted" style={styles.note}>
-                {connection.displayName} · {connection.status}
-              </Text>
-            ) : null}
-            {!provider.enabled && provider.note ? (
-              <Text variant="bodySmall" tone="muted" style={styles.note}>
-                {provider.note}
-              </Text>
-            ) : null}
-            {connect.isError &&
-            connect.variables === provider.connectorId ? (
-              <Text variant="bodySmall" tone="danger" style={styles.note}>
-                {connect.error instanceof Error
-                  ? connect.error.message
-                  : 'Could not connect'}
-              </Text>
-            ) : null}
+              return (
+                <Pressable
+                  key={entry.key}
+                  accessibilityRole="button"
+                  accessibilityState={{
+                    disabled: !connectable || busy || isPending,
+                    selected: connected,
+                  }}
+                  accessibilityLabel={
+                    connectable
+                      ? `${entry.label}. ${connected ? 'Connected. Tap to disconnect' : entry.summary}`
+                      : `${entry.label}. ${entry.note ?? 'Unavailable'}`
+                  }
+                  disabled={!connectable || busy || isPending}
+                  onPress={() => {
+                    if (connected && connection) disconnect.mutate(connection.id);
+                    else if (entry.connectorId) connect.mutate(entry.connectorId);
+                  }}
+                  style={({ pressed }) => [
+                    styles.cellSlot,
+                    styles.cell,
+                    connected && styles.cellConnected,
+                    !connectable && styles.cellPlanned,
+                    pressed && styles.pressed,
+                  ]}
+                >
+                  <Text
+                    variant="label"
+                    tone={!connectable ? 'faint' : connected ? 'brand' : 'primary'}
+                    style={styles.cellText}
+                    numberOfLines={2}
+                  >
+                    {entry.label}
+                  </Text>
+                  <Text
+                    variant="bodySmall"
+                    tone={connectable ? 'secondary' : 'faint'}
+                    style={styles.cellText}
+                    numberOfLines={2}
+                  >
+                    {busy
+                      ? 'Working…'
+                      : connected
+                        ? (connection?.displayName ?? 'Connected')
+                        : (entry.note ?? entry.summary)}
+                  </Text>
+                  {connected ? (
+                    <Text variant="tag" tone="brand" uppercase>
+                      Connected
+                    </Text>
+                  ) : null}
+                </Pressable>
+              );
+            })}
           </View>
-        );
-      })}
+        ))}
+      </View>
+
+      {failed ? (
+        <Text
+          accessibilityLiveRegion="polite"
+          variant="bodySmall"
+          tone="danger"
+          style={styles.message}
+        >
+          {failed.message}
+        </Text>
+      ) : null}
     </View>
   );
 }
 
 const styles = StyleSheet.create({
-  card: {
-    gap: spacing.lg,
-    padding: spacing.lg,
+  wrapper: { gap: spacing.md },
+  grid: { gap: GRID_GAP },
+  row: { flexDirection: 'row', gap: GRID_GAP },
+  cellSlot: { flex: 1, minWidth: 0 },
+  cell: {
+    minHeight: 104,
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: spacing.xs,
+    paddingHorizontal: spacing.sm,
+    paddingVertical: spacing.md,
     borderWidth: 1,
     borderColor: palette.borderSoft,
-    borderRadius: radius.lg,
+    borderRadius: radius.md,
     backgroundColor: palette.surface,
-    ...shadow.card,
   },
-  provider: { gap: spacing.xs },
-  note: { paddingHorizontal: spacing.xs },
+  cellConnected: {
+    borderColor: palette.brand,
+    backgroundColor: palette.brandWash,
+  },
+  cellPlanned: { backgroundColor: palette.canvas },
+  cellText: { textAlign: 'center' },
+  pressed: { opacity: 0.8 },
+  message: { textAlign: 'center' },
 });

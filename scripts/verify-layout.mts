@@ -42,7 +42,13 @@ interface Frame {
  * Builds the current screen's node tree:
  *   content (padding 24) > grid (gap 16, column) > row (gap 16, row) > cell (flex 1)
  */
-function layoutGrid(windowWidth: number, cellCount: number): Frame[][] {
+function layoutGrid(
+  windowWidth: number,
+  cellCount: number,
+  columns: number = COLUMNS,
+  gap: number = GAP,
+  cellMinHeight: number = CELL_MIN_HEIGHT,
+): Frame[][] {
   const root = Yoga.Node.create();
   root.setWidth(windowWidth);
   root.setPadding(Edge.Horizontal, GUTTER);
@@ -50,17 +56,17 @@ function layoutGrid(windowWidth: number, cellCount: number): Frame[][] {
 
   const grid = Yoga.Node.create();
   grid.setFlexDirection(FlexDirection.Column);
-  grid.setGap(Gutter.All, GAP);
+  grid.setGap(Gutter.All, gap);
   root.insertChild(grid, 0);
 
   const items = Array.from({ length: cellCount }, (_, i) => i);
-  const rows = chunkRows(items, COLUMNS);
+  const rows = chunkRows(items, columns);
   const cellNodes: ReturnType<typeof Yoga.Node.create>[][] = [];
 
   rows.forEach((row, rowIndex) => {
     const rowNode = Yoga.Node.create();
     rowNode.setFlexDirection(FlexDirection.Row);
-    rowNode.setGap(Gutter.All, GAP);
+    rowNode.setGap(Gutter.All, gap);
     grid.insertChild(rowNode, rowIndex);
 
     const nodesInRow: ReturnType<typeof Yoga.Node.create>[] = [];
@@ -71,7 +77,7 @@ function layoutGrid(windowWidth: number, cellCount: number): Frame[][] {
       node.setFlexBasis(0);
       node.setMinWidth(0);
       if (cell !== null) {
-        node.setMinHeight(CELL_MIN_HEIGHT);
+        node.setMinHeight(cellMinHeight);
         node.setAlignItems(Align.Center);
         node.setJustifyContent(Justify.Center);
       }
@@ -209,6 +215,75 @@ console.log(
     .slice(0, 3)
     .map((f) => f.top)
     .join('/')})`,
+);
+
+/*
+ * The connectors screen renders the same structure at three columns with a
+ * tighter gap. Three cells plus two gaps leave much less slack than two, so
+ * this is where an overflow would reappear first — and the grid holds 14
+ * entries, which exercises a padded final row (14 = 4 rows of 3, then 2).
+ */
+const CONNECTOR_COLUMNS = 3;
+const CONNECTOR_GAP = 12;
+const CONNECTOR_MIN_HEIGHT = 104;
+const CONNECTOR_COUNT = 14;
+
+console.log('\nyoga layout — connectors grid, three across:');
+
+for (const windowWidth of [320, 360, 390, 393, 411, 412, 480, 600]) {
+  const frames = layoutGrid(
+    windowWidth,
+    CONNECTOR_COUNT,
+    CONNECTOR_COLUMNS,
+    CONNECTOR_GAP,
+    CONNECTOR_MIN_HEIGHT,
+  );
+
+  assert(
+    frames.length === Math.ceil(CONNECTOR_COUNT / CONNECTOR_COLUMNS),
+    `${windowWidth}pt: ${frames.length} rows for ${CONNECTOR_COUNT} connectors`,
+  );
+
+  const [a, b, c] = frames[0]!;
+
+  // All three must share a row — this is the collapse the structure prevents.
+  assert(
+    a!.top === b!.top && b!.top === c!.top,
+    `${windowWidth}pt: all three cells share a row (top ${a!.top})`,
+  );
+  assert(
+    b!.left > a!.left + a!.width - 0.01 && c!.left > b!.left + b!.width - 0.01,
+    `${windowWidth}pt: cells run left to right, none wrapped below`,
+  );
+
+  // Three cells plus two gaps must fit the content box.
+  const contentWidth = windowWidth - GUTTER * 2;
+  const spanned = c!.left + c!.width - a!.left;
+  assert(
+    spanned <= contentWidth + 0.01,
+    `${windowWidth}pt: row spans ${spanned.toFixed(1)}pt within ${contentWidth}pt`,
+  );
+  assert(
+    a!.width > 0 && Math.abs(a!.width - c!.width) <= 1.01,
+    `${windowWidth}pt: cells are equal width within rounding (${a!.width.toFixed(1)}pt)`,
+  );
+
+  // The final row holds 2 real cells + 1 spacer; the real ones must keep the
+  // same width as a full row rather than stretching.
+  const lastRow = frames[frames.length - 1]!;
+  assert(
+    Math.abs(lastRow[0]!.width - a!.width) <= 1.01,
+    `${windowWidth}pt: padded final row keeps cell width (${lastRow[0]!.width.toFixed(1)}pt)`,
+  );
+}
+
+// The counter-example: percentage widths at three columns overflow far more
+// readily than at two, which is why this grid is structural.
+const THREE_COL_PERCENT = 0.333;
+const contentAt390 = 390 - GUTTER * 2;
+assert(
+  contentAt390 * THREE_COL_PERCENT * 3 + CONNECTOR_GAP * 2 > contentAt390,
+  'a 33.3% + 12pt-gap rule would overflow at three columns — regression reproduced',
 );
 
 console.log('\nlayout verified.');

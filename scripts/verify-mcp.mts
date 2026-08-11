@@ -15,6 +15,50 @@ import {
 } from '../src/mcp/runtime-singleton.js';
 import { runMcpSpike } from '../src/mcp/run-mcp-spike.js';
 
+/*
+ * Tripwires for the architectural claim: the MCP client and server run inside
+ * one JavaScript process, linked by InMemoryTransport, with no network and no
+ * child process. Installed before the runtime is created, so any attempt to
+ * open a socket or spawn a process during the whole run is caught rather than
+ * merely being absent from a grep.
+ */
+const violations: string[] = [];
+
+// esbuild emits CJS for this script, so the runtime `require` returns the live
+// builtin module object rather than an ESM wrapper — patching it affects callers.
+declare const require: (id: string) => Record<string, unknown>;
+
+function trap(mod: Record<string, unknown>, names: readonly string[], label: string): void {
+  for (const name of names) {
+    if (typeof mod[name] !== 'function') continue;
+    Object.defineProperty(mod, name, {
+      configurable: true,
+      writable: true,
+      value: (...args: unknown[]) => {
+        violations.push(`${label}.${name}(${String(args[0]).slice(0, 60)})`);
+        throw new Error(`${label}.${name} must not be used by the MCP runtime`);
+      },
+    });
+  }
+}
+
+trap(require('node:child_process'), ['spawn', 'spawnSync', 'exec', 'execSync', 'execFile', 'fork'], 'child_process');
+trap(require('node:net'), ['connect', 'createConnection', 'createServer'], 'net');
+trap(require('node:http'), ['request', 'get', 'createServer'], 'http');
+trap(require('node:https'), ['request', 'get', 'createServer'], 'https');
+trap(require('node:dgram'), ['createSocket'], 'dgram');
+
+const globals = globalThis as Record<string, unknown>;
+for (const name of ['fetch', 'XMLHttpRequest', 'WebSocket', 'EventSource']) {
+  if (typeof globals[name] === 'undefined') continue;
+  globals[name] = (...args: unknown[]) => {
+    violations.push(`${name}(${String(args[0]).slice(0, 60)})`);
+    throw new Error(`${name} must not be used by the MCP runtime`);
+  };
+}
+
+const startingPid = process.pid;
+
 function assert(condition: unknown, message: string): asserts condition {
   if (!condition) throw new Error(`FAIL: ${message}`);
   console.log(`  ok — ${message}`);
@@ -280,6 +324,29 @@ async function main(): Promise<void> {
     );
   }
   console.log(`  ok — ${gated.length} composed-schema tools complete the round-trip`);
+
+  console.log('architecture: one process, in-memory transport:');
+
+  assert(
+    violations.length === 0,
+    'no network call or process spawn occurred during the entire run',
+  );
+  assert(
+    process.pid === startingPid,
+    'client and server ran in the same process (pid unchanged)',
+  );
+
+  const transport = (
+    runtimeWithConnectors.rawClient as unknown as { transport?: object }
+  ).transport;
+  assert(
+    transport !== undefined && transport !== null,
+    'the client is connected through a transport object',
+  );
+  assert(
+    typeof (transport as { start?: unknown }).start === 'function',
+    'the transport is a real Transport instance, not a stub',
+  );
 
   console.log('runtime shutdown:');
 

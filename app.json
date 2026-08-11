@@ -25,8 +25,12 @@
     "plugins": [
       "expo-router",
       "expo-secure-store",
-      "./plugins/with-attestation-native-probes"
+      "./plugins/with-attestation-native-probes",
+      "expo-web-browser"
     ],
-    "scheme": "creepyim"
+    "scheme": [
+      "creepyim",
+      "com.googleusercontent.apps.113810819709-javkhtvie8tjsuph29flcoesr0h4sio6"
+    ]
   }
 }

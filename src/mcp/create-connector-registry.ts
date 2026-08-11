@@ -1,5 +1,6 @@
 import type { ConnectionStore } from '@mobile-agent/connector-core';
 import { ConnectorRegistry } from '@mobile-agent/connector-registry';
+import { getCredentialVault } from '@/mcp/runtime-singleton';
 import { AndroidConnector } from '@mobile-agent/connector-android';
 import { GoogleConnector } from '@mobile-agent/connector-google';
 import {
@@ -36,6 +37,32 @@ export interface AppRegistryOptions {
  *   fake success. Telegram's personal connector registers when it runs on
  *   the native TDLib adapter (status follows the adapter).
  */
+/**
+ * Google's real sign-in, injected here rather than imported by the connector
+ * package: the package is bundled for Node by the verification scripts, and
+ * `expo-auth-session` cannot load there. Without these the connector still
+ * registers, and `connect()` reports that sign-in is unavailable.
+ */
+function googleAuthOptions(connectionStore: ConnectionStore) {
+  return {
+    store: connectionStore,
+    vault: getCredentialVault(),
+    authorize: async () => {
+      const { authorizeGoogle } = await import('@/connections/google/authorize');
+      const { tokens, identity } = await authorizeGoogle();
+      return {
+        ...tokens,
+        ...(identity.email ? { email: identity.email } : {}),
+        ...(identity.name ? { name: identity.name } : {}),
+      };
+    },
+    revoke: async (token: string) => {
+      const { revokeGoogleToken } = await import('@/connections/google/authorize');
+      await revokeGoogleToken(token);
+    },
+  };
+}
+
 export function createConnectorRegistry(
   options: AppRegistryOptions,
 ): ConnectorRegistry {
@@ -49,7 +76,7 @@ export function createConnectorRegistry(
 
   const connectors = [
     new AndroidConnector(store),
-    new GoogleConnector(store),
+    new GoogleConnector(googleAuthOptions(connectionStore)),
     new TelegramUserConnector({
       store: connectionStore,
       adapterFactory: development ? () => new MockTdlibAdapter() : undefined,

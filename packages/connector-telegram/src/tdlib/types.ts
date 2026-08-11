@@ -16,7 +16,12 @@ export type TdlibAuthStateType =
   | 'initializing'
   | 'wait_phone_number'
   | 'wait_code'
+  | 'wait_email_address'
+  | 'wait_email_code'
   | 'wait_password'
+  | 'wait_registration'
+  | 'wait_other_device_confirmation'
+  | 'wait_premium_purchase'
   | 'ready'
   | 'logging_out'
   | 'closed'
@@ -58,12 +63,48 @@ export type TdlibAuthState =
   | { type: 'not_initialized' }
   | { type: 'initializing' }
   | { type: 'wait_phone_number' }
-  | { type: 'wait_code'; codeLength?: number }
-  | { type: 'wait_password'; passwordHint?: string }
+  | {
+      type: 'wait_code';
+      codeLength?: number;
+      phoneNumber?: string;
+      timeoutSeconds?: number;
+    }
+  | {
+      type: 'wait_email_address';
+      allowAppleId?: boolean;
+      allowGoogleId?: boolean;
+    }
+  | {
+      type: 'wait_email_code';
+      emailAddressPattern?: string;
+      codeLength?: number;
+      allowAppleId?: boolean;
+      allowGoogleId?: boolean;
+    }
+  | {
+      type: 'wait_password';
+      passwordHint?: string;
+    }
+  | {
+      type: 'wait_registration';
+      termsOfServiceText?: string;
+    }
+  | {
+      type: 'wait_other_device_confirmation';
+      link: string;
+    }
+  | {
+      type: 'wait_premium_purchase';
+      supportEmail?: string;
+    }
   | { type: 'ready'; user: TdUser }
   | { type: 'logging_out' }
   | { type: 'closed' }
-  | { type: 'error'; message: string };
+  | {
+      type: 'error';
+      message: string;
+      recoverable?: boolean;
+    };
 
 export type TdlibAuthStateListener = (state: TdlibAuthState) => void;
 
@@ -77,12 +118,16 @@ export interface TdlibAdapter {
   setAuthStateListener(listener: TdlibAuthStateListener): () => void;
 
   /**
-   * Auth state machine drives these. One-time codes and the 2FA password are
-   * passed straight to TDLib and must never be persisted or logged.
+   * Auth state machine drives these. One-time codes, passwords and
+   * registration data are passed straight to TDLib and must never be
+   * persisted or logged.
    */
   requestPhoneNumber(phoneNumber: string): Promise<void>;
   submitAuthCode(code: string): Promise<void>;
+  submitEmailAddress(email: string): Promise<void>;
+  submitEmailCode(code: string): Promise<void>;
   submitPassword(password: string): Promise<void>;
+  submitRegistration(firstName: string, lastName: string): Promise<void>;
 
   searchChats(query: string, limit?: number): Promise<TdChat[]>;
   getRecentMessages(chatId: string, limit?: number): Promise<TdMessage[]>;

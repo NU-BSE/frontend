@@ -100,6 +100,21 @@ export class MockTdlibAdapter implements TdlibAdapter {
       this.transition({ type: 'wait_password', passwordHint: 'dev hint' });
       return;
     }
+    if (code === '33333') {
+      this.transition({
+        type: 'wait_email_address',
+        allowAppleId: false,
+        allowGoogleId: false,
+      });
+      return;
+    }
+    if (code === '44444') {
+      this.transition({
+        type: 'wait_registration',
+        termsOfServiceText: 'Telegram Terms of Service (mock).',
+      });
+      return;
+    }
     this.transition({ type: 'ready', user: this.user });
   }
 
@@ -112,6 +127,49 @@ export class MockTdlibAdapter implements TdlibAdapter {
     }
     if (password !== 'password') {
       throw new ConnectorError('Invalid 2FA password', 'AUTH_REQUIRED');
+    }
+    this.transition({ type: 'ready', user: this.user });
+  }
+
+  async submitEmailAddress(email: string): Promise<void> {
+    if (this.state.type !== 'wait_email_address') {
+      throw new ConnectorError(
+        `Cannot submit an email in state ${this.state.type}`,
+        'VALIDATION_FAILED',
+      );
+    }
+    if (!email.includes('@')) {
+      throw new ConnectorError('Invalid email address', 'VALIDATION_FAILED');
+    }
+    this.transition({
+      type: 'wait_email_code',
+      emailAddressPattern: email.replace(/^(.{1}).*(@.*)$/u, '$1***$2'),
+      codeLength: 6,
+    });
+  }
+
+  async submitEmailCode(code: string): Promise<void> {
+    if (this.state.type !== 'wait_email_code') {
+      throw new ConnectorError(
+        `Cannot submit an email code in state ${this.state.type}`,
+        'VALIDATION_FAILED',
+      );
+    }
+    if (code !== '333333') {
+      throw new ConnectorError('Invalid email code', 'VALIDATION_FAILED');
+    }
+    this.transition({ type: 'ready', user: this.user });
+  }
+
+  async submitRegistration(firstName: string, _lastName: string): Promise<void> {
+    if (this.state.type !== 'wait_registration') {
+      throw new ConnectorError(
+        `Cannot submit registration in state ${this.state.type}`,
+        'VALIDATION_FAILED',
+      );
+    }
+    if (!firstName.trim()) {
+      throw new ConnectorError('First name is required', 'VALIDATION_FAILED');
     }
     this.transition({ type: 'ready', user: this.user });
   }

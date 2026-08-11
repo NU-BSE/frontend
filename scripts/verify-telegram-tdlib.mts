@@ -98,17 +98,55 @@ console.log('auth-state mapping:');
     'Ready → initializing (profile pending)',
   );
 
-  // Unknown interactive state → error
+  // Email states
   assertEq(
     mapAuthorizationState(rawAuthState('authorizationStateWaitEmailAddress')).type,
-    'error',
-    'WaitEmailAddress → error',
+    'wait_email_address',
+    'WaitEmailAddress → wait_email_address',
   );
 
+  {
+    const state = mapAuthorizationState(rawAuthState('authorizationStateWaitEmailAddress', { allow_apple_id: true }));
+    if (state.type === 'wait_email_address') {
+      assert(state.allowAppleId, 'allowAppleId preserved');
+    }
+  }
+
   assertEq(
-    mapAuthorizationState(rawAuthState('authorizationStateWaitOtherDeviceConfirmation')).type,
-    'error',
-    'WaitOtherDeviceConfirmation → error',
+    mapAuthorizationState(rawAuthState('authorizationStateWaitEmailCode', { code_info: { email_address_pattern: 'a***@gmail.com', length: 6 } })).type,
+    'wait_email_code',
+    'WaitEmailCode → wait_email_code',
+  );
+
+  {
+    const state = mapAuthorizationState(rawAuthState('authorizationStateWaitEmailCode', { code_info: { email_address_pattern: 'a***@gmail.com', length: 6 } }));
+    if (state.type === 'wait_email_code') {
+      assertEq(state.emailAddressPattern, 'a***@gmail.com', 'email pattern preserved');
+      assertEq(state.codeLength, 6, 'email code length');
+    }
+  }
+
+  // Registration
+  assertEq(
+    mapAuthorizationState(rawAuthState('authorizationStateWaitRegistration', { terms_of_service: { text: 'TOS text', min_user_age: 16 } })).type,
+    'wait_registration',
+    'WaitRegistration → wait_registration',
+  );
+
+  // Other device
+  {
+    const state = mapAuthorizationState(rawAuthState('authorizationStateWaitOtherDeviceConfirmation', { link: 'tg://login?token=abc' }));
+    assertEq(state.type, 'wait_other_device_confirmation', 'WaitOtherDeviceConfirmation → wait_other_device_confirmation');
+    if (state.type === 'wait_other_device_confirmation') {
+      assert(state.link.length > 0, 'link preserved');
+    }
+  }
+
+  // Premium
+  assertEq(
+    mapAuthorizationState(rawAuthState('authorizationStateWaitPremiumPurchase')).type,
+    'wait_premium_purchase',
+    'WaitPremiumPurchase → wait_premium_purchase',
   );
 
   // Null/empty → initializing

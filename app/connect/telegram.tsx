@@ -22,7 +22,11 @@ export default function TelegramAuthScreen() {
   const [authState, setAuthState] = useState<TdlibAuthState>({ type: 'not_initialized' });
   const [phone, setPhone] = useState('');
   const [code, setCode] = useState('');
+  const [email, setEmail] = useState('');
+  const [emailCode, setEmailCode] = useState('');
   const [password, setPassword] = useState('');
+  const [firstName, setFirstName] = useState('');
+  const [lastName, setLastName] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [initializing, setInitializing] = useState(true);
@@ -115,6 +119,7 @@ export default function TelegramAuthScreen() {
       cancelled = true;
       unsub?.();
       setCode('');
+      setEmailCode('');
       setPassword('');
     };
 
@@ -162,6 +167,45 @@ export default function TelegramAuthScreen() {
       setLoading(false);
     }
   }, [adapter, password]);
+
+  const handleSubmitEmail = useCallback(async () => {
+    if (!adapter) return;
+    setError(null);
+    setLoading(true);
+    try {
+      await adapter.submitEmailAddress(email);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to submit email.');
+      setLoading(false);
+    }
+  }, [adapter, email]);
+
+  const handleSubmitEmailCode = useCallback(async () => {
+    if (!adapter) return;
+    setError(null);
+    setLoading(true);
+    try {
+      await adapter.submitEmailCode(emailCode);
+      setEmailCode('');
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Invalid email code.');
+      setLoading(false);
+    }
+  }, [adapter, emailCode]);
+
+  const handleSubmitRegistration = useCallback(async () => {
+    if (!adapter) return;
+    setError(null);
+    setLoading(true);
+    try {
+      await adapter.submitRegistration(firstName, lastName);
+      setFirstName('');
+      setLastName('');
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to complete registration.');
+      setLoading(false);
+    }
+  }, [adapter, firstName, lastName]);
 
   const handleCancel = useCallback(() => {
     cleanupRef.current();
@@ -271,6 +315,110 @@ export default function TelegramAuthScreen() {
               disabled={loading || password.length === 0}
             />
           </>
+        ) : authState.type === 'wait_email_address' ? (
+          <>
+            <Text variant="body" tone="secondary" style={styles.description}>
+              Verify your email address to continue.
+            </Text>
+            <TextInput
+              style={styles.input}
+              placeholder="name@example.com"
+              placeholderTextColor={palette.textFaint}
+              keyboardType="email-address"
+              autoCapitalize="none"
+              value={email}
+              onChangeText={setEmail}
+              autoFocus
+              editable={!loading}
+            />
+            <Button
+              label={loading ? 'Sending…' : 'Continue'}
+              onPress={handleSubmitEmail}
+              disabled={loading || !email.includes('@')}
+            />
+          </>
+        ) : authState.type === 'wait_email_code' ? (
+          <>
+            <Text variant="body" tone="secondary" style={styles.description}>
+              Check your email
+              {authState.emailAddressPattern
+                ? ` (${authState.emailAddressPattern})`
+                : ''}{' '}
+              for a verification code
+              {authState.codeLength ? ` (${authState.codeLength} digits)` : ''}.
+            </Text>
+            <TextInput
+              style={styles.input}
+              placeholder={authState.codeLength
+                ? Array.from({ length: authState.codeLength }).fill('0').join('')
+                : '000000'}
+              placeholderTextColor={palette.textFaint}
+              keyboardType="number-pad"
+              value={emailCode}
+              onChangeText={setEmailCode}
+              maxLength={authState.codeLength ?? 6}
+              autoFocus
+              editable={!loading}
+            />
+            <Button
+              label={loading ? 'Verifying…' : 'Verify'}
+              onPress={handleSubmitEmailCode}
+              disabled={
+                loading ||
+                (authState.codeLength !== undefined
+                  ? emailCode.length !== authState.codeLength
+                  : emailCode.length === 0)
+              }
+            />
+          </>
+        ) : authState.type === 'wait_registration' ? (
+          <>
+            <Text variant="body" tone="secondary" style={styles.description}>
+              Create your Telegram account.
+            </Text>
+            {authState.termsOfServiceText ? (
+              <Text variant="bodySmall" tone="secondary" style={styles.description}>
+                {authState.termsOfServiceText}
+              </Text>
+            ) : null}
+            <TextInput
+              style={styles.input}
+              placeholder="First name"
+              placeholderTextColor={palette.textFaint}
+              value={firstName}
+              onChangeText={setFirstName}
+              autoFocus
+              editable={!loading}
+            />
+            <TextInput
+              style={styles.input}
+              placeholder="Last name (optional)"
+              placeholderTextColor={palette.textFaint}
+              value={lastName}
+              onChangeText={setLastName}
+              editable={!loading}
+            />
+            <Button
+              label={loading ? 'Creating…' : 'Create account'}
+              onPress={handleSubmitRegistration}
+              disabled={loading || !firstName.trim()}
+            />
+          </>
+        ) : authState.type === 'wait_other_device_confirmation' ? (
+          <>
+            <Text variant="body" tone="secondary" style={styles.description}>
+              Open Telegram on a device where you are already signed in
+              and confirm this login attempt.
+            </Text>
+          </>
+        ) : authState.type === 'wait_premium_purchase' ? (
+          <>
+            <Text variant="body" tone="danger" style={styles.description}>
+              This Telegram account requires a Premium purchase to log in.
+              Creepy.IM does not support this authorization method.
+            </Text>
+            <Button label="Back" onPress={handleCancel} />
+          </>
         ) : authState.type === 'ready' ? (
           <View style={styles.centered}>
             <ActivityIndicator size="large" color={palette.brand} />
@@ -327,8 +475,18 @@ function getStepTitle(stateType: string): string {
       return 'Your phone number';
     case 'wait_code':
       return 'Verification code';
+    case 'wait_email_address':
+      return 'Your email';
+    case 'wait_email_code':
+      return 'Email verification';
     case 'wait_password':
       return 'Two-factor password';
+    case 'wait_registration':
+      return 'Create account';
+    case 'wait_other_device_confirmation':
+      return 'Confirm on another device';
+    case 'wait_premium_purchase':
+      return 'Premium required';
     case 'ready':
       return 'Connected!';
     case 'logging_out':

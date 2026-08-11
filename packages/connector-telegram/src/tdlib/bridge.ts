@@ -150,6 +150,47 @@ export class NativeTdlibAdapter implements TdlibAdapter {
     }
   }
 
+  async submitEmailAddress(email: string): Promise<void> {
+    const tdlib = this.assertModule();
+    try {
+      await tdlib.td_json_client_send({
+        ['@type']: 'setAuthenticationEmailAddress',
+        email_address: email,
+      });
+    } catch (error) {
+      throw mapTdlibError(error, 'email submission');
+    }
+  }
+
+  async submitEmailCode(code: string): Promise<void> {
+    const tdlib = this.assertModule();
+    try {
+      await tdlib.td_json_client_send({
+        ['@type']: 'checkAuthenticationEmailCode',
+        code: {
+          ['@type']: 'emailAddressAuthenticationCode',
+          code,
+        },
+      });
+    } catch (error) {
+      throw mapTdlibError(error, 'email code verification');
+    }
+  }
+
+  async submitRegistration(firstName: string, lastName: string): Promise<void> {
+    const tdlib = this.assertModule();
+    try {
+      await tdlib.td_json_client_send({
+        ['@type']: 'registerUser',
+        first_name: firstName,
+        last_name: lastName,
+        disable_notification: false,
+      });
+    } catch (error) {
+      throw mapTdlibError(error, 'registration');
+    }
+  }
+
   async searchChats(query: string, limit = 10): Promise<TdChat[]> {
     const tdlib = this.assertModule();
     try {
@@ -291,21 +332,26 @@ export class NativeTdlibAdapter implements TdlibAdapter {
     try {
       const raw = await tdlib.getAuthorizationState();
       const parsed = JSON.parse(raw) as Record<string, unknown>;
-
-      if (isTdlibReadyState(parsed)) {
-        await this.resolveReadyUser(tdlib);
-        return;
-      }
-
-      const mapped = mapAuthorizationState(parsed);
-      this.transition(mapped);
-    } catch (error) {
-      // Reconciliation failure is not fatal — events may still arrive.
+      await this.handleAuthorizationState(tdlib, parsed);
+    } catch {
       this.transition({
         type: 'error',
         message: 'Failed to reconcile Telegram authorization state.',
       });
     }
+  }
+
+  private async handleAuthorizationState(
+    tdlib: ReactNativeTdLib,
+    rawState: Record<string, unknown>,
+  ): Promise<void> {
+    if (isTdlibReadyState(rawState)) {
+      await this.resolveReadyUser(tdlib);
+      return;
+    }
+
+    const next = mapAuthorizationState(rawState);
+    this.transition(next);
   }
 
   private async resolveReadyUser(
@@ -366,13 +412,9 @@ export class NativeTdlibAdapter implements TdlibAdapter {
         const authState =
           update.authorization_state as Record<string, unknown> | undefined;
 
-        if (authState && isTdlibReadyState(authState)) {
-          await this.resolveReadyUser(tdlib);
-          return;
+        if (authState) {
+          await this.handleAuthorizationState(tdlib, authState);
         }
-
-        const nextState = mapAuthorizationState(authState ?? null);
-        this.transition(nextState);
         break;
       }
 

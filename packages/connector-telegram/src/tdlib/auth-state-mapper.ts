@@ -34,7 +34,44 @@ export function mapAuthorizationState(
           : typeof info?.length === 'number'
             ? (info.length as number)
             : undefined;
-      return { type: 'wait_code', codeLength: length };
+      const phoneNumber =
+        typeof info?.phone_number === 'string'
+          ? (info.phone_number as string)
+          : undefined;
+      const timeoutSeconds =
+        typeof info?.timeout === 'number'
+          ? (info.timeout as number)
+          : undefined;
+      return { type: 'wait_code', codeLength: length, phoneNumber, timeoutSeconds };
+    }
+
+    case 'WaitEmailAddress':
+      return {
+        type: 'wait_email_address',
+        allowAppleId: Boolean(raw.allow_apple_id),
+        allowGoogleId: Boolean(raw.allow_google_id),
+      };
+
+    case 'WaitEmailCode': {
+      const info = raw.code_info as Record<string, unknown> | undefined;
+      const codeType = info?.type as Record<string, unknown> | undefined;
+      const length =
+        typeof codeType?.length === 'number'
+          ? (codeType.length as number)
+          : typeof info?.length === 'number'
+            ? (info.length as number)
+            : undefined;
+      const emailPattern =
+        typeof info?.email_address_pattern === 'string'
+          ? (info.email_address_pattern as string)
+          : undefined;
+      return {
+        type: 'wait_email_code',
+        emailAddressPattern: emailPattern,
+        codeLength: length,
+        allowAppleId: Boolean(raw.allow_apple_id),
+        allowGoogleId: Boolean(raw.allow_google_id),
+      };
     }
 
     case 'WaitPassword': {
@@ -44,6 +81,36 @@ export function mapAuthorizationState(
           : undefined;
       return { type: 'wait_password', passwordHint };
     }
+
+    case 'WaitRegistration': {
+      const tos = raw.terms_of_service as Record<string, unknown> | undefined;
+      const tosText =
+        typeof tos?.text === 'string' && (tos.text as string).length > 0
+          ? { text: tos.text as string, minUserAge: tos.min_user_age }
+          : undefined;
+      return {
+        type: 'wait_registration',
+        termsOfServiceText:
+          typeof tosText?.text === 'string'
+            ? (tosText.text as string).slice(0, 2000)
+            : undefined,
+      };
+    }
+
+    case 'WaitOtherDeviceConfirmation':
+      return {
+        type: 'wait_other_device_confirmation',
+        link: typeof raw.link === 'string' ? (raw.link as string) : '',
+      };
+
+    case 'WaitPremiumPurchase':
+      return {
+        type: 'wait_premium_purchase',
+        supportEmail:
+          typeof raw.support_email_address === 'string'
+            ? (raw.support_email_address as string)
+            : undefined,
+      };
 
     case 'Ready':
       // TDLib says "Ready", but we need the user profile before
@@ -64,16 +131,6 @@ export function mapAuthorizationState(
     case 'WaitEncryptionKey':
       // Handled internally by react-native-tdlib during startup.
       return { type: 'initializing' };
-
-    case 'WaitEmailAddress':
-    case 'WaitEmailCode':
-    case 'WaitRegistration':
-    case 'WaitOtherDeviceConfirmation':
-    case 'WaitPremiumPurchase':
-      return {
-        type: 'error',
-        message: 'This Telegram authorization method is not supported yet.',
-      };
 
     default:
       return typeStr

@@ -30,7 +30,7 @@ export interface UseAgentChatOptions {
 }
 
 export interface AgentChat {
-  /** 'agent' runs the tool loop; 'text-only' is the honest remote fallback. */
+  /** 'agent' runs the tool loop via AgentRuntime; 'text-only' degrades when no model is available. */
   mode: 'agent' | 'text-only';
   messages: readonly AgentMessage[];
   runState: AgentRunState;
@@ -56,7 +56,7 @@ export function useAgentChat(options: UseAgentChatOptions = {}): AgentChat {
   const { model, modelId } = useAgentContext();
   const queryClient = useQueryClient();
 
-  // Text-only fallback path (remote engine without a tool contract).
+  // Text-only degrades when no AgentModel is available (local engine not ready).
   const textChat = useCreepyChat({ threadId: options.threadId });
 
   const runtimeQuery = useQuery({

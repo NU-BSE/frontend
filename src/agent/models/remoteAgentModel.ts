@@ -2,6 +2,7 @@ import * as z from 'zod/v4';
 
 import type {
   AgentModel,
+  AgentModelExecution,
   AgentModelInput,
   AgentModelResult,
 } from '../types';
@@ -42,8 +43,24 @@ const agentResultSchema = z
     }),
   ]);
 
+const modelTierSchema = z.enum([
+  'fast',
+  'normal',
+  'expert',
+]);
+
+const usageSchema = z.object({
+  promptTokens: z.number(),
+  completionTokens: z.number(),
+  totalTokens: z.number(),
+});
+
 const agentStepResponseSchema = z.object({
+  requestedModelTier: modelTierSchema,
+  effectiveModelTier: modelTierSchema,
+  routingReason: z.string(),
   result: agentResultSchema,
+  usage: usageSchema.nullish(),
 });
 
 interface RemoteAgentModelOptions {
@@ -168,7 +185,17 @@ export function createRemoteAgentModel(
         }
       }
 
-      const json = await response.json();
+      let json: unknown;
+      try {
+        json = await response.json();
+      } catch (error) {
+        throw new AgentError(
+          'MODEL_ERROR',
+          'The server returned malformed JSON.',
+          error,
+        );
+      }
+
       const parsed = agentStepResponseSchema.safeParse(json);
 
       if (!parsed.success) {
@@ -179,16 +206,31 @@ export function createRemoteAgentModel(
         );
       }
 
-      const result = parsed.data.result;
+      const data = parsed.data;
 
-      if (result.kind === 'tool_calls') {
+      const execution: AgentModelExecution = {
+        requestedTier: data.requestedModelTier,
+        effectiveTier: data.effectiveModelTier,
+        routingReason: data.routingReason,
+        usage: data.usage ?? undefined,
+      };
+
+      if (data.result.kind === 'final') {
         return {
-          ...result,
-          text: result.text ?? undefined,
-        } as AgentModelResult;
+          kind: 'final',
+          text: data.result.text,
+          reasoning: data.result.reasoning,
+          execution,
+        };
       }
 
-      return result as AgentModelResult;
+      return {
+        kind: 'tool_calls',
+        text: data.result.text ?? undefined,
+        toolCalls: data.result.toolCalls,
+        reasoning: data.result.reasoning,
+        execution,
+      };
     },
   };
 }

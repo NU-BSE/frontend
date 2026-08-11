@@ -27,6 +27,8 @@ export function createRunTelemetry(
     completedSuccessfully: false,
     escalationCount: 0,
     transitions: [],
+    backendDowngradeCount: 0,
+    providerFallbackCount: 0,
     durationMs: 0,
   };
 }

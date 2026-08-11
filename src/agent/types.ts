@@ -83,9 +83,33 @@ export interface AgentReasoningMetadata {
   needsDeeperReasoning?: boolean;
 }
 
+export interface AgentModelUsage {
+  promptTokens: number;
+  completionTokens: number;
+  totalTokens: number;
+}
+
+export interface AgentModelExecution {
+  requestedTier: import('./routing/types').ModelTier;
+  effectiveTier: import('./routing/types').ModelTier;
+  routingReason: string;
+  usage?: AgentModelUsage;
+}
+
 export type AgentModelResult =
-  | { kind: 'final'; text: string; reasoning?: AgentReasoningMetadata; }
-  | { kind: 'tool_calls'; text?: string; toolCalls: AgentToolCall[]; reasoning?: AgentReasoningMetadata; };
+  | {
+      kind: 'final';
+      text: string;
+      reasoning?: AgentReasoningMetadata;
+      execution?: AgentModelExecution;
+    }
+  | {
+      kind: 'tool_calls';
+      text?: string;
+      toolCalls: AgentToolCall[];
+      reasoning?: AgentReasoningMetadata;
+      execution?: AgentModelExecution;
+    };
 
 /** Compact, secret-free description of what the user has connected. */
 export interface ConnectionSummary {
@@ -113,7 +137,7 @@ export interface AgentModelInput {
  * The agent-facing model interface. Implementations:
  * - structured planner over a local text engine;
  * - deterministic planner for development and tests;
- * - (future) remote tool-capable model.
+ * - remote tool-capable model via FastAPI/OpenRouter.
  *
  * A plain text completion must never be passed off as a native tool call:
  * models without `toolCalling` capability get no tools at all.

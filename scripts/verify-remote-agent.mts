@@ -1,14 +1,17 @@
 /**
  * Remote agent wire-contract tests.
  *
- * Verifies the request shape, response parsing, error handling and Zod
- * validation of the POST /agent/step adapter.
+ * Verifies the request shape, response parsing, error handling, Zod
+ * validation and execution metadata of the POST /agent/step adapter.
  *
  * Run: npm run verify:remote-agent
  */
 import { createRemoteAgentModel } from '../src/agent/models/remoteAgentModel.js';
 import { AgentError } from '../src/agent/types.js';
-import type { AgentModelInput } from '../src/agent/types.js';
+import type {
+  AgentModelInput,
+  AgentModelResult,
+} from '../src/agent/types.js';
 import type { LlmRoutingContext } from '../src/agent/routing/types.js';
 
 function assert(condition: unknown, message: string): asserts condition {
@@ -24,7 +27,7 @@ function baseInput(overrides?: Partial<AgentModelInput>): AgentModelInput {
   return {
     runId: 'run-test-1',
     messages: [
-      { id: 'msg_1', role: 'user', content: 'Find Daniyar in Telegram' },
+      { id: 'msg_1', role: 'user' as const, content: 'Find Daniyar in Telegram' },
     ],
     tools: [
       {
@@ -68,6 +71,24 @@ function baseInput(overrides?: Partial<AgentModelInput>): AgentModelInput {
   };
 }
 
+function successBody(
+  result: unknown,
+  overrides?: {
+    requestedModelTier?: string;
+    effectiveModelTier?: string;
+    routingReason?: string;
+    usage?: { promptTokens: number; completionTokens: number; totalTokens: number } | null;
+  },
+): string {
+  return JSON.stringify({
+    requestedModelTier: overrides?.requestedModelTier ?? 'normal',
+    effectiveModelTier: overrides?.effectiveModelTier ?? 'normal',
+    routingReason: overrides?.routingReason ?? 'requested',
+    usage: overrides?.usage === undefined ? null : overrides.usage,
+    result,
+  });
+}
+
 type FetchMock = (
   url: string | URL,
   init?: RequestInit,
@@ -93,7 +114,7 @@ async function main(): Promise<void> {
       const body = JSON.parse((init?.body as string) ?? '{}');
       fetches.push({ body });
       return new Response(
-        JSON.stringify({ result: { kind: 'final', text: 'ok' } }),
+        successBody({ kind: 'final', text: 'ok' }),
         { status: 200 },
       );
     };
@@ -126,7 +147,7 @@ async function main(): Promise<void> {
   {
     const mockFetch: FetchMock = async () => {
       return new Response(
-        JSON.stringify({ result: { kind: 'final', text: 'Done' } }),
+        successBody({ kind: 'final', text: 'Done' }),
         { status: 200 },
       );
     };
@@ -148,18 +169,16 @@ async function main(): Promise<void> {
   {
     const mockFetch: FetchMock = async () => {
       return new Response(
-        JSON.stringify({
-          result: {
-            kind: 'tool_calls',
-            text: null,
-            toolCalls: [
-              {
-                id: 'call_1',
-                toolName: 'telegram.user.search_chats',
-                args: { connectionId: 'telegram-user-test', query: 'Daniyar' },
-              },
-            ],
-          },
+        successBody({
+          kind: 'tool_calls',
+          text: null,
+          toolCalls: [
+            {
+              id: 'call_1',
+              toolName: 'telegram.user.search_chats',
+              args: { connectionId: 'telegram-user-test', query: 'Daniyar' },
+            },
+          ],
         }),
         { status: 200 },
       );
@@ -188,7 +207,57 @@ async function main(): Promise<void> {
   }
 
   // -------------------------------------------------------------------
-  // D. Error responses
+  // D. Execution metadata
+  // -------------------------------------------------------------------
+  console.log('execution metadata:');
+  {
+    const mockFetch: FetchMock = async () => {
+      return new Response(
+        successBody(
+          { kind: 'final', text: 'Done' },
+          {
+            requestedModelTier: 'expert',
+            effectiveModelTier: 'normal',
+            routingReason: 'expert_budget_unavailable',
+            usage: {
+              promptTokens: 100,
+              completionTokens: 30,
+              totalTokens: 130,
+            },
+          },
+        ),
+        { status: 200 },
+      );
+    };
+
+    const model = createRemoteAgentModel({
+      baseUrl: 'http://test',
+    });
+
+    const result = (await withFetch(mockFetch, () =>
+      model.run(baseInput()),
+    )) as AgentModelResult;
+
+    assert(
+      result.execution?.requestedTier === 'expert',
+      'requested tier is expert',
+    );
+    assert(
+      result.execution?.effectiveTier === 'normal',
+      'effective tier is normal',
+    );
+    assert(
+      result.execution?.routingReason === 'expert_budget_unavailable',
+      'routing reason is preserved',
+    );
+    assert(
+      result.execution?.usage?.totalTokens === 130,
+      'token usage is preserved',
+    );
+  }
+
+  // -------------------------------------------------------------------
+  // E. Error responses
   // -------------------------------------------------------------------
   console.log('error responses:');
 
@@ -226,7 +295,7 @@ async function main(): Promise<void> {
   await assertErrorCode(502, { message: 'Bad gateway' }, 'NETWORK_ERROR', '502');
 
   // -------------------------------------------------------------------
-  // D2. Invalid JSON / schema — MODEL_ERROR
+  // E2. Invalid JSON / schema — MODEL_ERROR
   // -------------------------------------------------------------------
   console.log('invalid server response:');
   {
@@ -248,6 +317,33 @@ async function main(): Promise<void> {
       assert(error instanceof AgentError, 'invalid schema throws AgentError');
       if (error instanceof AgentError) {
         assertEq(error.code, 'MODEL_ERROR', 'invalid schema code is MODEL_ERROR');
+      }
+    }
+  }
+
+  // -------------------------------------------------------------------
+  // E3. Malformed JSON — MODEL_ERROR
+  // -------------------------------------------------------------------
+  console.log('malformed JSON response:');
+  {
+    const mockFetch: FetchMock = async () => {
+      return new Response(
+        '{not valid json',
+        { status: 200, headers: { 'Content-Type': 'text/html' } },
+      );
+    };
+
+    const model = createRemoteAgentModel({
+      baseUrl: 'http://test',
+    });
+
+    try {
+      await withFetch(mockFetch, () => model.run(baseInput()));
+      throw new Error('FAIL: expected error for malformed JSON');
+    } catch (error) {
+      assert(error instanceof AgentError, 'malformed JSON throws AgentError');
+      if (error instanceof AgentError) {
+        assertEq(error.code, 'MODEL_ERROR', 'malformed JSON code is MODEL_ERROR');
       }
     }
   }

@@ -210,10 +210,8 @@ export class AgentRuntime {
         this.routingMonitor.recordStep();
 
         this.setState({ type: 'thinking' });
-        recordModelCall(
-          routingTelemetry,
-          this.currentTier,
-        );
+
+        const requestedTier = this.currentTier;
 
         const result =
           await this.options.model.run({
@@ -227,6 +225,41 @@ export class AgentRuntime {
               this.routingMonitor
                 .buildRoutingContext(),
           });
+
+        const effectiveTier =
+          result.execution
+            ?.effectiveTier ??
+          requestedTier;
+
+        recordModelCall(
+          routingTelemetry,
+          effectiveTier,
+        );
+
+        const execution =
+          result.execution;
+
+        if (execution) {
+          if (
+            tierRank(
+              execution.effectiveTier,
+            ) <
+            tierRank(
+              execution.requestedTier,
+            )
+          ) {
+            routingTelemetry
+              .backendDowngradeCount += 1;
+          }
+
+          if (
+            execution.routingReason ===
+            'provider_fallback'
+          ) {
+            routingTelemetry
+              .providerFallbackCount += 1;
+          }
+        }
 
         this.routingMonitor.recordModelResponse(result);
 
@@ -493,5 +526,16 @@ export class AgentRuntime {
   private nextId(prefix: string): string {
     this.idCounter += 1;
     return `${prefix}_${this.idCounter.toString(36)}_${Date.now().toString(36)}`;
+  }
+}
+
+function tierRank(tier: ModelTier): number {
+  switch (tier) {
+    case 'fast':
+      return 0;
+    case 'normal':
+      return 1;
+    case 'expert':
+      return 2;
   }
 }

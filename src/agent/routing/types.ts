@@ -163,6 +163,8 @@ export interface RoutingTelemetry {
   durationMs: number;
   escalationCount: number;
   transitions: TierTransition[];
+  backendDowngradeCount: number;
+  providerFallbackCount: number;
 }
 
 /** Lightweight plan identity for detecting replanning. */

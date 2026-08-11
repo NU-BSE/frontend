@@ -1,5 +1,6 @@
 import { ROUTING_CONFIG } from './config';
 import type { AgentRunMetrics, ReasoningSignals } from './types';
+import type { ProgressTracker } from './progressTracker';
 
 /**
  * Converts raw run metrics into the structured signal set the reasoning
@@ -12,7 +13,12 @@ export function buildSignals(
   isRepeating: boolean,
   consecutiveFailedPlans: number,
   consecutiveReplans: number,
+  repeatedFailurePattern: number,
+  progressTracker?: ProgressTracker,
 ): ReasoningSignals {
+  const noProgressSteps = progressTracker?.getStuckStepCount() ?? 0;
+  const isStuck = progressTracker?.isStuck() ?? false;
+
   return {
     toolCalls: metrics.toolCalls,
     connectorCount: metrics.connectorDomains.size,
@@ -35,8 +41,10 @@ export function buildSignals(
 
     failedPlans: consecutiveFailedPlans,
     replans: consecutiveReplans,
-    repeatedToolPattern: isRepeating,
+    repeatedToolPattern: isRepeating || isStuck,
     invalidToolCalls: metrics.invalidToolCalls,
-    repeatedToolFailures: metrics.failedToolCalls,
+    // Only count repeated *same-pattern* failures, not total failures.
+    repeatedToolFailures: repeatedFailurePattern,
+    noProgressSteps,
   };
 }

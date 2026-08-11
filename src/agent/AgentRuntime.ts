@@ -2,6 +2,8 @@ import type { AgentMcpClient } from '@mobile-agent/mcp-client';
 
 import { mapMcpTools } from './toolMapper';
 import { executeApprovedToolCall, executeToolCall } from './toolExecutor';
+import { ToolExecutionLedger } from './toolExecutionLedger';
+import { detectStepProgress } from './routing/progressTracker';
 import {
   AgentError,
   MAX_AGENT_STEPS,
@@ -98,6 +100,9 @@ export class AgentRuntime {
   /** The active model tier — starts at the initial estimate, may escalate. */
   private currentTier: ModelTier = 'fast';
 
+  /** Per-run ledger that prevents replaying completed side effects. */
+  private readonly toolLedger = new ToolExecutionLedger();
+
   constructor(private readonly options: AgentRuntimeOptions) {
     this.maxSteps = options.maxSteps ?? MAX_AGENT_STEPS;
   }
@@ -176,6 +181,7 @@ export class AgentRuntime {
     // Adaptive routing: boot based on the user's request and reset the
     // monitor from any previous run.
     this.routingMonitor.reset();
+    this.toolLedger.reset();
 
     const initialEstimate =
       estimateInitialTier(text);
@@ -203,6 +209,7 @@ export class AgentRuntime {
       const tools = mapMcpTools(mcpTools);
 
       let step = 0;
+      let previousStepToolNames: string[] = [];
       while (step < this.maxSteps) {
         step += 1;
         this.throwIfAborted(controller.signal);
@@ -302,6 +309,47 @@ export class AgentRuntime {
 
           this.routingMonitor.recordToolCall(call);
 
+          const toolDef = tools.find((tool) => tool.name === call.toolName);
+          const isSideEffect =
+            toolDef?.risk === 'write' ||
+            toolDef?.risk === 'external_side_effect' ||
+            toolDef?.risk === 'destructive';
+
+          // Idempotency guard: never replay a completed side effect.
+          if (isSideEffect) {
+            const duplicate =
+              this.toolLedger.findDuplicate(call);
+
+            if (duplicate) {
+              const dedupResult: AgentToolResult = {
+                status: 'success',
+                data: { deduplicated: true, originalCallId: duplicate.toolCallId },
+              };
+
+              this.routingMonitor.recordToolResult(
+                call,
+                dedupResult,
+                toolDef?.risk,
+              );
+
+              steps.push({
+                type: 'tool_result',
+                toolName: call.toolName,
+                success: true,
+              });
+
+              this.pushMessage({
+                id: this.nextId('msg'),
+                role: 'tool',
+                toolCallId: call.id,
+                toolName: call.toolName,
+                result: dedupResult,
+              });
+
+              continue;
+            }
+          }
+
           let toolResult = await executeToolCall(
             this.options.mcp,
             call,
@@ -312,7 +360,8 @@ export class AgentRuntime {
             toolResult = await this.handleApproval(call, toolResult, steps);
           }
 
-          const toolDef = tools.find((tool) => tool.name === call.toolName);
+          this.toolLedger.record(call, toolResult);
+
           this.routingMonitor.recordToolResult(
             call,
             toolResult,
@@ -333,6 +382,20 @@ export class AgentRuntime {
             result: toolResult,
           });
         }
+
+        // Progress tracking: detect whether this step moved the run forward.
+        const currentStepToolNames = result.toolCalls.map((tc) => tc.toolName);
+        const hadNewResults = result.toolCalls.some(
+          (tc) => !this.toolLedger.findDuplicate(tc),
+        );
+        const stepProgress = detectStepProgress(
+          currentStepToolNames,
+          previousStepToolNames,
+          hadNewResults,
+          false,
+        );
+        this.routingMonitor.recordProgress(stepProgress);
+        previousStepToolNames = currentStepToolNames;
 
         // Check whether the current tier needs escalation after this tool batch.
         const routingDecision = this.routingMonitor.chooseTier();
@@ -420,11 +483,21 @@ export class AgentRuntime {
     const approval = this.pendingApproval;
     if (!decision || !approval) return;
 
-    this.pendingDecision = null;
-    this.pendingApproval = null;
-
-    await this.options.approveApproval(approval.approvalId);
-    decision.resolve('approved');
+    try {
+      await this.options.approveApproval(approval.approvalId);
+      this.pendingDecision = null;
+      this.pendingApproval = null;
+      decision.resolve('approved');
+    } catch {
+      // Restore so the user can retry or cancel — the pending approval
+      // must not silently disappear on an approval-service failure.
+      this.pendingDecision = decision;
+      this.pendingApproval = approval;
+      throw new AgentError(
+        'TOOL_EXECUTION_ERROR',
+        'Failed to mark the approval as confirmed. You can try again or cancel.',
+      );
+    }
   }
 
   /**

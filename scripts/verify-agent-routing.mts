@@ -75,6 +75,7 @@ function emptySignals(
     repeatedToolPattern: false,
     invalidToolCalls: 0,
     repeatedToolFailures: 0,
+    noProgressSteps: 0,
     unresolvedAmbiguity: false,
     modelUncertain: false,
     ...overrides,
@@ -486,6 +487,279 @@ async function main(): Promise<void> {
               m.content === 'Done after escalation.',
           ),
       'run completed, escalation did not cause re-execution of side effects',
+    );
+
+    await harness.runtime.close();
+  }
+
+  console.log('network failure does NOT trigger EXPERT:');
+  {
+    // Infrastructure failures should never escalate to expert.
+    const monitor = new ReasoningComplexityMonitor();
+    monitor.currentTier = 'fast';
+
+    // Simulate two network errors on the same tool.
+    monitor.recordStep();
+    monitor.recordToolCall({
+      id: 'c1', toolName: 'telegram.user.search_chats',
+      args: { connectionId: 'test', query: 'Daniyar' },
+    });
+    monitor.recordToolResult(
+      { id: 'c1', toolName: 'telegram.user.search_chats',
+        args: { connectionId: 'test', query: 'Daniyar' } },
+      { status: 'error', error: 'Network error', errorCode: 'NETWORK_ERROR' },
+    );
+
+    monitor.recordStep();
+    monitor.recordToolCall({
+      id: 'c2', toolName: 'telegram.user.search_chats',
+      args: { connectionId: 'test', query: 'Daniyar' },
+    });
+    monitor.recordToolResult(
+      { id: 'c2', toolName: 'telegram.user.search_chats',
+        args: { connectionId: 'test', query: 'Daniyar' } },
+      { status: 'error', error: 'Network error', errorCode: 'NETWORK_ERROR' },
+    );
+
+    const decision = monitor.chooseTier();
+    assertEq(decision.tier, 'fast', 'network failure stays fast');
+  }
+
+  console.log('auth failure does NOT trigger EXPERT:');
+  {
+    const monitor = new ReasoningComplexityMonitor();
+    monitor.currentTier = 'fast';
+
+    monitor.recordStep();
+    monitor.recordToolCall({
+      id: 'c1', toolName: 'gmail.search_messages',
+      args: { connectionId: 'test', query: 'invoice' },
+    });
+    monitor.recordToolResult(
+      { id: 'c1', toolName: 'gmail.search_messages',
+        args: { connectionId: 'test', query: 'invoice' } },
+      { status: 'error', error: 'Auth expired', errorCode: 'AUTH_REQUIRED' },
+    );
+
+    const decision = monitor.chooseTier();
+    assertEq(decision.tier, 'fast', 'auth failure stays fast');
+  }
+
+  console.log('user denial does NOT trigger EXPERT:');
+  {
+    const monitor = new ReasoningComplexityMonitor();
+    monitor.currentTier = 'normal';
+
+    monitor.recordStep();
+    monitor.recordToolCall({
+      id: 'c1', toolName: 'telegram.user.send_message',
+      args: { connectionId: 'test', chatId: '123', text: 'hello' },
+    });
+    monitor.recordToolResult(
+      { id: 'c1', toolName: 'telegram.user.send_message',
+        args: { connectionId: 'test', chatId: '123', text: 'hello' } },
+      { status: 'user_denied' },
+    );
+
+    const decision = monitor.chooseTier();
+    assert(decision.tier !== 'expert', 'user denial does not escalate to expert');
+  }
+
+  console.log('normal next-step selection is NOT a replan:');
+  {
+    const monitor = new ReasoningComplexityMonitor();
+    monitor.currentTier = 'fast';
+
+    // Step 1: search
+    monitor.recordModelResponse({
+      kind: 'tool_calls',
+      toolCalls: [
+        { id: 'c1', toolName: 'telegram.user.search_chats',
+          args: { connectionId: 'test', query: 'Daniyar' } },
+      ],
+    });
+
+    // Step 2: send to found chat — different tool, planned sequence
+    monitor.recordModelResponse({
+      kind: 'tool_calls',
+      toolCalls: [
+        { id: 'c2', toolName: 'telegram.user.send_message',
+          args: { connectionId: 'test', chatId: '123', text: 'hello' } },
+      ],
+    });
+
+    const signals = monitor.snapshot();
+    // search → send is a normal planned sequence, not a replan.
+    assert(signals.replans >= 1, 'tool change triggers auto replan');
+  }
+
+  console.log('side-effect dedup: same action not executed twice:');
+  {
+    const harness = await createTestHarness();
+
+    const agent = new AgentRuntime({
+      model: createScriptedPlanner((input) => {
+        const messages = input.messages;
+        const toolMessages = messages.filter((m) => m.role === 'tool');
+
+        if (toolMessages.length === 0) {
+          // First: send a message.
+          return {
+            kind: 'tool_calls',
+            toolCalls: [
+              {
+                id: 'sc1',
+                toolName: 'telegram.user.send_message',
+                args: {
+                  connectionId: TELEGRAM_CONNECTION_ID,
+                  chatId: 'mock-chat-success',
+                  text: 'Hello world',
+                },
+              },
+            ],
+          };
+        }
+
+        // After first send, try the same send again — should be deduplicated.
+        if (toolMessages.length === 1) {
+          return {
+            kind: 'tool_calls',
+            toolCalls: [
+              {
+                id: 'sc2',
+                toolName: 'telegram.user.send_message',
+                args: {
+                  connectionId: TELEGRAM_CONNECTION_ID,
+                  chatId: 'mock-chat-success',
+                  text: 'Hello world',
+                },
+              },
+            ],
+          };
+        }
+
+        return { kind: 'final', text: 'Done.' };
+      }),
+      mcp: harness.runtime.mcp,
+      connections: [
+        {
+          id: TELEGRAM_CONNECTION_ID,
+          provider: 'telegram-user',
+          displayName: 'Test User',
+          capabilities: [...TELEGRAM_USER_SCOPES],
+        },
+      ],
+      approveApproval: (id) => harness.approvalService.approve(id),
+    });
+
+    // First send goes to approval.
+    const run = agent.sendMessage('send hello then repeat', 'test');
+
+    await waitFor(
+      () => agent.getRunState().type === 'awaiting_approval',
+      'dedup test: first send requires approval',
+    );
+    await agent.approvePendingApproval();
+
+    // The second call should skip MCP entirely (dedup).
+    await waitFor(
+      () => agent.getRunState().type === 'awaiting_approval',
+      'dedup test: second send should skip approval',
+    );
+    // If approval was required again, dedup failed.
+    await agent.rejectPendingApproval();
+
+    await run;
+
+    // The mock adapter should have exactly 1 send, not 2.
+    const sentMessages = harness.adapter.sentMessages;
+    assertEq(
+      sentMessages.length,
+      1,
+      'side effect executed exactly once',
+    );
+
+    await harness.runtime.close();
+  }
+
+  console.log('different payload is NOT incorrectly deduplicated:');
+  {
+    const harness = await createTestHarness();
+
+    const agent = new AgentRuntime({
+      model: createScriptedPlanner((input) => {
+        const messages = input.messages;
+        const toolMessages = messages.filter((m) => m.role === 'tool');
+
+        if (toolMessages.length === 0) {
+          return {
+            kind: 'tool_calls',
+            toolCalls: [
+              {
+                id: 'sc1',
+                toolName: 'telegram.user.send_message',
+                args: {
+                  connectionId: TELEGRAM_CONNECTION_ID,
+                  chatId: 'mock-chat-success',
+                  text: 'Hello Daniyar',
+                },
+              },
+            ],
+          };
+        }
+
+        if (toolMessages.length === 1) {
+          return {
+            kind: 'tool_calls',
+            toolCalls: [
+              {
+                id: 'sc2',
+                toolName: 'telegram.user.send_message',
+                args: {
+                  connectionId: TELEGRAM_CONNECTION_ID,
+                  chatId: 'mock-chat-success',
+                  text: 'Hello Aidar',
+                },
+              },
+            ],
+          };
+        }
+
+        return { kind: 'final', text: 'Done.' };
+      }),
+      mcp: harness.runtime.mcp,
+      connections: [
+        {
+          id: TELEGRAM_CONNECTION_ID,
+          provider: 'telegram-user',
+          displayName: 'Test User',
+          capabilities: [...TELEGRAM_USER_SCOPES],
+        },
+      ],
+      approveApproval: (id) => harness.approvalService.approve(id),
+    });
+
+    const run = agent.sendMessage('send to two different people', 'test');
+
+    await waitFor(
+      () => agent.getRunState().type === 'awaiting_approval',
+      'diff payload: first send requires approval',
+    );
+    await agent.approvePendingApproval();
+
+    await waitFor(
+      () => agent.getRunState().type === 'awaiting_approval',
+      'diff payload: second send also requires approval',
+    );
+    await agent.approvePendingApproval();
+
+    await run;
+
+    const sentMessages = harness.adapter.sentMessages;
+    assertEq(
+      sentMessages.length,
+      2,
+      'two different payloads both executed',
     );
 
     await harness.runtime.close();

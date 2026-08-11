@@ -98,6 +98,7 @@ export interface ReasoningSignals {
   repeatedToolPattern: boolean;
   invalidToolCalls: number;
   repeatedToolFailures: number;
+  noProgressSteps: number;
 
   // Uncertainty signals
   unresolvedAmbiguity: boolean;

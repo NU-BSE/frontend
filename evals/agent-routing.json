@@ -15,7 +15,9 @@
         "constraintSolving": false,
         "rankingOrOptimization": false,
         "failedPlans": 0,
-        "replans": 0
+        "replans": 0,
+        "repeatedToolFailures": 0,
+        "noProgressSteps": 0
       }
     }
   },
@@ -34,7 +36,9 @@
         "rankingOrOptimization": true,
         "temporalReconciliation": true,
         "failedPlans": 0,
-        "replans": 0
+        "replans": 0,
+        "repeatedToolFailures": 0,
+        "noProgressSteps": 0
       }
     }
   },
@@ -51,7 +55,9 @@
         "crossSourceSynthesis": false,
         "conflictingEvidence": false,
         "failedPlans": 0,
-        "replans": 0
+        "replans": 0,
+        "repeatedToolFailures": 0,
+        "noProgressSteps": 0
       }
     }
   },
@@ -69,7 +75,9 @@
         "crossSourceSynthesis": true,
         "conflictingEvidence": true,
         "failedPlans": 0,
-        "replans": 0
+        "replans": 0,
+        "repeatedToolFailures": 0,
+        "noProgressSteps": 0
       }
     }
   },
@@ -88,7 +96,9 @@
         "rankingOrOptimization": true,
         "temporalReconciliation": true,
         "failedPlans": 0,
-        "replans": 0
+        "replans": 0,
+        "repeatedToolFailures": 0,
+        "noProgressSteps": 0
       }
     }
   },
@@ -105,7 +115,9 @@
         "crossSourceSynthesis": true,
         "conflictingEvidence": true,
         "failedPlans": 0,
-        "replans": 0
+        "replans": 0,
+        "repeatedToolFailures": 0,
+        "noProgressSteps": 0
       }
     }
   },
@@ -122,7 +134,9 @@
         "unresolvedAmbiguity": true,
         "modelUncertain": true,
         "failedPlans": 0,
-        "replans": 0
+        "replans": 0,
+        "repeatedToolFailures": 0,
+        "noProgressSteps": 0
       }
     }
   },
@@ -138,7 +152,9 @@
         "stepCount": 4,
         "repeatedToolPattern": true,
         "failedPlans": 0,
-        "replans": 0
+        "replans": 0,
+        "repeatedToolFailures": 0,
+        "noProgressSteps": 0
       }
     }
   },
@@ -154,7 +170,9 @@
         "stepCount": 3,
         "failedPlans": 2,
         "replans": 2,
-        "crossSourceSynthesis": false
+        "crossSourceSynthesis": false,
+        "repeatedToolFailures": 0,
+        "noProgressSteps": 0
       }
     }
   },
@@ -172,7 +190,9 @@
         "largeUnstructuredContext": false,
         "crossSourceSynthesis": false,
         "failedPlans": 0,
-        "replans": 0
+        "replans": 0,
+        "repeatedToolFailures": 0,
+        "noProgressSteps": 0
       }
     }
   },
@@ -189,7 +209,130 @@
         "largeUnstructuredContext": true,
         "crossSourceSynthesis": true,
         "failedPlans": 0,
-        "replans": 0
+        "replans": 0,
+        "repeatedToolFailures": 0,
+        "noProgressSteps": 0
+      }
+    }
+  },
+  {
+    "id": "network-outage",
+    "description": "Three network errors on Gmail — infrastructure, not planner failure",
+    "expectedMaxTier": "fast",
+    "input": {
+      "currentTier": "fast",
+      "signals": {
+        "toolCalls": 3,
+        "connectorCount": 1,
+        "stepCount": 3,
+        "failedPlans": 0,
+        "replans": 0,
+        "repeatedToolFailures": 0,
+        "noProgressSteps": 0
+      }
+    }
+  },
+  {
+    "id": "auth-expired",
+    "description": "Gmail auth expired — user needs to reconnect, not escalate model",
+    "expectedMaxTier": "fast",
+    "input": {
+      "currentTier": "fast",
+      "signals": {
+        "toolCalls": 1,
+        "connectorCount": 1,
+        "stepCount": 1,
+        "failedPlans": 0,
+        "replans": 0,
+        "repeatedToolFailures": 0,
+        "noProgressSteps": 0
+      }
+    }
+  },
+  {
+    "id": "user-denied",
+    "description": "User declined a send — not a reason for Terra",
+    "expectedMaxTier": "fast",
+    "input": {
+      "currentTier": "normal",
+      "signals": {
+        "toolCalls": 1,
+        "connectorCount": 1,
+        "stepCount": 1,
+        "failedPlans": 0,
+        "replans": 0,
+        "repeatedToolFailures": 0,
+        "noProgressSteps": 0
+      }
+    }
+  },
+  {
+    "id": "no-progress",
+    "description": "Three steps with no new entities, no completed actions, no plan change",
+    "expectedMaxTier": "normal",
+    "input": {
+      "currentTier": "fast",
+      "signals": {
+        "toolCalls": 3,
+        "connectorCount": 1,
+        "stepCount": 3,
+        "replans": 0,
+        "failedPlans": 0,
+        "repeatedToolFailures": 0,
+        "repeatedToolPattern": true,
+        "noProgressSteps": 3
+      }
+    }
+  },
+  {
+    "id": "real-replan",
+    "description": "Search failed, model switches to different tool — genuine replan",
+    "expectedMaxTier": "normal",
+    "input": {
+      "currentTier": "fast",
+      "signals": {
+        "toolCalls": 2,
+        "connectorCount": 1,
+        "stepCount": 2,
+        "failedPlans": 0,
+        "replans": 1,
+        "repeatedToolFailures": 0,
+        "noProgressSteps": 0
+      }
+    }
+  },
+  {
+    "id": "normal-next-step-not-replan",
+    "description": "Search → Send is a planned sequence, not a genuine replan",
+    "expectedMaxTier": "fast",
+    "input": {
+      "currentTier": "fast",
+      "signals": {
+        "toolCalls": 2,
+        "connectorCount": 1,
+        "stepCount": 2,
+        "failedPlans": 0,
+        "replans": 0,
+        "repeatedToolFailures": 0,
+        "noProgressSteps": 0
+      }
+    }
+  },
+  {
+    "id": "duplicate-successful-side-effect",
+    "description": "Same send repeated — dedup blocks second execution, run continues",
+    "expectedMaxTier": "fast",
+    "input": {
+      "currentTier": "fast",
+      "signals": {
+        "toolCalls": 2,
+        "connectorCount": 1,
+        "stepCount": 2,
+        "failedPlans": 0,
+        "replans": 0,
+        "repeatedToolFailures": 0,
+        "repeatedToolPattern": false,
+        "noProgressSteps": 0
       }
     }
   }

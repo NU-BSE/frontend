@@ -1,6 +1,10 @@
 import { LoopDetector } from './loopDetector';
 import { chooseTier } from './routingPolicy';
 import { buildSignals } from './signals';
+import {
+  calculateReasoningScore,
+} from './reasoningScore';
+import { ProgressTracker } from './progressTracker';
 import type {
   AgentModelResult,
   AgentToolCall,
@@ -12,6 +16,7 @@ import type {
   ModelTier,
   ReasoningSignals,
   RoutingDecision,
+  StepProgress,
 } from './types';
 import {
   classifyRoutingFailure,
@@ -63,8 +68,13 @@ function createMetrics(): AgentRunMetrics {
 export class ReasoningComplexityMonitor {
   private metrics: AgentRunMetrics = createMetrics();
   private readonly loopDetector = new LoopDetector();
+  private readonly progressTracker = new ProgressTracker();
   private consecutiveFailedPlans = 0;
   private consecutiveReplans = 0;
+  /** Tracks repeated failures of the same pattern. */
+  private failurePatterns = new Map<string, number>();
+  /** Tool names from the previous planning turn. */
+  private previousStepToolNames: string[] = [];
 
   /** The current tier (updated when the runtime escalates). */
   get currentTier(): ModelTier {
@@ -109,9 +119,32 @@ export class ReasoningComplexityMonitor {
     }
 
     if ( response.kind === 'tool_calls' ) {
-      // Пока ничего автоматически не считаем replan.
-      // Это отдельная логика.
+      const currentToolNames = response.toolCalls.map((tc) => tc.toolName);
+
+      // Auto-detect replan: the tool set changed materially from the
+      // previous step (new tool added, or a different tool entirely).
+      const previousTools = new Set(this.previousStepToolNames);
+      const hasNewTool = currentToolNames.some(
+        (name) => !previousTools.has(name),
+      );
+      const hasDroppedTool = this.previousStepToolNames.some(
+        (name) => !currentToolNames.includes(name),
+      );
+
+      if (
+        this.previousStepToolNames.length > 0 &&
+        (hasNewTool || hasDroppedTool)
+      ) {
+        this.recordReplan();
+      }
+
+      this.previousStepToolNames = currentToolNames;
     }
+  }
+
+  /** Called after tool-result processing to track meaningful progress. */
+  recordProgress(progress: StepProgress): void {
+    this.progressTracker.recordProgress(progress);
   }
 
   /**
@@ -190,6 +223,11 @@ export class ReasoningComplexityMonitor {
 
     if (result.status === 'error') {
       this.metrics.failedToolCalls += 1;
+
+      const patternKey =
+        `${call.toolName}::${result.errorCode ?? 'unknown'}`;
+      const current = this.failurePatterns.get(patternKey) ?? 0;
+      this.failurePatterns.set(patternKey, current + 1);
     }
 
     if (result.status === 'user_denied') {
@@ -217,11 +255,18 @@ export class ReasoningComplexityMonitor {
 
   /** Build the signal snapshot the routing policy uses. */
   snapshot(): ReasoningSignals {
+    const maxRepeatedFailurePattern = Math.max(
+      0,
+      ...this.failurePatterns.values(),
+    );
+
     return buildSignals(
       this.metrics,
       this.loopDetector.isRepeating(),
       this.consecutiveFailedPlans,
       this.consecutiveReplans,
+      maxRepeatedFailurePattern,
+      this.progressTracker,
     );
   }
 
@@ -259,7 +304,7 @@ export class ReasoningComplexityMonitor {
     const s = this.snapshot();
     return {
       requestedTier: this.metrics.currentTier,
-      reasoningScore: calculateReasoningScoreForMonitor(s),
+      reasoningScore: calculateReasoningScore(s).score,
       hardReasoningSignals: collectHardReasoningSignals(s),
       weakSignals: {
         stepCount: s.stepCount,
@@ -289,37 +334,17 @@ export class ReasoningComplexityMonitor {
   reset(): void {
     this.metrics = createMetrics();
     this.loopDetector.reset();
+    this.progressTracker.reset();
     this.consecutiveFailedPlans = 0;
     this.consecutiveReplans = 0;
+    this.failurePatterns.clear();
+    this.previousStepToolNames = [];
   }
 }
 
 function extractConnectorDomain(toolName: string): string | null {
   const dotIndex = toolName.indexOf('.');
   return dotIndex >= 0 ? toolName.slice(0, dotIndex) : null;
-}
-
-function calculateReasoningScoreForMonitor(s: ReasoningSignals): number {
-  // Lightweight inline version to avoid circular deps.
-  let score = 0;
-  if (s.toolCalls >= 7) score += 1;
-  if (s.connectorCount >= 3) score += 1;
-  if (s.stepCount >= 7) score += 1;
-  if (s.largeStructuredContext) score += 1;
-  if (s.largeUnstructuredContext) score += 2;
-  if (s.crossSourceSynthesis) score += 3;
-  if (s.conflictingEvidence) score += 4;
-  if (s.constraintSolving) score += 4;
-  if (s.temporalReconciliation) score += 2;
-  if (s.rankingOrOptimization) score += 3;
-  if (s.dependentMultiStageReasoning) score += 3;
-  score += Math.min(s.failedPlans, 2) * 3;
-  score += Math.min(s.replans, 2) * 2;
-  if (s.repeatedToolPattern) score += 4;
-  if (s.invalidToolCalls >= 2) score += 3;
-  if (s.unresolvedAmbiguity) score += 1;
-  if (s.modelUncertain) score += 1;
-  return score;
 }
 
 function collectHardReasoningSignals(s: ReasoningSignals): string[] {

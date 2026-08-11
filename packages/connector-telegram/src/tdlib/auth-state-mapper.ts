@@ -27,11 +27,14 @@ export function mapAuthorizationState(
 
     case 'WaitCode': {
       const info = raw.code_info as Record<string, unknown> | undefined;
-      const codeLength =
-        typeof info?.length === 'number'
-          ? (info.length as number)
-          : undefined;
-      return { type: 'wait_code', codeLength };
+      const codeType = info?.type as Record<string, unknown> | undefined;
+      const length =
+        typeof codeType?.length === 'number'
+          ? (codeType.length as number)
+          : typeof info?.length === 'number'
+            ? (info.length as number)
+            : undefined;
+      return { type: 'wait_code', codeLength: length };
     }
 
     case 'WaitPassword': {
@@ -54,8 +57,16 @@ export function mapAuthorizationState(
     case 'Closed':
       return { type: 'closed' };
 
-    default:
+    case 'Closing':
+    case 'WaitTdlibParameters':
+    case 'WaitEncryptionKey':
+      // Intermediate states handled internally by react-native-tdlib.
       return { type: 'initializing' };
+
+    default:
+      return typeStr
+        ? { type: 'error', message: 'Telegram requested an authorization step that is not supported yet.' }
+        : { type: 'initializing' };
   }
 }
 

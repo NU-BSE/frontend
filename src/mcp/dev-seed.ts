@@ -70,3 +70,18 @@ export async function seedDevelopmentConnections(
     await store.save(connection);
   }
 }
+
+const CLEANUP_IDS = new Set(DEV_CONNECTIONS.map((c) => c.id));
+
+/**
+ * Removes known development-seed connections from the store.
+ * Safe to call in production — only removes the well-known fixed IDs,
+ * never touches real user connections.
+ */
+export async function removeDevelopmentConnections(
+  store: ConnectionStore,
+): Promise<void> {
+  for (const id of CLEANUP_IDS) {
+    await store.remove(id);
+  }
+}

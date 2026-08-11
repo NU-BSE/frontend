@@ -75,6 +75,14 @@ export class TelegramUserConnector extends StoreBackedConnector {
   }
 
   /**
+   * Releases JS-level resources (NativeEventEmitter subscriptions)
+   * without logging out or removing the TDLib database.
+   */
+  async dispose(): Promise<void> {
+    await this.adapter.close();
+  }
+
+  /**
    * Tools re-attach to an existing session lazily. Connector instances are
    * recreated whenever the MCP runtime restarts (e.g. after a connect or
    * disconnect), but the session itself lives on: in TDLib's encrypted

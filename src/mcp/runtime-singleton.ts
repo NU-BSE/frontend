@@ -19,7 +19,7 @@ import {
 
 import { createConnectorRegistry } from './create-connector-registry';
 import type { ConnectorRegistry } from '@mobile-agent/connector-registry';
-import { seedDevelopmentConnections } from './dev-seed';
+import { seedDevelopmentConnections, removeDevelopmentConnections } from './dev-seed';
 import { resolveDefaultRuntimeMode, type McpRuntimeMode } from './runtime-mode';
 
 export interface AppMcpDependencies {
@@ -101,7 +101,9 @@ export function getLocalMcpRuntime(
     const connectionStore = getConnectionStore();
 
     runtimePromise = (async () => {
-      if (mode === 'development' && !devConnectionsSeeded) {
+      if (mode === 'production') {
+        await removeDevelopmentConnections(connectionStore);
+      } else if (!devConnectionsSeeded) {
         await seedDevelopmentConnections(connectionStore);
         devConnectionsSeeded = true;
       }
@@ -212,6 +214,15 @@ export async function closeLocalMcpRuntime(): Promise<void> {
   }
 
   const runtime = await runtimePromise;
+
+  if (currentRegistry) {
+    for (const connector of currentRegistry.listConnectors()) {
+      const disposable = (connector as { dispose?: () => Promise<void> }).dispose;
+      if (disposable) {
+        try { await disposable(); } catch { /* best-effort */ }
+      }
+    }
+  }
 
   await runtime.close();
 

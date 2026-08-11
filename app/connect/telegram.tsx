@@ -12,9 +12,10 @@ import { router } from 'expo-router';
 import { Text } from '@/components/Text';
 import { Button } from '@/components/Button';
 import { palette, radius, spacing } from '@/theme/tokens';
-import { getCurrentRegistry } from '@/mcp/runtime-singleton';
+import { getCurrentRegistry, getLocalMcpRuntime } from '@/mcp/runtime-singleton';
 import { useConnectConnector } from '@/connections/useConnections';
 import type { TdlibAdapter, TdlibAuthState } from '@mobile-agent/connector-telegram';
+import { getTelegramAdapter } from '@mobile-agent/connector-telegram';
 
 export default function TelegramAuthScreen() {
   const [adapter, setAdapter] = useState<TdlibAdapter | null>(null);
@@ -24,38 +25,57 @@ export default function TelegramAuthScreen() {
   const [password, setPassword] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+  const [initializing, setInitializing] = useState(true);
 
   const connect = useConnectConnector();
+  const completingRef = useRef(false);
+  const mountedRef = useRef(true);
   const cleanupRef = useRef<() => void>(() => {});
 
   const completeConnect = useCallback(
     async () => {
+      if (completingRef.current) return;
+      completingRef.current = true;
       try {
         await connect.mutateAsync('telegram-user');
-        router.back();
+        if (mountedRef.current) router.back();
       } catch (err) {
-        setError(
-          err instanceof Error ? err.message : 'Failed to create connection record.',
-        );
+        completingRef.current = false;
+        if (mountedRef.current) {
+          setError(
+            err instanceof Error ? err.message : 'Failed to create connection record.',
+          );
+        }
       }
     },
     [connect],
   );
 
   useEffect(() => {
+    mountedRef.current = true;
     let cancelled = false;
     let unsub: (() => void) | undefined;
 
     void (async () => {
       try {
+        // Ensure the MCP runtime exists before we try to get a connector.
+        await getLocalMcpRuntime();
+        if (cancelled) return;
+
         const registry = getCurrentRegistry();
-        if (!registry) return;
+        if (!registry) {
+          throw new Error('MCP runtime did not provide a connector registry.');
+        }
 
         const connector = registry.get('telegram-user');
-        if (!connector) return;
+        if (!connector) {
+          throw new Error('Telegram connector is not available in this build.');
+        }
 
-        const adapter = (connector as any).getAdapter?.() as TdlibAdapter | undefined;
-        if (!adapter) return;
+        const adapter = getTelegramAdapter(connector);
+        if (!adapter) {
+          throw new Error('Telegram TDLib adapter is unavailable.');
+        }
 
         if (cancelled) return;
         setAdapter(adapter);
@@ -64,17 +84,19 @@ export default function TelegramAuthScreen() {
 
         if (cancelled) return;
 
-        // If already ready (existing session), skip auth UI.
         if (adapter.getAuthState().type === 'ready') {
+          setInitializing(false);
           await completeConnect();
           return;
         }
+
+        setInitializing(false);
 
         unsub = adapter.setAuthStateListener((state) => {
           setAuthState(state);
           setLoading(false);
 
-          if (state.type === 'ready') {
+          if (state.type === 'ready' && !cancelled) {
             void completeConnect();
           }
         });
@@ -83,6 +105,7 @@ export default function TelegramAuthScreen() {
           setError(
             err instanceof Error ? err.message : 'Failed to initialize Telegram.',
           );
+          setInitializing(false);
           setLoading(false);
         }
       }
@@ -91,10 +114,14 @@ export default function TelegramAuthScreen() {
     cleanupRef.current = () => {
       cancelled = true;
       unsub?.();
+      setCode('');
+      setPassword('');
     };
 
-    return () => cleanupRef.current();
-    // completeConnect is stable (wrapped in callback below).
+    return () => {
+      mountedRef.current = false;
+      cleanupRef.current();
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -141,7 +168,7 @@ export default function TelegramAuthScreen() {
     router.back();
   }, []);
 
-  if (!adapter) {
+  if (initializing) {
     return (
       <View style={styles.container}>
         <ActivityIndicator size="large" color={palette.brand} />
@@ -151,6 +178,22 @@ export default function TelegramAuthScreen() {
       </View>
     );
   }
+
+  if (!adapter) {
+    return (
+      <View style={styles.container}>
+        <Text variant="body" tone="danger" style={styles.description}>
+          {error ?? 'Telegram is not available.'}
+        </Text>
+        <Button label="Back" onPress={handleCancel} />
+      </View>
+    );
+  }
+
+  const expectedCodeLength =
+    authState.type === 'wait_code'
+      ? authState.codeLength ?? 5
+      : 5;
 
   return (
     <KeyboardAvoidingView
@@ -191,19 +234,19 @@ export default function TelegramAuthScreen() {
             </Text>
             <TextInput
               style={styles.input}
-              placeholder="12345"
+              placeholder={Array.from({ length: expectedCodeLength }).fill('0').join('')}
               placeholderTextColor={palette.textFaint}
               keyboardType="number-pad"
               value={code}
               onChangeText={setCode}
-              maxLength={5}
+              maxLength={expectedCodeLength}
               autoFocus
               editable={!loading}
             />
             <Button
               label={loading ? 'Verifying…' : 'Verify'}
               onPress={handleSubmitCode}
-              disabled={loading || code.length < 5}
+              disabled={loading || code.length < expectedCodeLength}
             />
           </>
         ) : authState.type === 'wait_password' ? (
@@ -240,9 +283,13 @@ export default function TelegramAuthScreen() {
             <Text variant="body" tone="danger" style={styles.description}>
               {authState.message}
             </Text>
-            <Button label="Try Again" onPress={handleCancel} />
+            <Button label="Back" onPress={handleCancel} />
           </>
-        ) : null}
+        ) : (
+          <Text variant="body" tone="secondary" style={styles.description}>
+            Waiting for Telegram…
+          </Text>
+        )}
 
         {error ? (
           <Text variant="bodySmall" tone="danger" style={styles.error}>
@@ -255,7 +302,6 @@ export default function TelegramAuthScreen() {
             label="Cancel"
             variant="ghost"
             onPress={handleCancel}
-            disabled={loading && authState.type !== 'ready'}
           />
         </View>
       </View>

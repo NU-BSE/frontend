@@ -15,7 +15,10 @@ export function normalizeChat(raw: Record<string, unknown>): TdChat {
   } else if (typeStr.includes('BasicGroup')) {
     chatType = 'group';
   } else if (typeStr.includes('Supergroup')) {
-    chatType = raw.is_channel ? 'channel' : 'group';
+    // is_channel lives on the Supergroup object, not the Chat root.
+    // Without a separate getSupergroup() call we cannot reliably
+    // distinguish a channel from a group — fall back to unknown.
+    chatType = 'unknown';
   } else if (typeStr.includes('Channel')) {
     chatType = 'channel';
   }
@@ -59,19 +62,14 @@ export function normalizeMessage(
       break;
 
     case 'messagePhoto':
-      text =
-        typeof content?.caption === 'object' && content.caption != null
-          ? String(
-              (content.caption as Record<string, unknown>).text ??
-                content.caption ??
-                '',
-            )
-          : '[Photo]';
+      text = extractCaption(content) || '[Photo]';
       break;
 
-    case 'messageVideo':
-      text = '[Video]';
+    case 'messageVideo': {
+      const cap = extractCaption(content);
+      text = cap || '[Video]';
       break;
+    }
 
     case 'messageVoiceNote':
       text = '[Voice message]';
@@ -84,17 +82,23 @@ export function normalizeMessage(
           : '[Sticker]';
       break;
 
-    case 'messageAnimation':
-      text = '[GIF]';
+    case 'messageAnimation': {
+      const cap = extractCaption(content);
+      text = cap || '[GIF]';
       break;
+    }
 
-    case 'messageDocument':
-      text = '[Document]';
+    case 'messageDocument': {
+      const cap = extractCaption(content);
+      text = cap || '[Document]';
       break;
+    }
 
-    case 'messageAudio':
-      text = '[Audio]';
+    case 'messageAudio': {
+      const cap = extractCaption(content);
+      text = cap || '[Audio]';
       break;
+    }
 
     case 'messageLocation':
       text = '[Location]';
@@ -140,6 +144,14 @@ export function normalizeSentMessage(
 // ------------------------------------------------------------------
 // Internal helpers
 // ------------------------------------------------------------------
+
+function extractCaption(content: Record<string, unknown> | undefined): string | undefined {
+  const caption = content?.caption;
+  if (!caption || typeof caption !== 'object') return undefined;
+  const captionObj = caption as Record<string, unknown>;
+  const text = typeof captionObj.text === 'string' ? captionObj.text : undefined;
+  return text && text.length > 0 ? text : undefined;
+}
 
 function extractUsername(raw: Record<string, unknown>): string | undefined {
   const usernamesRaw = raw.usernames as Record<string, unknown> | undefined;

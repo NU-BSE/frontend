@@ -17,3 +17,14 @@ export type {
   TdUser,
 } from './tdlib/types';
 export { TdlibUnavailableError } from './tdlib/types';
+
+/**
+ * Type-guard for connectors that expose a TDLib adapter for
+ * interactive auth flows.
+ */
+export function getTelegramAdapter(
+  connector: unknown,
+): import('./tdlib/types').TdlibAdapter | undefined {
+  const c = connector as { getAdapter?: () => import('./tdlib/types').TdlibAdapter };
+  return c.getAdapter?.();
+}

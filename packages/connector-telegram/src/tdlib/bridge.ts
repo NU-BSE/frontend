@@ -199,6 +199,17 @@ export class NativeTdlibAdapter implements TdlibAdapter {
           ? (JSON.parse(result.raw) as Record<string, unknown>)
           : (result as unknown as Record<string, unknown>);
 
+      assertNotTdlibError(raw);
+
+      const messageId = raw.id;
+      if (
+        messageId === undefined ||
+        messageId === null ||
+        (typeof messageId === 'string' && messageId.length === 0)
+      ) {
+        throw new Error('Telegram did not confirm the message (no message id).');
+      }
+
       return normalizeSentMessage(chatId, text, raw);
     } catch (error) {
       throw mapTdlibError(error, 'sending message');
@@ -348,4 +359,20 @@ export class NativeTdlibAdapter implements TdlibAdapter {
 function isTdlibReadyState(raw: Record<string, unknown>): boolean {
   const type = raw['@type'] ?? (raw as Record<string, unknown>)['_'] ?? '';
   return String(type).replace(/^authorizationState/, '') === 'Ready';
+}
+
+/**
+ * Throws if `raw` is a TDLib error object.
+ * `react-native-tdlib` may resolve the Promise with a TDLib Error
+ * instead of rejecting — without this check a failed send would be
+ * silently accepted as success.
+ */
+function assertNotTdlibError(raw: Record<string, unknown>): void {
+  const type = raw['@type'] ?? raw['_'] ?? '';
+  if (type === 'error') {
+    const code = raw.code ?? '';
+    const message =
+      typeof raw.message === 'string' ? raw.message : 'TDLib returned an error.';
+    throw new Error(`TDLib error ${String(code)}: ${message}`);
+  }
 }

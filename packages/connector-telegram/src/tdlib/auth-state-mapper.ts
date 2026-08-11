@@ -28,12 +28,13 @@ export function mapAuthorizationState(
     case 'WaitCode': {
       const info = raw.code_info as Record<string, unknown> | undefined;
       const codeType = info?.type as Record<string, unknown> | undefined;
-      const length =
+      const lengthRaw =
         typeof codeType?.length === 'number'
           ? (codeType.length as number)
           : typeof info?.length === 'number'
             ? (info.length as number)
             : undefined;
+      const length = lengthRaw && lengthRaw > 0 ? lengthRaw : undefined;
       const phoneNumber =
         typeof info?.phone_number === 'string'
           ? (info.phone_number as string)
@@ -55,12 +56,13 @@ export function mapAuthorizationState(
     case 'WaitEmailCode': {
       const info = raw.code_info as Record<string, unknown> | undefined;
       const codeType = info?.type as Record<string, unknown> | undefined;
-      const length =
+      const lengthRaw =
         typeof codeType?.length === 'number'
           ? (codeType.length as number)
           : typeof info?.length === 'number'
             ? (info.length as number)
             : undefined;
+      const length = lengthRaw && lengthRaw > 0 ? lengthRaw : undefined;
       const emailPattern =
         typeof info?.email_address_pattern === 'string'
           ? (info.email_address_pattern as string)
@@ -84,16 +86,26 @@ export function mapAuthorizationState(
 
     case 'WaitRegistration': {
       const tos = raw.terms_of_service as Record<string, unknown> | undefined;
-      const tosText =
-        typeof tos?.text === 'string' && (tos.text as string).length > 0
-          ? { text: tos.text as string, minUserAge: tos.min_user_age }
+      const formatted = tos?.text as Record<string, unknown> | undefined;
+      const termsText =
+        typeof formatted?.text === 'string' && (formatted.text as string).length > 0
+          ? (formatted.text as string)
+          : typeof tos?.text === 'string'
+            ? (tos.text as string)
+            : undefined;
+      const minUserAge =
+        typeof tos?.min_user_age === 'number'
+          ? (tos.min_user_age as number)
+          : undefined;
+      const showTermsPopup =
+        typeof tos?.show_popup === 'boolean'
+          ? tos.show_popup
           : undefined;
       return {
         type: 'wait_registration',
-        termsOfServiceText:
-          typeof tosText?.text === 'string'
-            ? (tosText.text as string).slice(0, 2000)
-            : undefined,
+        termsOfServiceText: termsText,
+        minUserAge: minUserAge && minUserAge > 0 ? minUserAge : undefined,
+        showTermsPopup,
       };
     }
 

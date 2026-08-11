@@ -126,12 +126,61 @@ console.log('auth-state mapping:');
     }
   }
 
-  // Registration
-  assertEq(
-    mapAuthorizationState(rawAuthState('authorizationStateWaitRegistration', { terms_of_service: { text: 'TOS text', min_user_age: 16 } })).type,
-    'wait_registration',
-    'WaitRegistration → wait_registration',
-  );
+  // Registration with formattedText
+  {
+    const state = mapAuthorizationState(rawAuthState('authorizationStateWaitRegistration', {
+      terms_of_service: {
+        text: {
+          ['@type']: 'formattedText',
+          text: 'Telegram Terms',
+          entities: [],
+        },
+        min_user_age: 16,
+        show_popup: true,
+      },
+    }));
+    assertEq(state.type, 'wait_registration', 'WaitRegistration → wait_registration');
+    if (state.type === 'wait_registration') {
+      assertEq(state.termsOfServiceText, 'Telegram Terms', 'formattedText parsed correctly');
+      assertEq(state.minUserAge, 16, 'minUserAge preserved');
+      assertEq(state.showTermsPopup, true, 'showTermsPopup preserved');
+    }
+  }
+
+  // Registration with plain text ToS (fallback)
+  {
+    const state = mapAuthorizationState(rawAuthState('authorizationStateWaitRegistration', {
+      terms_of_service: { text: 'Plain TOS text', min_user_age: 13 },
+    }));
+    if (state.type === 'wait_registration') {
+      assertEq(state.termsOfServiceText, 'Plain TOS text', 'plain text ToS fallback works');
+      assertEq(state.minUserAge, 13, 'minUserAge from plain text');
+    }
+  }
+
+  // Code length 0 → undefined
+  {
+    const state = mapAuthorizationState(rawAuthState('authorizationStateWaitCode', { code_info: { length: 0 } }));
+    if (state.type === 'wait_code') {
+      assert(state.codeLength === undefined, 'code length 0 becomes undefined');
+    }
+  }
+
+  // Code length missing → undefined
+  {
+    const state = mapAuthorizationState(rawAuthState('authorizationStateWaitCode'));
+    if (state.type === 'wait_code') {
+      assert(state.codeLength === undefined, 'missing code length is undefined');
+    }
+  }
+
+  // Email code length 0
+  {
+    const state = mapAuthorizationState(rawAuthState('authorizationStateWaitEmailCode', { code_info: { email_address_pattern: 'a***@gmail.com', length: 0 } }));
+    if (state.type === 'wait_email_code') {
+      assert(state.codeLength === undefined, 'email code length 0 becomes undefined');
+    }
+  }
 
   // Other device
   {

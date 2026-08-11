@@ -85,9 +85,11 @@ export type TdlibAuthState =
       type: 'wait_password';
       passwordHint?: string;
     }
-  | {
+  |     {
       type: 'wait_registration';
       termsOfServiceText?: string;
+      minUserAge?: number;
+      showTermsPopup?: boolean;
     }
   | {
       type: 'wait_other_device_confirmation';

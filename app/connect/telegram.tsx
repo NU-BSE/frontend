@@ -27,6 +27,7 @@ export default function TelegramAuthScreen() {
   const [password, setPassword] = useState('');
   const [firstName, setFirstName] = useState('');
   const [lastName, setLastName] = useState('');
+  const [termsAccepted, setTermsAccepted] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [initializing, setInitializing] = useState(true);
@@ -234,11 +235,6 @@ export default function TelegramAuthScreen() {
     );
   }
 
-  const expectedCodeLength =
-    authState.type === 'wait_code'
-      ? authState.codeLength ?? 5
-      : 5;
-
   return (
     <KeyboardAvoidingView
       style={styles.container}
@@ -278,19 +274,26 @@ export default function TelegramAuthScreen() {
             </Text>
             <TextInput
               style={styles.input}
-              placeholder={Array.from({ length: expectedCodeLength }).fill('0').join('')}
+              placeholder={authState.codeLength
+                ? Array.from({ length: authState.codeLength }).fill('0').join('')
+                : '00000'}
               placeholderTextColor={palette.textFaint}
               keyboardType="number-pad"
               value={code}
               onChangeText={setCode}
-              maxLength={expectedCodeLength}
+              maxLength={authState.codeLength ?? 16}
               autoFocus
               editable={!loading}
             />
             <Button
               label={loading ? 'Verifying…' : 'Verify'}
               onPress={handleSubmitCode}
-              disabled={loading || code.length < expectedCodeLength}
+              disabled={
+                loading ||
+                (authState.codeLength !== undefined
+                  ? code.length !== authState.codeLength
+                  : code.length === 0)
+              }
             />
           </>
         ) : authState.type === 'wait_password' ? (
@@ -356,7 +359,7 @@ export default function TelegramAuthScreen() {
               keyboardType="number-pad"
               value={emailCode}
               onChangeText={setEmailCode}
-              maxLength={authState.codeLength ?? 6}
+              maxLength={authState.codeLength ?? 16}
               autoFocus
               editable={!loading}
             />
@@ -376,10 +379,26 @@ export default function TelegramAuthScreen() {
             <Text variant="body" tone="secondary" style={styles.description}>
               Create your Telegram account.
             </Text>
-            {authState.termsOfServiceText ? (
+            {authState.minUserAge ? (
               <Text variant="bodySmall" tone="secondary" style={styles.description}>
-                {authState.termsOfServiceText}
+                Minimum age required: {authState.minUserAge}
               </Text>
+            ) : null}
+            {authState.termsOfServiceText ? (
+              <>
+                <View style={styles.termsBox}>
+                  <Text variant="bodySmall" tone="secondary">
+                    {authState.termsOfServiceText}
+                  </Text>
+                </View>
+                <View style={styles.checkRow}>
+                  <Button
+                    label={termsAccepted ? '☑ I accept the Terms of Service' : '☐ I accept the Terms of Service'}
+                    variant="ghost"
+                    onPress={() => setTermsAccepted(!termsAccepted)}
+                  />
+                </View>
+              </>
             ) : null}
             <TextInput
               style={styles.input}
@@ -387,6 +406,7 @@ export default function TelegramAuthScreen() {
               placeholderTextColor={palette.textFaint}
               value={firstName}
               onChangeText={setFirstName}
+              maxLength={64}
               autoFocus
               editable={!loading}
             />
@@ -396,12 +416,17 @@ export default function TelegramAuthScreen() {
               placeholderTextColor={palette.textFaint}
               value={lastName}
               onChangeText={setLastName}
+              maxLength={64}
               editable={!loading}
             />
             <Button
               label={loading ? 'Creating…' : 'Create account'}
               onPress={handleSubmitRegistration}
-              disabled={loading || !firstName.trim()}
+              disabled={
+                loading ||
+                firstName.trim().length === 0 ||
+                (!!authState.termsOfServiceText && !termsAccepted)
+              }
             />
           </>
         ) : authState.type === 'wait_other_device_confirmation' ? (
@@ -525,4 +550,13 @@ const styles = StyleSheet.create({
   status: { textAlign: 'center', marginTop: spacing.md },
   centered: { alignItems: 'center', gap: spacing.sm },
   cancelWrap: { alignItems: 'center' },
+  termsBox: {
+    borderWidth: 1,
+    borderColor: palette.borderSoft,
+    borderRadius: radius.sm,
+    padding: spacing.md,
+    maxHeight: 200,
+    overflow: 'hidden' as const,
+  },
+  checkRow: { alignItems: 'center' },
 });

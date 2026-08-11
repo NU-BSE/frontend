@@ -1,3 +1,4 @@
+import { ConnectorError } from '@mobile-agent/connector-core';
 import {
   TdlibUnavailableError,
   type TdChat,
@@ -58,14 +59,6 @@ function loadTelegramConfig(): TelegramConfig {
   };
 }
 
-/**
- * Production TDLib bridge using `react-native-tdlib`.
- *
- * Lazy-loads the native module so Node test environments (verify:mcp,
- * verify:agent, verify:routing) remain loadable. TDLib updates arrive
- * through React Native's `NativeEventEmitter` and are mapped to the
- * `TdlibAuthState` state machine before propagating to listeners.
- */
 export class NativeTdlibAdapter implements TdlibAdapter {
   readonly kind = 'native' as const;
 
@@ -77,7 +70,9 @@ export class NativeTdlibAdapter implements TdlibAdapter {
   private emitterSubscription: { remove: () => void } | null = null;
 
   private readonly pendingSends = new Map<string, PendingSend>();
+  private readonly earlySendResults = new Map<string, EarlySendResult>();
   private static readonly SEND_TIMEOUT_MS = 30_000;
+  private static readonly AUTH_REQUEST_TIMEOUT_MS = 15_000;
 
   async initialize(): Promise<void> {
     if (this.tdlib) return;
@@ -103,8 +98,6 @@ export class NativeTdlibAdapter implements TdlibAdapter {
       throw mapTdlibError(error, 'initialization');
     }
 
-    // Reconcile: TDLib may already have a running session.
-    // Calls getAuthorizationState() and resolves the user profile if ready.
     await this.reconcileAuthorizationState(tdlib);
   }
 
@@ -120,7 +113,12 @@ export class NativeTdlibAdapter implements TdlibAdapter {
     };
   }
 
+  // ------------------------------------------------------------------
+  // Auth methods
+  // ------------------------------------------------------------------
+
   async requestPhoneNumber(phoneNumber: string): Promise<void> {
+    this.assertAuthState('wait_phone_number');
     const tdlib = this.assertModule();
     const cleaned = validatePhoneNumber(phoneNumber);
     const { countrycode, phoneNumber: localNumber } = parsePhoneNumber(cleaned);
@@ -133,6 +131,7 @@ export class NativeTdlibAdapter implements TdlibAdapter {
   }
 
   async submitAuthCode(code: string): Promise<void> {
+    this.assertAuthState('wait_code');
     const tdlib = this.assertModule();
     try {
       await tdlib.verifyPhoneNumber(code);
@@ -142,6 +141,7 @@ export class NativeTdlibAdapter implements TdlibAdapter {
   }
 
   async submitPassword(password: string): Promise<void> {
+    this.assertAuthState('wait_password');
     const tdlib = this.assertModule();
     try {
       await tdlib.verifyPassword(password);
@@ -151,11 +151,17 @@ export class NativeTdlibAdapter implements TdlibAdapter {
   }
 
   async submitEmailAddress(email: string): Promise<void> {
+    this.assertAuthState('wait_email_address');
     const tdlib = this.assertModule();
+    const normalized = email.trim().toLowerCase();
+    if (!normalized.includes('@') || normalized.length < 5 || normalized.length > 254) {
+      throw new ConnectorError('Invalid email address.', 'VALIDATION_FAILED');
+    }
+
     try {
-      await tdlib.td_json_client_send({
+      await this.sendAuthRequest(tdlib, {
         ['@type']: 'setAuthenticationEmailAddress',
-        email_address: email,
+        email_address: normalized,
       });
     } catch (error) {
       throw mapTdlibError(error, 'email submission');
@@ -163,9 +169,10 @@ export class NativeTdlibAdapter implements TdlibAdapter {
   }
 
   async submitEmailCode(code: string): Promise<void> {
+    this.assertAuthState('wait_email_code');
     const tdlib = this.assertModule();
     try {
-      await tdlib.td_json_client_send({
+      await this.sendAuthRequest(tdlib, {
         ['@type']: 'checkAuthenticationEmailCode',
         code: {
           ['@type']: 'emailAddressAuthenticationCode',
@@ -178,12 +185,23 @@ export class NativeTdlibAdapter implements TdlibAdapter {
   }
 
   async submitRegistration(firstName: string, lastName: string): Promise<void> {
+    this.assertAuthState('wait_registration');
     const tdlib = this.assertModule();
+    const first = firstName.trim();
+    const last = lastName.trim();
+
+    if (first.length < 1 || first.length > 64) {
+      throw new ConnectorError('First name must be 1–64 characters.', 'VALIDATION_FAILED');
+    }
+    if (last.length > 64) {
+      throw new ConnectorError('Last name must be at most 64 characters.', 'VALIDATION_FAILED');
+    }
+
     try {
-      await tdlib.td_json_client_send({
+      await this.sendAuthRequest(tdlib, {
         ['@type']: 'registerUser',
-        first_name: firstName,
-        last_name: lastName,
+        first_name: first,
+        last_name: last,
         disable_notification: false,
       });
     } catch (error) {
@@ -191,14 +209,16 @@ export class NativeTdlibAdapter implements TdlibAdapter {
     }
   }
 
+  // ------------------------------------------------------------------
+  // Tool methods
+  // ------------------------------------------------------------------
+
   async searchChats(query: string, limit = 10): Promise<TdChat[]> {
     const tdlib = this.assertModule();
     try {
       const raw = await tdlib.searchChats(query, Math.min(limit, 20));
       const parsed = JSON.parse(raw);
-
       if (!Array.isArray(parsed)) return [];
-
       return parsed
         .slice(0, limit)
         .map((chat) => normalizeChat(chat as Record<string, unknown>));
@@ -210,22 +230,12 @@ export class NativeTdlibAdapter implements TdlibAdapter {
   async getRecentMessages(chatId: string, limit = 20): Promise<TdMessage[]> {
     const tdlib = this.assertModule();
     try {
-      const items = await tdlib.getChatHistory(
-        Number(chatId),
-        0,
-        Math.min(limit, 50),
-        0,
-      );
-
+      const items = await tdlib.getChatHistory(Number(chatId), 0, Math.min(limit, 50), 0);
       if (!Array.isArray(items)) return [];
-
       return items
         .map((item) => {
-          try {
-            return JSON.parse(item.raw_json) as Record<string, unknown>;
-          } catch {
-            return null;
-          }
+          try { return JSON.parse(item.raw_json) as Record<string, unknown>; }
+          catch { return null; }
         })
         .filter((raw): raw is Record<string, unknown> => raw != null)
         .map(normalizeMessage);
@@ -251,19 +261,50 @@ export class NativeTdlibAdapter implements TdlibAdapter {
       throw new Error('Telegram did not confirm the message (no message id).');
     }
 
-    // If TDLib already confirmed delivery, return immediately.
     const sendingState = sendingStateType(raw);
-    if (!sendingState || sendingState === 'messageSendingStateFailed') {
-      if (!isValidMessageId(raw.id)) {
-        throw new Error('Telegram did not confirm the message (no valid id).');
-      }
+
+    // `messageSendingStateFailed` means the message was NOT sent.
+    if (sendingState === 'messageSendingStateFailed') {
+      const stateObj = raw.sending_state as Record<string, unknown> | undefined;
+      const err = stateObj?.error as Record<string, unknown> | undefined;
+      throw mapTdlibError(
+        new Error(
+          typeof err?.message === 'string'
+            ? err.message
+            : 'Telegram failed to send the message.',
+        ),
+        'sending message',
+      );
+    }
+
+    // No sending state = already final/confirmed.
+    if (!sendingState) {
       return normalizeSentMessage(chatId, text, raw);
     }
 
-    // Message is pending — wait for confirmation event or timeout.
+    // `messageSendingStatePending` — wait for confirmation event or timeout.
+
+    // Check for early-arrival event first.
+    const tempKey = String(tempId);
+    const early = this.earlySendResults.get(tempKey);
+    if (early) {
+      this.earlySendResults.delete(tempKey);
+      if (early.type === 'succeeded' && early.message) {
+        return normalizeSentMessage(chatId, text, early.message);
+      }
+      throw mapTdlibError(
+        new Error(
+          typeof early.error === 'string'
+            ? early.error
+            : 'Telegram failed to send the message.',
+        ),
+        'sending message',
+      );
+    }
+
     return new Promise<TdSentMessage>((resolve, reject) => {
       const timer = setTimeout(() => {
-        this.pendingSends.delete(String(tempId));
+        this.pendingSends.delete(tempKey);
         reject(
           mapTdlibError(
             new Error('Telegram did not confirm the message within the timeout.'),
@@ -272,7 +313,7 @@ export class NativeTdlibAdapter implements TdlibAdapter {
         );
       }, NativeTdlibAdapter.SEND_TIMEOUT_MS);
 
-      this.pendingSends.set(String(tempId), {
+      this.pendingSends.set(tempKey, {
         chatId,
         text,
         resolve,
@@ -294,11 +335,10 @@ export class NativeTdlibAdapter implements TdlibAdapter {
   async close(): Promise<void> {
     for (const [, pending] of this.pendingSends) {
       clearTimeout(pending.timer);
-      pending.reject(
-        new Error('Adapter was closed while a send was pending.'),
-      );
+      pending.reject(new Error('Adapter was closed while a send was pending.'));
     }
     this.pendingSends.clear();
+    this.earlySendResults.clear();
 
     if (this.emitterSubscription) {
       this.emitterSubscription.remove();
@@ -320,12 +360,47 @@ export class NativeTdlibAdapter implements TdlibAdapter {
     return this.tdlib;
   }
 
+  private assertAuthState(expected: TdlibAuthState['type']): void {
+    if (this.state.type !== expected) {
+      throw new ConnectorError(
+        `Telegram authorization state changed. Expected ${expected}, got ${this.state.type}.`,
+        'VALIDATION_FAILED',
+      );
+    }
+  }
+
   /**
-   * After `startTdLib()`, explicitly query TDLib for the current
-   * authorization state.  This is necessary because TDLib may already
-   * have a running session and will not emit a fresh
-   * `updateAuthorizationState` event.
+   * Sends a low-level TDLib request and waits for an authorization-state
+   * change. `react-native-tdlib`'s `td_json_client_send()` is fire-and-forget
+   * on Android — this helper polls `getAuthorizationState()` until the
+   * state changes, confirming TDLib processed the request.
    */
+  private async sendAuthRequest(
+    tdlib: ReactNativeTdLib,
+    request: Record<string, unknown>,
+  ): Promise<void> {
+    const before = this.state.type;
+    await tdlib.td_json_client_send(request);
+
+    const deadline = Date.now() + NativeTdlibAdapter.AUTH_REQUEST_TIMEOUT_MS;
+
+    while (Date.now() < deadline) {
+      await sleep(200);
+      try {
+        const raw = await tdlib.getAuthorizationState();
+        const parsed = JSON.parse(raw) as Record<string, unknown>;
+        const next = mapAuthorizationState(parsed);
+        if (next.type !== before) {
+          return;
+        }
+      } catch {
+        continue;
+      }
+    }
+
+    throw new Error('Telegram did not respond to the authorization request.');
+  }
+
   private async reconcileAuthorizationState(
     tdlib: ReactNativeTdLib,
   ): Promise<void> {
@@ -392,7 +467,7 @@ export class NativeTdlibAdapter implements TdlibAdapter {
         },
       );
     } catch {
-      // NativeEventEmitter unavailable (Node test). Updates must be polled.
+      // NativeEventEmitter unavailable (Node test).
     }
   }
 
@@ -408,10 +483,8 @@ export class NativeTdlibAdapter implements TdlibAdapter {
         } catch {
           return;
         }
-
         const authState =
           update.authorization_state as Record<string, unknown> | undefined;
-
         if (authState) {
           await this.handleAuthorizationState(tdlib, authState);
         }
@@ -420,70 +493,83 @@ export class NativeTdlibAdapter implements TdlibAdapter {
 
       case 'updateMessageSendSucceeded': {
         let update: Record<string, unknown>;
-        try {
-          update = JSON.parse(event.raw) as Record<string, unknown>;
-        } catch {
-          return;
-        }
+        try { update = JSON.parse(event.raw) as Record<string, unknown>; }
+        catch { return; }
         this.handleSendSucceeded(update);
         break;
       }
 
       case 'updateMessageSendFailed': {
         let update: Record<string, unknown>;
-        try {
-          update = JSON.parse(event.raw) as Record<string, unknown>;
-        } catch {
-          return;
-        }
+        try { update = JSON.parse(event.raw) as Record<string, unknown>; }
+        catch { return; }
         this.handleSendFailed(update);
         break;
       }
     }
   }
 
-  private handleSendSucceeded(
-    update: Record<string, unknown>,
-  ): void {
+  private handleSendSucceeded(update: Record<string, unknown>): void {
     const oldId = String(update.old_message_id ?? '');
+    const message = update.message as Record<string, unknown> | undefined;
+
+    if (!message || !isValidMessageId(message.id)) {
+      // Malformed update — reject or store as error.
+      const pending = this.pendingSends.get(oldId);
+      if (pending) {
+        clearTimeout(pending.timer);
+        this.pendingSends.delete(oldId);
+        pending.reject(
+          new ConnectorError('Telegram confirmation did not contain a valid message.', 'PROVIDER_ERROR'),
+        );
+      }
+      return;
+    }
+
     const pending = this.pendingSends.get(oldId);
-    if (!pending) return;
+    if (pending) {
+      clearTimeout(pending.timer);
+      this.pendingSends.delete(oldId);
+      pending.resolve(
+        normalizeSentMessage(pending.chatId, pending.text, message),
+      );
+      return;
+    }
 
-    clearTimeout(pending.timer);
-    this.pendingSends.delete(oldId);
-
-    const message =
-      update.message as Record<string, unknown> | undefined;
-    const finalRaw: Record<string, unknown> = {
-      id: message?.id ?? update.old_message_id,
-      chat_id: message?.chat_id ?? pending.chatId,
-      date: message?.date,
-    };
-
-    pending.resolve(
-      normalizeSentMessage(pending.chatId, pending.text, finalRaw),
-    );
+    // Early arrival: store for the pending send promise.
+    this.earlySendResults.set(oldId, {
+      type: 'succeeded',
+      message: message as Record<string, unknown>,
+    });
+    // Cleanup stale early results.
+    if (this.earlySendResults.size > 20) {
+      const firstKey = this.earlySendResults.keys().next().value as string | undefined;
+      if (firstKey) this.earlySendResults.delete(firstKey);
+    }
   }
 
-  private handleSendFailed(
-    update: Record<string, unknown>,
-  ): void {
+  private handleSendFailed(update: Record<string, unknown>): void {
     const oldId = String(update.old_message_id ?? '');
-    const pending = this.pendingSends.get(oldId);
-    if (!pending) return;
-
-    clearTimeout(pending.timer);
-    this.pendingSends.delete(oldId);
-
     const error = update.error as Record<string, unknown> | undefined;
-    const message =
+    const errorMsg =
       typeof error?.message === 'string'
         ? error.message
         : 'Telegram failed to send the message.';
 
-    pending.reject(
-      mapTdlibError(new Error(message), 'sending message'),
-    );
+    const pending = this.pendingSends.get(oldId);
+    if (pending) {
+      clearTimeout(pending.timer);
+      this.pendingSends.delete(oldId);
+      pending.reject(mapTdlibError(new Error(errorMsg), 'sending message'));
+      return;
+    }
+
+    // Early arrival.
+    this.earlySendResults.set(oldId, { type: 'failed', error: errorMsg });
+    if (this.earlySendResults.size > 20) {
+      const firstKey = this.earlySendResults.keys().next().value as string | undefined;
+      if (firstKey) this.earlySendResults.delete(firstKey);
+    }
   }
 
   private transition(next: TdlibAuthState): void {
@@ -492,22 +578,15 @@ export class NativeTdlibAdapter implements TdlibAdapter {
   }
 }
 
-/**
- * Returns true when a raw TDLib authorization state object represents the
- * "Ready" state. This check runs BEFORE profile loading so we never
- * create an application-level `ready` state with an empty user.
- */
+// ------------------------------------------------------------------
+// Module-level helpers
+// ------------------------------------------------------------------
+
 function isTdlibReadyState(raw: Record<string, unknown>): boolean {
   const type = raw['@type'] ?? (raw as Record<string, unknown>)['_'] ?? '';
   return String(type).replace(/^authorizationState/, '') === 'Ready';
 }
 
-/**
- * Throws if `raw` is a TDLib error object.
- * `react-native-tdlib` may resolve the Promise with a TDLib Error
- * instead of rejecting — without this check a failed send would be
- * silently accepted as success.
- */
 function assertNotTdlibError(raw: Record<string, unknown>): void {
   const type = raw['@type'] ?? raw['_'] ?? '';
   if (type === 'error') {
@@ -518,12 +597,22 @@ function assertNotTdlibError(raw: Record<string, unknown>): void {
   }
 }
 
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
 interface PendingSend {
   chatId: string;
   text: string;
   resolve: (message: TdSentMessage) => void;
   reject: (error: unknown) => void;
   timer: ReturnType<typeof setTimeout>;
+}
+
+interface EarlySendResult {
+  type: 'succeeded' | 'failed';
+  message?: Record<string, unknown>;
+  error?: string;
 }
 
 interface TdRawResultLike {
@@ -541,9 +630,7 @@ function sendingStateType(raw: Record<string, unknown>): string | undefined {
   return state?.['@type'] as string | undefined;
 }
 
-function isValidMessageId(
-  value: unknown,
-): value is string | number {
+function isValidMessageId(value: unknown): value is string | number {
   if (typeof value === 'number' && Number.isFinite(value)) return true;
   if (typeof value === 'string' && value.length > 0) return true;
   return false;

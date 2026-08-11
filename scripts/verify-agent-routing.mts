@@ -29,6 +29,9 @@ import {
 import { AgentRuntime } from '../src/agent/AgentRuntime.js';
 import { createScriptedPlanner } from '../src/agent/models/deterministicPlanner.js';
 import {
+  ReasoningComplexityMonitor,
+} from '../src/agent/routing/ReasoningComplexityMonitor.js';
+import {
   calculateReasoningScore,
   chooseTier,
   estimateInitialTier,
@@ -249,6 +252,48 @@ async function main(): Promise<void> {
     assert(
       est.suggestedTier !== 'fast',
       'constraint + optimization language escalates initial estimate',
+    );
+  }
+
+  console.log('planner reasoning metadata reaches routing:');
+  {
+    const monitor = new ReasoningComplexityMonitor();
+
+    monitor.currentTier = 'normal';
+
+    monitor.recordModelResponse({
+      kind: 'tool_calls',
+      toolCalls: [],
+      reasoning: {
+        crossSourceSynthesis: true,
+        constraintSolving: true,
+        rankingOrOptimization: true,
+      },
+    });
+
+    const signals = monitor.snapshot();
+
+    assert(
+      signals.crossSourceSynthesis,
+      'cross-source metadata reaches signals',
+    );
+
+    assert(
+      signals.constraintSolving,
+      'constraint metadata reaches signals',
+    );
+
+    assert(
+      signals.rankingOrOptimization,
+      'optimization metadata reaches signals',
+    );
+
+    const decision = monitor.chooseTier();
+
+    assertEq(
+      decision.tier,
+      'expert',
+      'hard reasoning can escalate NORMAL to EXPERT',
     );
   }
 

@@ -165,6 +165,9 @@ export interface RoutingTelemetry {
   transitions: TierTransition[];
   backendDowngradeCount: number;
   providerFallbackCount: number;
+  promptTokens: number;
+  completionTokens: number;
+  totalTokens: number;
 }
 
 /** Lightweight plan identity for detecting replanning. */

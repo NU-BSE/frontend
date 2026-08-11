@@ -113,9 +113,8 @@ export function createRemoteAgentModel(
         { once: true },
       );
 
-      let response: Response;
       try {
-        response = await fetch(
+        const response = await fetch(
           `${options.baseUrl}/agent/step`,
           {
             method: 'POST',
@@ -131,7 +130,82 @@ export function createRemoteAgentModel(
             signal: controller.signal,
           },
         );
+
+        if (!response.ok) {
+          const body = await safeJson(response);
+          const detail =
+            typeof body?.message === 'string'
+              ? body.message
+              : response.statusText;
+
+          switch (response.status) {
+            case 401:
+              throw new AgentError('AUTH_REQUIRED', detail);
+            case 429:
+              throw new AgentError('RATE_LIMITED', detail);
+            case 422:
+              throw new AgentError('MODEL_ERROR', detail);
+            default:
+              throw new AgentError(
+                response.status >= 500
+                  ? 'NETWORK_ERROR'
+                  : 'MODEL_ERROR',
+                `Remote agent failed with ${response.status}: ${detail}`,
+              );
+          }
+        }
+
+        let json: unknown;
+        try {
+          json = await response.json();
+        } catch (error) {
+          throw new AgentError(
+            'MODEL_ERROR',
+            'The server returned malformed JSON.',
+            error,
+          );
+        }
+
+        const parsed = agentStepResponseSchema.safeParse(json);
+
+        if (!parsed.success) {
+          throw new AgentError(
+            'MODEL_ERROR',
+            'The server returned an invalid agent response.',
+            parsed.error,
+          );
+        }
+
+        const data = parsed.data;
+
+        const execution: AgentModelExecution = {
+          requestedTier: data.requestedModelTier,
+          effectiveTier: data.effectiveModelTier,
+          routingReason: data.routingReason,
+          usage: data.usage ?? undefined,
+        };
+
+        if (data.result.kind === 'final') {
+          return {
+            kind: 'final',
+            text: data.result.text,
+            reasoning: data.result.reasoning,
+            execution,
+          };
+        }
+
+        return {
+          kind: 'tool_calls',
+          text: data.result.text ?? undefined,
+          toolCalls: data.result.toolCalls,
+          reasoning: data.result.reasoning,
+          execution,
+        };
       } catch (error) {
+        if (error instanceof AgentError) {
+          throw error;
+        }
+
         if (input.signal?.aborted) {
           throw new AgentError(
             'CANCELLED',
@@ -160,77 +234,6 @@ export function createRemoteAgentModel(
           cancelFromCaller,
         );
       }
-
-      if (!response.ok) {
-        const body = await safeJson(response);
-        const detail =
-          typeof body?.message === 'string'
-            ? body.message
-            : response.statusText;
-
-        switch (response.status) {
-          case 401:
-            throw new AgentError('AUTH_REQUIRED', detail);
-          case 429:
-            throw new AgentError('RATE_LIMITED', detail);
-          case 422:
-            throw new AgentError('MODEL_ERROR', detail);
-          default:
-            throw new AgentError(
-              response.status >= 500
-                ? 'NETWORK_ERROR'
-                : 'MODEL_ERROR',
-              `Remote agent failed with ${response.status}: ${detail}`,
-            );
-        }
-      }
-
-      let json: unknown;
-      try {
-        json = await response.json();
-      } catch (error) {
-        throw new AgentError(
-          'MODEL_ERROR',
-          'The server returned malformed JSON.',
-          error,
-        );
-      }
-
-      const parsed = agentStepResponseSchema.safeParse(json);
-
-      if (!parsed.success) {
-        throw new AgentError(
-          'MODEL_ERROR',
-          'The server returned an invalid agent response.',
-          parsed.error,
-        );
-      }
-
-      const data = parsed.data;
-
-      const execution: AgentModelExecution = {
-        requestedTier: data.requestedModelTier,
-        effectiveTier: data.effectiveModelTier,
-        routingReason: data.routingReason,
-        usage: data.usage ?? undefined,
-      };
-
-      if (data.result.kind === 'final') {
-        return {
-          kind: 'final',
-          text: data.result.text,
-          reasoning: data.result.reasoning,
-          execution,
-        };
-      }
-
-      return {
-        kind: 'tool_calls',
-        text: data.result.text ?? undefined,
-        toolCalls: data.result.toolCalls,
-        reasoning: data.result.reasoning,
-        execution,
-      };
     },
   };
 }

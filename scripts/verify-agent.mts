@@ -33,17 +33,28 @@ import {
   createScriptedPlanner,
 } from '../src/agent/models/deterministicPlanner.js';
 import {
+  createRemoteAgentModel,
+} from '../src/agent/models/remoteAgentModel.js';
+import {
   MAX_AGENT_STEPS,
   type AgentMessage,
+  type AgentModel,
   type AgentModelInput,
   type AgentModelResult,
   type AgentRunState,
   type AgentToolResult,
 } from '../src/agent/types.js';
+import type {
+  RoutingTelemetry,
+} from '../src/agent/routing/types.js';
 
 function assert(condition: unknown, message: string): asserts condition {
   if (!condition) throw new Error(`FAIL: ${message}`);
   console.log(`  ok — ${message}`);
+}
+
+function assertEq<T>(actual: T, expected: T, message: string): void {
+  assert(actual === expected, `${message} (expected ${expected}, got ${actual})`);
 }
 
 /**
@@ -158,6 +169,20 @@ function createAgent(
   });
 
   return { agent, states };
+}
+
+function createAgentWithModel(
+  harness: Harness,
+  model: AgentModel,
+  onRoutingTelemetry?: (telemetry: RoutingTelemetry) => void,
+): AgentRuntime {
+  return new AgentRuntime({
+    model,
+    mcp: harness.runtime.mcp,
+    connections: toConnectionSummariesSync(harness),
+    approveApproval: (id) => harness.approvalService.approve(id),
+    onRoutingTelemetry,
+  });
 }
 
 function toConnectionSummariesSync(harness: Harness) {
@@ -602,6 +627,137 @@ async function main(): Promise<void> {
     );
 
     await harness.runtime.close();
+  }
+
+  console.log('remote agent loop: backend → MCP → backend');
+  {
+    const harness = await createHarness();
+    const requests: Array<Record<string, unknown>> = [];
+    const originalFetch = globalThis.fetch;
+    let telemetry: RoutingTelemetry | undefined;
+
+    try {
+      globalThis.fetch = (async (_url, init) => {
+        const body = JSON.parse((init?.body as string) ?? '{}');
+        requests.push(body);
+
+        if (requests.length === 1) {
+          return new Response(
+            JSON.stringify({
+              requestId: body.requestId,
+              runId: body.runId,
+              requestedModelTier: 'fast',
+              effectiveModelTier: 'fast',
+              routingReason: 'default_fast',
+              result: {
+                kind: 'tool_calls',
+                text: null,
+                toolCalls: [
+                  {
+                    id: 'remote_call_1',
+                    toolName: 'telegram.user.search_chats',
+                    args: {
+                      connectionId: TELEGRAM_CONNECTION_ID,
+                      query: 'Данияр',
+                    },
+                  },
+                ],
+              },
+              usage: {
+                promptTokens: 10,
+                completionTokens: 5,
+                totalTokens: 15,
+              },
+            }),
+            { status: 200, headers: { 'Content-Type': 'application/json' } },
+          );
+        }
+
+        if (requests.length === 2) {
+          const toolMessage = (body.messages as Array<Record<string, unknown>>).find(
+            (message) => message.role === 'tool',
+          ) as Record<string, unknown> | undefined;
+
+          assert(
+            toolMessage != null,
+            'second request contains tool result',
+          );
+
+          assert(
+            (toolMessage.result as Record<string, unknown>)?.status === 'success',
+            'local MCP result reached remote model',
+          );
+
+          return new Response(
+            JSON.stringify({
+              requestId: body.requestId,
+              runId: body.runId,
+              requestedModelTier: 'fast',
+              effectiveModelTier: 'fast',
+              routingReason: 'default_fast',
+              result: {
+                kind: 'final',
+                text: 'Нашёл чат Данияра.',
+              },
+              usage: {
+                promptTokens: 20,
+                completionTokens: 10,
+                totalTokens: 30,
+              },
+            }),
+            { status: 200, headers: { 'Content-Type': 'application/json' } },
+          );
+        }
+
+        throw new Error('unexpected third remote call');
+      }) as typeof globalThis.fetch;
+
+      const model = createRemoteAgentModel({
+        baseUrl: 'http://fake-backend',
+      });
+
+      const agent = createAgentWithModel(harness, model, (value) => {
+        telemetry = value;
+      });
+
+      await agent.sendMessage('Найди Данияра в Telegram');
+
+      assertEq(requests.length, 2, 'remote model called twice');
+      assertEq(requests[0].runId, requests[1].runId, 'same runId across model steps');
+      assert(
+        (requests[0].connections as Array<unknown>)?.length === 1,
+        'connections sent to backend',
+      );
+
+      const tools = requests[0].tools as Array<Record<string, unknown>>;
+      assert(
+        tools?.some((tool) => tool.name === 'telegram.user.search_chats'),
+        'MCP tool schema sent to backend',
+      );
+
+      const messages = agent.getMessages();
+      const final = messages[messages.length - 1];
+
+      assert(
+        final.role === 'assistant' && final.content === 'Нашёл чат Данияра.',
+        'remote final answer reaches conversation',
+      );
+
+      assert(
+        telemetry?.completedSuccessfully === true,
+        'run completed successfully',
+      );
+
+      assertEq(telemetry?.totalToolCalls, 1, 'one local tool call executed');
+      assertEq(telemetry?.fastCalls, 2, 'two effective FAST calls recorded');
+
+      assertEq(telemetry?.promptTokens, 30, 'prompt token usage aggregated');
+      assertEq(telemetry?.completionTokens, 15, 'completion usage aggregated');
+      assertEq(telemetry?.totalTokens, 45, 'total token usage aggregated');
+    } finally {
+      globalThis.fetch = originalFetch;
+      await harness.runtime.close();
+    }
   }
 
   console.log('verify:agent — all checks passed');

@@ -240,6 +240,15 @@ export class AgentRuntime {
           result.execution;
 
         if (execution) {
+          if (execution.usage) {
+            routingTelemetry.promptTokens +=
+              execution.usage.promptTokens;
+            routingTelemetry.completionTokens +=
+              execution.usage.completionTokens;
+            routingTelemetry.totalTokens +=
+              execution.usage.totalTokens;
+          }
+
           if (
             tierRank(
               execution.effectiveTier,

@@ -29,6 +29,9 @@ export function createRunTelemetry(
     transitions: [],
     backendDowngradeCount: 0,
     providerFallbackCount: 0,
+    promptTokens: 0,
+    completionTokens: 0,
+    totalTokens: 0,
     durationMs: 0,
   };
 }

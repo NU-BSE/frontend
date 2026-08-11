@@ -1,5 +1,6 @@
 import React, { useMemo } from 'react';
 import { Pressable, StyleSheet, View } from 'react-native';
+import { router } from 'expo-router';
 
 import { Text } from '@/components/Text';
 import {
@@ -97,7 +98,13 @@ export function ConnectorList() {
                   disabled={!connectable || busy || isPending}
                   onPress={() => {
                     if (connected && connection) disconnect.mutate(connection.id);
-                    else if (entry.connectorId) connect.mutate(entry.connectorId);
+                    else if (entry.connectorId) {
+                      if (entry.connectorId === 'telegram-user') {
+                        router.push('/connect/telegram');
+                      } else {
+                        connect.mutate(entry.connectorId);
+                      }
+                    }
                   }}
                   style={({ pressed }) => [
                     styles.cellSlot,

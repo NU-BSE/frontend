@@ -10,10 +10,15 @@ export function normalizeChat(raw: Record<string, unknown>): TdChat {
   const typeStr = String(rawType?.['@type'] ?? rawType ?? '');
 
   let chatType: TdChat['type'] = 'unknown';
-  if (typeStr.includes('Private')) chatType = 'private';
-  else if (typeStr.includes('BasicGroup') || typeStr.includes('Supergroup'))
+  if (typeStr.includes('Private')) {
+    chatType = 'private';
+  } else if (typeStr.includes('BasicGroup')) {
     chatType = 'group';
-  else if (typeStr.includes('Channel')) chatType = 'channel';
+  } else if (typeStr.includes('Supergroup')) {
+    chatType = raw.is_channel ? 'channel' : 'group';
+  } else if (typeStr.includes('Channel')) {
+    chatType = 'channel';
+  }
 
   return {
     id: String(raw.id ?? ''),
@@ -22,14 +27,7 @@ export function normalizeChat(raw: Record<string, unknown>): TdChat {
         ? (raw.title as string)
         : [raw.first_name, raw.last_name].filter(Boolean).join(' ') ||
           `Chat ${String(raw.id ?? '')}`,
-    username:
-      typeof raw.usernames === 'object' && raw.usernames != null
-        ? String(
-            (raw.usernames as Record<string, unknown>).active_usernames ?? '',
-          ) || undefined
-        : typeof raw.username === 'string'
-          ? (raw.username as string)
-          : undefined,
+    username: extractUsername(raw),
     type: chatType,
   };
 }
@@ -45,7 +43,7 @@ export function normalizeMessage(
   raw: Record<string, unknown>,
 ): TdMessage {
   const content = raw.content as Record<string, unknown> | undefined;
-  const contentType = String(content?.['@type'] ?? content?.['_'] ?? '');
+  const contentType = String(content?.['@type'] ?? content?._ ?? '');
 
   let text: string;
   switch (contentType) {
@@ -110,29 +108,15 @@ export function normalizeMessage(
       text = '[Unsupported message type]';
   }
 
-  const sender =
-    raw.sender_id && typeof raw.sender_id === 'object'
-      ? (raw.sender_id as Record<string, unknown>)
-      : null;
-
+  // sender_id is a TDLib reference (messageSenderUser/messageSenderChat),
+  // not a user object. We do not make additional TDLib requests here,
+  // so sender name stays undefined unless we later add sender resolution.
   return {
     id: String(raw.id ?? ''),
     chatId: String(raw.chat_id ?? ''),
-    senderName:
-      typeof sender?.first_name === 'string'
-        ? [
-            sender.first_name as string,
-            typeof sender.last_name === 'string'
-              ? (sender.last_name as string)
-              : '',
-          ]
-            .filter(Boolean)
-            .join(' ') || undefined
-        : undefined,
+    senderName: undefined,
     text: text || '',
-    timestamp: new Date(
-      Number(raw.date ?? 0) * 1000,
-    ).toISOString(),
+    timestamp: normalizeTimestamp(raw.date),
     outgoing: Boolean(raw.is_outgoing),
   };
 }
@@ -149,8 +133,33 @@ export function normalizeSentMessage(
     messageId: String(raw.id ?? ''),
     chatId: String(raw.chat_id ?? chatId),
     text,
-    sentAt: typeof raw.date === 'number'
-      ? new Date(raw.date * 1000).toISOString()
-      : new Date().toISOString(),
+    sentAt: normalizeTimestamp(raw.date),
   };
+}
+
+// ------------------------------------------------------------------
+// Internal helpers
+// ------------------------------------------------------------------
+
+function extractUsername(raw: Record<string, unknown>): string | undefined {
+  const usernamesRaw = raw.usernames as Record<string, unknown> | undefined;
+  const active = Array.isArray(usernamesRaw?.active_usernames)
+    ? (usernamesRaw.active_usernames as string[])
+    : [];
+
+  if (typeof active[0] === 'string') return active[0];
+  if (typeof raw.username === 'string') return raw.username as string;
+  return undefined;
+}
+
+/**
+ * Converts a TDLib Unix timestamp to an ISO 8601 string.
+ * Falls back to the current time when the value is invalid.
+ */
+function normalizeTimestamp(unixSeconds: unknown): string {
+  const ts = Number(unixSeconds);
+  if (Number.isFinite(ts) && ts > 0) {
+    return new Date(ts * 1000).toISOString();
+  }
+  return new Date().toISOString();
 }

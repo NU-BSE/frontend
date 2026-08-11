@@ -7,7 +7,7 @@ import {
   type TdMessage,
   type TdSentMessage,
 } from './types';
-import { mapAuthorizationState, mapTdUser, parsePhoneNumber } from './auth-state-mapper';
+import { mapAuthorizationState, mapTdUser, parsePhoneNumber, validatePhoneNumber } from './auth-state-mapper';
 import { normalizeChat, normalizeMessage, normalizeSentMessage } from './normalizers';
 import { mapTdlibError } from './tdlib-error-mapper';
 
@@ -99,6 +99,10 @@ export class NativeTdlibAdapter implements TdlibAdapter {
     } catch (error) {
       throw mapTdlibError(error, 'initialization');
     }
+
+    // Reconcile: TDLib may already have a running session.
+    // Calls getAuthorizationState() and resolves the user profile if ready.
+    await this.reconcileAuthorizationState(tdlib);
   }
 
   getAuthState(): TdlibAuthState {
@@ -115,7 +119,8 @@ export class NativeTdlibAdapter implements TdlibAdapter {
 
   async requestPhoneNumber(phoneNumber: string): Promise<void> {
     const tdlib = this.assertModule();
-    const { countrycode, phoneNumber: localNumber } = parsePhoneNumber(phoneNumber);
+    const cleaned = validatePhoneNumber(phoneNumber);
+    const { countrycode, phoneNumber: localNumber } = parsePhoneNumber(cleaned);
 
     try {
       await tdlib.login({ countrycode, phoneNumber: localNumber });
@@ -146,38 +151,13 @@ export class NativeTdlibAdapter implements TdlibAdapter {
     const tdlib = this.assertModule();
     try {
       const raw = await tdlib.searchChats(query, Math.min(limit, 20));
-      const parsed = JSON.parse(raw) as Record<string, unknown>;
-      const chatIds = parsed.chat_ids as number[] | undefined;
+      const parsed = JSON.parse(raw);
 
-      if (!chatIds) return [];
+      if (!Array.isArray(parsed)) return [];
 
-      const chatsRaw = JSON.stringify(Object.entries(parsed).filter(
-        ([key]) => key !== 'chat_ids' && key !== '@type' && key !== '_' && key !== 'total_count',
-      ));
-
-      // react-native-tdlib searchChats returns the full chat map keyed by id.
-      // Extract chat entries that match the returned ids.
-      const results: TdChat[] = [];
-      for (const key of Object.keys(parsed)) {
-        if (key === 'chat_ids' || key === '@type' || key === '_' || key === 'total_count') continue;
-        const chatObj = parsed[key] as Record<string, unknown> | undefined;
-        if (chatObj?.id && chatIds.includes(Number(chatObj.id))) {
-          results.push(normalizeChat(chatObj));
-        }
-      }
-
-      if (results.length === 0 && typeof parsed.chat_ids === 'string') {
-        // Fallback: searchChats may return IDs only. Use getChats to load them.
-        const chatsList = await tdlib.getChats(limit);
-        const allChats = JSON.parse(chatsList) as Record<string, unknown>[];
-        const idMap = new Set(chatIds.map(String));
-        return allChats
-          .filter((chat) => idMap.has(String(chat.id)))
-          .slice(0, limit)
-          .map(normalizeChat);
-      }
-
-      return results.slice(0, limit);
+      return parsed
+        .slice(0, limit)
+        .map((chat) => normalizeChat(chat as Record<string, unknown>));
     } catch (error) {
       throw mapTdlibError(error, 'search');
     }
@@ -244,11 +224,69 @@ export class NativeTdlibAdapter implements TdlibAdapter {
     this.config = null;
   }
 
+  // ------------------------------------------------------------------
+  // Private helpers
+  // ------------------------------------------------------------------
+
   private assertModule(): ReactNativeTdLib {
     if (!this.tdlib) {
       throw new TdlibUnavailableError('NativeTdlibAdapter is not initialized');
     }
     return this.tdlib;
+  }
+
+  /**
+   * After `startTdLib()`, explicitly query TDLib for the current
+   * authorization state.  This is necessary because TDLib may already
+   * have a running session and will not emit a fresh
+   * `updateAuthorizationState` event.
+   */
+  private async reconcileAuthorizationState(
+    tdlib: ReactNativeTdLib,
+  ): Promise<void> {
+    try {
+      const raw = await tdlib.getAuthorizationState();
+      const parsed = JSON.parse(raw) as Record<string, unknown>;
+
+      if (isTdlibReadyState(parsed)) {
+        await this.resolveReadyUser(tdlib);
+        return;
+      }
+
+      const mapped = mapAuthorizationState(parsed);
+      this.transition(mapped);
+    } catch (error) {
+      // Reconciliation failure is not fatal — events may still arrive.
+      this.transition({
+        type: 'error',
+        message: 'Failed to reconcile Telegram authorization state.',
+      });
+    }
+  }
+
+  private async resolveReadyUser(
+    tdlib: ReactNativeTdLib,
+  ): Promise<void> {
+    try {
+      const profileRaw = await tdlib.getProfile();
+      const profile = JSON.parse(profileRaw) as Record<string, unknown>;
+      const user = mapTdUser(profile);
+
+      if (!user.id) {
+        this.transition({
+          type: 'error',
+          message: 'Telegram profile did not return a valid user id.',
+        });
+        return;
+      }
+
+      this.transition({ type: 'ready', user });
+    } catch {
+      this.transition({
+        type: 'error',
+        message: 'Failed to load Telegram profile. Please try reconnecting.',
+      });
+    }
   }
 
   private subscribeToUpdates(tdlib: ReactNativeTdLib): void {
@@ -281,22 +319,18 @@ export class NativeTdlibAdapter implements TdlibAdapter {
       return;
     }
 
-    const authState = update.authorization_state as Record<string, unknown> | undefined;
-    const nextState = mapAuthorizationState(authState ?? null);
+    const authState =
+      update.authorization_state as Record<string, unknown> | undefined;
 
-    if (nextState.type === 'ready') {
-      try {
-        const profileRaw = await tdlib.getProfile();
-        const profile = JSON.parse(profileRaw) as Record<string, unknown>;
-        const user = mapTdUser(profile);
-        this.transition({ type: 'ready', user });
-        return;
-      } catch {
-        this.transition(nextState);
-        return;
-      }
+    if (
+      authState &&
+      isTdlibReadyState(authState)
+    ) {
+      await this.resolveReadyUser(tdlib);
+      return;
     }
 
+    const nextState = mapAuthorizationState(authState ?? null);
     this.transition(nextState);
   }
 
@@ -304,4 +338,14 @@ export class NativeTdlibAdapter implements TdlibAdapter {
     this.state = next;
     this.listener?.(next);
   }
+}
+
+/**
+ * Returns true when a raw TDLib authorization state object represents the
+ * "Ready" state. This check runs BEFORE profile loading so we never
+ * create an application-level `ready` state with an empty user.
+ */
+function isTdlibReadyState(raw: Record<string, unknown>): boolean {
+  const type = raw['@type'] ?? (raw as Record<string, unknown>)['_'] ?? '';
+  return String(type).replace(/^authorizationState/, '') === 'Ready';
 }

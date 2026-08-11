@@ -4,6 +4,10 @@ import type { TdlibAuthState, TdUser } from './types';
  * Maps raw TDLib authorization-state objects to the internal
  * `TdlibAuthState` discriminated union.
  *
+ * The `Ready` case NEVER produces an application-level ready state
+ * on its own — the caller must first load the profile via
+ * `getProfile()` and transition to `ready` with a valid user.
+ *
  * Unknown / intermediate states fall back to `initializing` so the
  * adapter never crashes on TDLib states it does not yet handle.
  */
@@ -39,7 +43,10 @@ export function mapAuthorizationState(
     }
 
     case 'Ready':
-      return { type: 'ready', user: { id: '' } };
+      // TDLib says "Ready", but we need the user profile before
+      // we can create an application-level `ready` state.
+      // Caller must call `resolveReadyUser()` separately.
+      return { type: 'initializing' };
 
     case 'LoggingOut':
       return { type: 'logging_out' };
@@ -53,10 +60,21 @@ export function mapAuthorizationState(
 }
 
 /**
- * Extracts a user profile from a raw TDLib user object and merges it into
- * the current auth state when transitioning to `ready`.
+ * Extracts a user profile from a raw TDLib user object.
  */
 export function mapTdUser(raw: Record<string, unknown>): TdUser {
+  const usernamesRaw = raw.usernames as Record<string, unknown> | undefined;
+  const active = Array.isArray(usernamesRaw?.active_usernames)
+    ? (usernamesRaw.active_usernames as string[])
+    : [];
+
+  const username =
+    typeof active[0] === 'string'
+      ? active[0]
+      : typeof raw.username === 'string'
+        ? (raw.username as string)
+        : undefined;
+
   return {
     id: String(raw.id ?? ''),
     firstName:
@@ -67,37 +85,47 @@ export function mapTdUser(raw: Record<string, unknown>): TdUser {
       typeof raw.last_name === 'string'
         ? (raw.last_name as string)
         : undefined,
-    username:
-      typeof raw.usernames === 'object' && raw.usernames != null
-        ? String(
-            (raw.usernames as Record<string, unknown>).active_usernames ??
-              '',
-          ) || undefined
-        : typeof raw.username === 'string'
-          ? (raw.username as string)
-          : undefined,
+    username,
   };
 }
 
 /**
- * Parses an E.164 phone number into country code and local number parts
- * expected by `react-native-tdlib`'s `login()`.
+ * Validates an E.164 phone number.
+ * Throws if the number is obviously malformed.
  */
-export function parsePhoneNumber(phoneNumber: string): {
+export function validatePhoneNumber(raw: string): string {
+  const cleaned = raw.replace(/[\s()\-–]/gu, '');
+
+  if (!cleaned.startsWith('+')) {
+    throw new Error('Phone number must start with + and include a country code.');
+  }
+
+  const digitsOnly = cleaned.slice(1);
+  if (!/^\d+$/u.test(digitsOnly)) {
+    throw new Error('Phone number must contain only digits after +.');
+  }
+
+  if (digitsOnly.length < 7 || digitsOnly.length > 15) {
+    throw new Error('Phone number must be between 7 and 15 digits.');
+  }
+
+  return cleaned;
+}
+
+/**
+ * Extracts country code and local number from a validated E.164 number.
+ *
+ * `react-native-tdlib`'s `login()` concatenates `countrycode + phoneNumber`,
+ * so we pass the full cleaned number as `phoneNumber` with an empty
+ * countrycode to avoid any splitting ambiguity.
+ */
+export function parsePhoneNumber(_phoneNumber: string): {
   countrycode: string;
   phoneNumber: string;
 } {
-  const cleaned = phoneNumber.replace(/[\s()\-–]/gu, '');
-
-  if (cleaned.startsWith('+')) {
-    // E.164: +7 (701) 123-45-67 → countrycode: '+7', phoneNumber: '7011234567'
-    const match = /^(\+\d{1,3})(\d+)$/u.exec(cleaned);
-    if (match) {
-      return { countrycode: match[1], phoneNumber: match[2] };
-    }
-  }
-
-  // Fallback: strip leading '+' and use everything as phone number
-  const digits = cleaned.replace(/^\+/u, '');
-  return { countrycode: '', phoneNumber: digits };
+  // `react-native-tdlib` simply concatenates the two fields.
+  // Passing the full E.164 string as phoneNumber avoids incorrect
+  // splitting of country codes.
+  const normalized = _phoneNumber.replace(/[\s()\-–]/gu, '');
+  return { countrycode: '', phoneNumber: normalized };
 }

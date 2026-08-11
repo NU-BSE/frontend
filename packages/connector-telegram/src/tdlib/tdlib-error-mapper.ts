@@ -16,9 +16,10 @@ const CHAT_NOT_FOUND_RE =
  * Maps a raw TDLib error (string message or object with `message`)
  * into a typed `ConnectorError` suitable for the MCP/Agent layer.
  *
- * Native stack traces and raw TDLib error codes never leave this helper.
+ * Native stack traces, raw TDLib error codes, local filesystem paths,
+ * and auth secrets never leave this helper.
  */
-export function mapTdlibError(error: unknown, context: string): ConnectorError {
+export function mapTdlibError(error: unknown, _context: string): ConnectorError {
   const message =
     error instanceof Error
       ? error.message
@@ -36,14 +37,16 @@ export function mapTdlibError(error: unknown, context: string): ConnectorError {
   if (RATE_LIMIT_RE.test(message)) {
     return new ConnectorError(
       'Telegram rate-limited this request. Please wait and try again.',
-      'PROVIDER_ERROR',
+      'RATE_LIMITED',
+      true,
     );
   }
 
   if (NETWORK_RE.test(message)) {
     return new ConnectorError(
-      `Telegram network error during ${context}: ${message.slice(0, 200)}`,
+      'Telegram network request failed. Please try again.',
       'PROVIDER_ERROR',
+      true,
     );
   }
 
@@ -55,7 +58,7 @@ export function mapTdlibError(error: unknown, context: string): ConnectorError {
   }
 
   return new ConnectorError(
-    `Telegram ${context} failed: ${message.slice(0, 200)}`,
+    'Telegram request failed. Please try again.',
     'PROVIDER_ERROR',
   );
 }

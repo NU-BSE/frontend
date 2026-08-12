@@ -50,7 +50,7 @@ export function TopAppBar({ scenarioId }: { scenarioId?: string }) {
         style={({ pressed }) => [styles.askPill, pressed && styles.pressed]}
       >
         <View style={styles.mascotWell}>
-          <CreepyMascot width={18} height={18} color={palette.white} />
+          <CreepyMascot width={26} height={26} color={palette.white} />
         </View>
         <Text variant="button" tone="inverse">
           Ask Creepy
@@ -89,9 +89,11 @@ const styles = StyleSheet.create({
     ...shadow.raised,
   },
   // The mascot sits directly on the pill so the blue background stays seamless.
+  // The well matches the glyph rather than padding it: the artwork is already
+  // cropped to its bounding box, so extra room here only shrinks it optically.
   mascotWell: {
-    width: 24,
-    height: 24,
+    width: 26,
+    height: 26,
     alignItems: 'center',
     justifyContent: 'center',
   },

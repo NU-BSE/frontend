@@ -75,7 +75,7 @@ export function AiProvider({ children }: { children: React.ReactNode }) {
       activationRef.current = activation;
       const selection = { memoryProfile: profile, assessment };
       const descriptor = resolveEngine(selection);
-      const nextConnection = createConnection(descriptor, selection);
+      const nextConnection = createConnection(descriptor);
       const previous = engineRef.current;
 
       engineRef.current = descriptor.engine;

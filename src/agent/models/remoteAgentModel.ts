@@ -10,6 +10,9 @@ import { AgentError } from '../types';
 
 const REMOTE_AGENT_TIMEOUT_MS = 90_000;
 
+/** Dev-only transport diagnostics. Never logs tokens or credentials. */
+const DEV_LOG = typeof __DEV__ === 'boolean' && __DEV__;
+
 const reasoningSchema = z.object({
   crossSourceSynthesis: z.boolean().optional(),
   conflictingEvidence: z.boolean().optional(),
@@ -86,6 +89,12 @@ export function createRemoteAgentModel(
       requestCounter += 1;
       const requestId = `req_${requestCounter.toString(36)}_${Date.now().toString(36)}`;
 
+      const endpoint = `${options.baseUrl}/agent/step`;
+      if (DEV_LOG) {
+        console.log('[chat] model=remote-agent');
+        console.log(`[chat] endpoint=${endpoint}`);
+      }
+
       const token = await options.getAccessToken?.();
 
       const headers: Record<string, string> = {
@@ -114,8 +123,9 @@ export function createRemoteAgentModel(
       );
 
       try {
+        if (DEV_LOG) console.log('[chat] POST /agent/step started');
         const response = await fetch(
-          `${options.baseUrl}/agent/step`,
+          endpoint,
           {
             method: 'POST',
             headers,
@@ -130,6 +140,10 @@ export function createRemoteAgentModel(
             signal: controller.signal,
           },
         );
+
+        if (DEV_LOG) {
+          console.log(`[chat] POST /agent/step status=${response.status}`);
+        }
 
         if (!response.ok) {
           const body = await safeJson(response);

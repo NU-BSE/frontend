@@ -1,6 +1,9 @@
 /**
  * API client for the Creepy.IM FastAPI backend.
- * Only auth-related endpoints — everything else is local.
+ *
+ * `baseUrl()`/`getToken()` are the shared source of truth for the backend
+ * origin and the bearer token, used by the auth endpoints below AND by the
+ * remote Agent Chat (`POST /agent/step` via `src/agent/models/remoteAgentModel`).
  */
 import * as SecureStore from 'expo-secure-store';
 import { Platform } from 'react-native';

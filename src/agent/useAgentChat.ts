@@ -16,6 +16,7 @@ import { useCreepyChat } from '@/ai/useCreepyChat';
 import { AgentRuntime } from './AgentRuntime';
 import { toConnectionSummaries } from './capabilityContext';
 import { useAgentContext } from './AgentProvider';
+import { AgentError } from './types';
 import type {
   AgentMessage,
   AgentRunState,
@@ -29,17 +30,28 @@ export interface UseAgentChatOptions {
   category?: string;
 }
 
+export type AgentReadiness = 'initializing' | 'ready' | 'running' | 'failed';
+
 export interface AgentChat {
   /** 'agent' runs the tool loop via AgentRuntime; 'text-only' degrades when no model is available. */
   mode: 'agent' | 'text-only';
+  /**
+   * Whether the agent runtime can accept a message. 'initializing' means the
+   * engine/model is still starting (text-only fallback may still work).
+   */
+  readiness: AgentReadiness;
   messages: readonly AgentMessage[];
   runState: AgentRunState;
   pendingApproval: PendingApproval | null;
   isRunning: boolean;
+  /** Non-null when the local MCP runtime failed to initialize. Chat still works degraded. */
+  mcpError: string | null;
   sendMessage(text: string): void;
   approvePendingApproval(): void;
   rejectPendingApproval(): void;
   cancel(): void;
+  /** Re-runs runtime initialization after a failure. */
+  retryInitialization(): void;
   modelId: string;
 }
 
@@ -77,13 +89,13 @@ export function useAgentChat(options: UseAgentChatOptions = {}): AgentChat {
   const category = options.category ?? 'General';
 
   // The runtime constructor is side-effect-free, so it is safe to build in
-  // a memo; the effect below only handles teardown.
+  // a memo; the effect below only handles teardown. MCP is injected later via
+  // `setMcp` so a slow/failed MCP bootstrap never blocks plain remote chat.
   const agentRuntime = useMemo<AgentRuntime | null>(() => {
-    if (!model || !mcpRuntime) return null;
+    if (!model) return null;
 
     return new AgentRuntime({
       model,
-      mcp: mcpRuntime.mcp,
       connections: toConnectionSummaries(connectionsQuery.data ?? []),
       approveApproval: approveConnectorTool,
       onState: (state) => {
@@ -118,13 +130,17 @@ export function useAgentChat(options: UseAgentChatOptions = {}): AgentChat {
     // connectionsQuery.data is intentionally not a dependency: live updates
     // flow through setConnections below, without rebuilding the conversation.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [category, mcpRuntime, model, queryClient]);
+  }, [category, model, queryClient]);
 
   useEffect(() => {
     return () => {
       agentRuntime?.cancel();
     };
   }, [agentRuntime]);
+
+  useEffect(() => {
+    agentRuntime?.setMcp(mcpRuntime?.mcp);
+  }, [agentRuntime, mcpRuntime]);
 
   const summaries = useMemo(
     () => toConnectionSummaries(connectionsQuery.data ?? []),
@@ -155,7 +171,20 @@ export function useAgentChat(options: UseAgentChatOptions = {}): AgentChat {
 
   const sendAgentMessage = useCallback(
     (text: string) => {
-      if (!agentRuntime || agentRuntime.isRunning()) return;
+      if (!agentRuntime) {
+        // Defensive: the agent branch is only rendered when a model exists,
+        // which guarantees a runtime. If it is somehow absent, surface an
+        // explicit failure instead of dropping the message silently.
+        setRunState({
+          type: 'failed',
+          error: new AgentError(
+            'MODEL_ERROR',
+            'Chat is not ready yet. Please try again.',
+          ),
+        });
+        return;
+      }
+      if (agentRuntime.isRunning()) return;
       setIsRunning(true);
       void agentRuntime
         .sendMessage(text, threadId)
@@ -163,6 +192,10 @@ export function useAgentChat(options: UseAgentChatOptions = {}): AgentChat {
     },
     [agentRuntime, threadId],
   );
+
+  const retryInitialization = useCallback(() => {
+    void runtimeQuery.refetch();
+  }, [runtimeQuery]);
 
   const approve = useCallback(() => {
     void agentRuntime?.approvePendingApproval();
@@ -195,28 +228,46 @@ export function useAgentChat(options: UseAgentChatOptions = {}): AgentChat {
   if (!model) {
     return {
       mode: 'text-only',
+      readiness: 'initializing',
       messages: textMessages,
       runState: textChat.isLoading ? { type: 'thinking' } : { type: 'idle' },
       pendingApproval: null,
       isRunning: textChat.isLoading,
+      mcpError: null,
       sendMessage: (text) => void textChat.sendMessage(text),
       approvePendingApproval: () => undefined,
       rejectPendingApproval: () => undefined,
       cancel: () => textChat.stop(),
+      retryInitialization,
       modelId,
     };
   }
 
+  const mcpError = runtimeQuery.isError
+    ? (runtimeQuery.error instanceof Error
+        ? runtimeQuery.error.message
+        : 'Local MCP runtime failed to initialize.')
+    : null;
+
+  const readiness: AgentReadiness = isRunning
+    ? 'running'
+    : runState.type === 'failed'
+      ? 'failed'
+      : 'ready';
+
   return {
     mode: 'agent',
+    readiness,
     messages,
     runState,
     pendingApproval,
     isRunning,
+    mcpError,
     sendMessage: sendAgentMessage,
     approvePendingApproval: approve,
     rejectPendingApproval: reject,
     cancel: cancelAgent,
+    retryInitialization,
     modelId,
   };
 }

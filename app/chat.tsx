@@ -54,10 +54,12 @@ export default function Chat() {
     runState,
     pendingApproval,
     isRunning,
+    mcpError,
     sendMessage,
     approvePendingApproval,
     rejectPendingApproval,
     cancel,
+    retryInitialization,
   } = useAgentChat({
     threadId: scenario?.id,
     category: scenario?.title,
@@ -128,10 +130,19 @@ export default function Chat() {
   const statusLine =
     engineStatus === 'preparing'
       ? 'Waking up…'
-      : (agentStatusLine ??
-        (engineStatus === 'degraded'
-          ? (degradedReason ?? 'Fell back to offline preview')
-          : ORIGIN_LABEL[origin]));
+      : mcpError && mode === 'agent'
+        ? 'Tools unavailable — continuing as text chat'
+        : (agentStatusLine ??
+          (engineStatus === 'degraded'
+            ? (degradedReason ?? 'Fell back to offline preview')
+            : ORIGIN_LABEL[origin]));
+
+  const statusTone =
+    engineStatus === 'degraded' ||
+    runState.type === 'failed' ||
+    (mcpError != null && mode === 'agent')
+      ? 'danger'
+      : 'faint';
 
   const isEmpty = messages.length === 0;
   const awaitingApproval = pendingApproval !== null;
@@ -145,15 +156,23 @@ export default function Chat() {
           </Text>
           <Text
             variant="tag"
-            tone={
-              engineStatus === 'degraded' || runState.type === 'failed'
-                ? 'danger'
-                : 'faint'
-            }
+            tone={statusTone}
             uppercase
           >
             {statusLine}
           </Text>
+          {mcpError && mode === 'agent' ? (
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel="Retry loading tools"
+              onPress={retryInitialization}
+              style={({ pressed }) => pressed && styles.pressed}
+            >
+              <Text variant="label" tone="brand">
+                Retry tools
+              </Text>
+            </Pressable>
+          ) : null}
         </View>
 
         <View style={styles.headerActions}>

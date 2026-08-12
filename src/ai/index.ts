@@ -4,6 +4,7 @@ import type { ConnectionAdapter } from '@tanstack/ai-client';
 import type { DeviceAssessment } from '@/attestation/client/deviceAssessment';
 import type { MemoryProfile } from '@/storage/prefs';
 import {
+  BACKEND_API_URL,
   FORCED_ENGINE,
   ON_DEVICE_DEFAULTS,
   REMOTE_AI_BASE_URL,
@@ -28,20 +29,36 @@ export type EngineSelection = {
   assessment: DeviceAssessment | null;
 };
 
-export function resolveEngine(selection: EngineSelection): EngineDescriptor {
-  if (FORCED_ENGINE === 'stub') {
+export interface EngineConfigOverrides {
+  forcedEngine?: '' | 'on-device' | 'remote' | 'stub';
+  /** Raw backend origin (EXPO_PUBLIC_API_URL). Injected for tests. */
+  backendApiUrl?: string;
+}
+
+export function resolveEngine(
+  selection: EngineSelection,
+  config: EngineConfigOverrides = {},
+): EngineDescriptor {
+  const forced = config.forcedEngine ?? FORCED_ENGINE;
+  const backendApiUrl = config.backendApiUrl ?? BACKEND_API_URL;
+
+  if (forced === 'stub') {
     return { origin: 'stub', engine: createStubEngine() };
   }
 
   const profile = selection.memoryProfile;
-  if (profile === 'cloud' || FORCED_ENGINE === 'remote') {
-    return {
-      origin: 'stub',
-      engine: createStubEngine(),
-      ...(!REMOTE_AI_BASE_URL
-        ? { degradedReason: 'Remote AI endpoint is not configured.' }
-        : {}),
-    };
+  if (profile === 'cloud' || forced === 'remote') {
+    // Remote mode is enabled by a configured backend origin — NOT by the
+    // legacy TanStack stream URL. The agent talks to POST /agent/step there.
+    if (!backendApiUrl) {
+      return {
+        origin: 'stub',
+        engine: createStubEngine(),
+        degradedReason:
+          'Remote agent backend is not configured (EXPO_PUBLIC_API_URL).',
+      };
+    }
+    return { origin: 'remote', engine: createStubEngine() };
   }
 
   const modelPath = LOCAL_MODEL_PATHS[profile];
@@ -52,7 +69,7 @@ export function resolveEngine(selection: EngineSelection): EngineDescriptor {
   const canRunOnDevice =
     assessmentAllowsLocal && Boolean(modelPath) && isOnDeviceSupported();
 
-  if ((FORCED_ENGINE === 'on-device' || !FORCED_ENGINE) && canRunOnDevice) {
+  if ((forced === 'on-device' || !forced) && canRunOnDevice) {
     return {
       origin: 'on-device',
       engine: createOnDeviceEngine({
@@ -80,15 +97,13 @@ export function resolveEngine(selection: EngineSelection): EngineDescriptor {
 
 export function createConnection(
   descriptor: EngineDescriptor,
-  selection: EngineSelection,
 ): {
   connection: ConnectionAdapter;
   origin: EngineOrigin;
 } {
-  if (
-    (selection.memoryProfile === 'cloud' || FORCED_ENGINE === 'remote') &&
-    REMOTE_AI_BASE_URL
-  ) {
+  // The legacy TanStack text-stream transport is only used when its own URL is
+  // explicitly configured; the AgentRuntime → /agent/step path never needs it.
+  if (descriptor.origin === 'remote' && REMOTE_AI_BASE_URL) {
     return {
       origin: 'remote',
       connection: xhrHttpStream(`${REMOTE_AI_BASE_URL}/chat/http`),

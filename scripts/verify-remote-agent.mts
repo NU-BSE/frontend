@@ -8,10 +8,14 @@
  */
 import { createRemoteAgentModel } from '../src/agent/models/remoteAgentModel.js';
 import { AgentError } from '../src/agent/types.js';
+import { AgentRuntime } from '../src/agent/AgentRuntime.js';
+import { resolveEngine } from '../src/ai/index.js';
 import type {
+  AgentModel,
   AgentModelInput,
   AgentModelResult,
 } from '../src/agent/types.js';
+import type { AgentMcpClient } from '@mobile-agent/mcp-client';
 import type { LlmRoutingContext } from '../src/agent/routing/types.js';
 
 function assert(condition: unknown, message: string): asserts condition {
@@ -346,6 +350,173 @@ async function main(): Promise<void> {
         assertEq(error.code, 'MODEL_ERROR', 'malformed JSON code is MODEL_ERROR');
       }
     }
+  }
+
+  // -------------------------------------------------------------------
+  // A. Engine origin selection — remote is gated on EXPO_PUBLIC_API_URL,
+  //    NOT on the legacy TanStack stream URL.
+  // -------------------------------------------------------------------
+  console.log('engine origin selection:');
+  {
+    const cloudSelection = {
+      memoryProfile: 'cloud' as const,
+      assessment: null,
+    };
+
+    const remoteByCloud = resolveEngine(cloudSelection, {
+      backendApiUrl: 'http://test-backend:8000',
+    });
+    assert(
+      remoteByCloud.origin === 'remote',
+      'cloud profile + backend URL → origin remote (no TanStack URL needed)',
+    );
+
+    const remoteForced = resolveEngine(cloudSelection, {
+      backendApiUrl: 'http://test-backend:8000',
+      forcedEngine: 'remote',
+    });
+    assert(
+      remoteForced.origin === 'remote',
+      'forced remote + backend URL → origin remote',
+    );
+
+    const noBackend = resolveEngine(cloudSelection, { backendApiUrl: '' });
+    assert(
+      noBackend.origin === 'stub',
+      'cloud profile without backend URL → stub (degraded)',
+    );
+    assert(
+      noBackend.degradedReason != null,
+      'missing backend URL surfaces a degraded reason',
+    );
+
+    assertEq(
+      createRemoteAgentModel({ baseUrl: 'http://test' }).id,
+      'remote-agent',
+      'remote model id is remote-agent',
+    );
+  }
+
+  // -------------------------------------------------------------------
+  // C/D. URL and Authorization header on the wire
+  // -------------------------------------------------------------------
+  console.log('request URL and Authorization header:');
+  {
+    let capturedUrl = '';
+    let capturedHeaders: Record<string, string> = {};
+
+    const mockFetch: FetchMock = async (url, init) => {
+      capturedUrl = String(url);
+      capturedHeaders = (init?.headers ?? {}) as Record<string, string>;
+      return new Response(
+        successBody({ kind: 'final', text: 'ok' }),
+        { status: 200 },
+      );
+    };
+
+    const model = createRemoteAgentModel({
+      baseUrl: 'http://test-backend:8000',
+      getAccessToken: () => Promise.resolve('token-123'),
+    });
+
+    await withFetch(mockFetch, () => model.run(baseInput()));
+
+    assertEq(
+      capturedUrl,
+      'http://test-backend:8000/agent/step',
+      'POST target is {baseUrl}/agent/step',
+    );
+    assertEq(
+      capturedHeaders['Authorization'],
+      'Bearer token-123',
+      'Authorization Bearer header is sent',
+    );
+    assertEq(
+      capturedHeaders['Content-Type'],
+      'application/json',
+      'Content-Type is application/json',
+    );
+  }
+
+  // -------------------------------------------------------------------
+  // F/G. Local MCP unavailable must not block plain remote chat.
+  // -------------------------------------------------------------------
+  console.log('remote chat degrades when local MCP is unavailable:');
+  {
+    let capturedTools: unknown = 'unset';
+    let reachedFinal = false;
+
+    const recordingModel: AgentModel = {
+      id: 'recording-model',
+      capabilities: {
+        textGeneration: true,
+        toolCalling: true,
+        structuredOutput: true,
+      },
+      async run(input: AgentModelInput): Promise<AgentModelResult> {
+        capturedTools = input.tools;
+        return { kind: 'final', text: 'ok' };
+      },
+    };
+
+    const failingMcp = {
+      async listTools() {
+        throw new Error('MCP unavailable');
+      },
+    } as unknown as AgentMcpClient;
+
+    const runtime = new AgentRuntime({
+      model: recordingModel,
+      mcp: failingMcp,
+      connections: [],
+      approveApproval: async () => {},
+      maxSteps: 2,
+      onState: (state) => {
+        if (state.type === 'responding') reachedFinal = true;
+      },
+    });
+
+    await runtime.sendMessage('hello', 't-mcp-down');
+
+    assert(
+      Array.isArray(capturedTools) && capturedTools.length === 0,
+      'MCP listTools failure degrades to tools: []',
+    );
+    assert(reachedFinal, 'plain remote chat still completes without MCP');
+  }
+
+  {
+    let reachedFinal = false;
+
+    const recordingModel: AgentModel = {
+      id: 'recording-model-2',
+      capabilities: {
+        textGeneration: true,
+        toolCalling: true,
+        structuredOutput: true,
+      },
+      async run(): Promise<AgentModelResult> {
+        return { kind: 'final', text: 'ok' };
+      },
+    };
+
+    // No MCP client at all (still initializing / failed to bootstrap).
+    const runtime = new AgentRuntime({
+      model: recordingModel,
+      connections: [],
+      approveApproval: async () => {},
+      maxSteps: 2,
+      onState: (state) => {
+        if (state.type === 'responding') reachedFinal = true;
+      },
+    });
+
+    await runtime.sendMessage('hello', 't-no-mcp');
+
+    assert(
+      reachedFinal,
+      'sendMessage is not a silent no-op when MCP is absent',
+    );
   }
 
   console.log('verify:remote-agent — all checks passed');

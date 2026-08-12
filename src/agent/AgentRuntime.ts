@@ -38,7 +38,12 @@ import type {
 
 export interface AgentRuntimeOptions {
   model: AgentModel;
-  mcp: AgentMcpClient;
+  /**
+   * Local MCP client. Optional so plain remote chat still works when the
+   * local MCP runtime is unavailable — tool discovery then degrades to an
+   * empty list and no tool calls are emitted.
+   */
+  mcp?: AgentMcpClient;
   /** What the user actually has connected — injected into model context. */
   connections: ConnectionSummary[];
   maxSteps?: number;
@@ -106,8 +111,22 @@ export class AgentRuntime {
   /** Per-run ledger that prevents replaying completed side effects. */
   private readonly toolLedger = new ToolExecutionLedger();
 
+  /**
+   * Mutable MCP client. It arrives asynchronously (the runtime singleton
+   * bootstraps after first paint) and can be torn down/rebuilt on
+   * connect/disconnect, so it is updated in place rather than baked into the
+   * constructor — rebuilding the runtime would drop the conversation.
+   */
+  private mcp: AgentMcpClient | undefined;
+
   constructor(private readonly options: AgentRuntimeOptions) {
     this.maxSteps = options.maxSteps ?? MAX_AGENT_STEPS;
+    this.mcp = options.mcp;
+  }
+
+  /** Updates the local MCP client without rebuilding the runtime. */
+  setMcp(mcp: AgentMcpClient | undefined): void {
+    this.mcp = mcp;
   }
 
   /** Returns the current tier (diagnostics / status line). */
@@ -207,9 +226,23 @@ export class AgentRuntime {
       });
 
       // Tool discovery happens per run, so freshly connected accounts are
-      // visible immediately.
-      const mcpTools = await this.options.mcp.listTools();
-      const tools = mapMcpTools(mcpTools);
+      // visible immediately. Local MCP is optional: a temporary MCP failure
+      // must not block plain remote chat — it degrades to an empty tool list.
+      let tools: AgentToolDefinition[] = [];
+      if (this.mcp) {
+        try {
+          const mcpTools = await this.mcp.listTools();
+          tools = mapMcpTools(mcpTools);
+        } catch (error) {
+          if (typeof __DEV__ === 'boolean' && __DEV__) {
+            console.log(
+              '[chat] MCP tool discovery failed; continuing with 0 tools',
+              error,
+            );
+          }
+          tools = [];
+        }
+      }
 
       let step = 0;
       let previousStepResults: StepToolResult[] = [];
@@ -375,14 +408,31 @@ export class AgentRuntime {
             }
           }
 
-          let toolResult = await executeToolCall(
-            this.options.mcp,
-            call,
-            controller.signal,
-          );
+          let toolResult: AgentToolResult;
+          if (!this.mcp) {
+            // No local MCP runtime, yet the model asked for a tool. This only
+            // happens with a stale/misconfigured tool list — fail honestly.
+            toolResult = {
+              status: 'error',
+              error:
+                'The local tool runtime is unavailable, so this action cannot be executed.',
+              errorCode: 'TOOL_EXECUTION_ERROR',
+            };
+          } else {
+            toolResult = await executeToolCall(
+              this.mcp,
+              call,
+              controller.signal,
+            );
+          }
 
-          if (toolResult.status === 'approval_required') {
-            toolResult = await this.handleApproval(call, toolResult, steps);
+          if (toolResult.status === 'approval_required' && this.mcp) {
+            toolResult = await this.handleApproval(
+              this.mcp,
+              call,
+              toolResult,
+              steps,
+            );
           }
 
           this.toolLedger.record(call, toolResult);
@@ -535,6 +585,7 @@ export class AgentRuntime {
   }
 
   private async handleApproval(
+    mcp: AgentMcpClient,
     call: AgentToolCall,
     toolResult: AgentToolResult,
     steps: AgentRunStep[],
@@ -579,7 +630,7 @@ export class AgentRuntime {
 
     this.setState({ type: 'executing_tool', toolName: call.toolName });
     return executeApprovedToolCall(
-      this.options.mcp,
+      mcp,
       call,
       approval.approvalId,
       this.abortController?.signal,

@@ -10,9 +10,9 @@ import type { AgentModel } from './types';
 
 interface AgentContextValue {
   /**
-   * The planning model for the current engine. Null only when generation is
-   * remote (no tool-calling contract with the backend yet) — the chat then
-   * degrades to honest text-only mode instead of faking tool use.
+   * The planning model for the current engine. Null only when there is no
+   * in-process engine and no remote backend — the chat then degrades to an
+   * honest text-only mode instead of faking tool use.
    */
   model: AgentModel | null;
   modelId: string;
@@ -30,7 +30,8 @@ const TEXT_ONLY_CAPABILITIES: LlmCapabilities = {
 /**
  * Chooses the agent-facing model for the active engine:
  *
- * - remote → tool-capable remote agent (POST /agent/step on the backend);
+ * - remote → tool-capable remote agent (POST /agent/step on the backend,
+ *   endpoint derived from EXPO_PUBLIC_API_URL);
  * - offline-preview stub → deterministic planner, so the full loop
  *   (plan → MCP → approval → execute → confirm) stays demoable;
  * - on-device text engine → strict structured planner (JSON protocol, every
@@ -41,6 +42,9 @@ export function AgentProvider({ children }: { children: React.ReactNode }) {
 
   const value = useMemo<AgentContextValue>(() => {
     if (origin === 'remote') {
+      if (typeof __DEV__ === 'boolean' && __DEV__) {
+        console.log('[chat] mode=agent origin=remote');
+      }
       const model = createRemoteAgentModel({
         baseUrl: baseUrl(),
         getAccessToken: () => getToken(),

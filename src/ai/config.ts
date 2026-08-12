@@ -12,7 +12,18 @@ const env = process.env;
 export const ON_DEVICE_MODEL_PATH =
   env.EXPO_PUBLIC_LLM_MODEL_PATH?.trim() || '';
 
-/** Optional remote AI route (a TanStack AI server). Used only as a fallback. */
+/**
+ * Canonical Creepy.IM backend origin. This is the single source of truth for
+ * the remote Agent backend (`POST /agent/step`) — presence of this value
+ * (for `cloud` / `remote` engine selection) is what enables `origin: remote`.
+ */
+export const BACKEND_API_URL = env.EXPO_PUBLIC_API_URL?.trim() || '';
+
+/**
+ * Optional legacy TanStack AI text-stream endpoint. Only used for the raw
+ * `useChat` stream transport; the AgentRuntime → /agent/step path does NOT
+ * depend on it.
+ */
 export const REMOTE_AI_BASE_URL =
   env.EXPO_PUBLIC_TANSTACK_AI_BASE_URL?.trim() || '';
 

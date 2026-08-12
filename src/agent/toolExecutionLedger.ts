@@ -9,7 +9,14 @@ export interface ToolExecutionRecord {
     | 'approval_required'
     | 'executed'
     | 'failed'
-    | 'cancelled';
+    | 'cancelled'
+    | 'uncertain';
+  /**
+   * The original successful result, preserved so a deduplicated replay can
+   * hand the model the real output (event id, message id, …) instead of a
+   * bare `{deduplicated: true}` marker that a dependent step cannot use.
+   */
+  result?: AgentToolResult;
 }
 
 /**
@@ -37,6 +44,20 @@ export class ToolExecutionLedger {
   }
 
   /**
+   * Returns a previous record whose outcome is unknown — the side effect may
+   * or may not have happened. The agent must NOT auto-replay it; the user has
+   * to decide explicitly.
+   */
+  findUncertain(
+    call: AgentToolCall,
+  ): ToolExecutionRecord | undefined {
+    const hash = normalizeArgsHash(call);
+    const record = this.records.get(callKey(call.toolName, hash));
+    if (record?.status === 'uncertain') return record;
+    return undefined;
+  }
+
+  /**
    * Records a new or in-progress execution. Callers should first check
    * `findDuplicate` before executing a side-effectful call.
    */
@@ -53,6 +74,8 @@ export class ToolExecutionLedger {
       status = 'approval_required';
     } else if (result.status === 'user_denied') {
       status = 'cancelled';
+    } else if (result.status === 'outcome_unknown') {
+      status = 'uncertain';
     } else {
       status = 'failed';
     }
@@ -62,6 +85,7 @@ export class ToolExecutionLedger {
       toolName: call.toolName,
       argsHash: hash,
       status,
+      ...(result.status === 'success' ? { result } : {}),
     });
   }
 
@@ -84,21 +108,39 @@ function callKey(toolName: string, hash: string): string {
 }
 
 /**
+ * Recursively canonical JSON for a value:
+ * - object keys sorted recursively, so `{payload:{a,b}}` and
+ *   `{payload:{b,a}}` hash identically;
+ * - arrays preserve order;
+ * - primitives returned as-is.
+ */
+function canonicalize(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(canonicalize);
+  if (typeof value === 'object' && value !== null) {
+    const record = value as Record<string, unknown>;
+    const out: Record<string, unknown> = {};
+    for (const key of Object.keys(record).sort()) {
+      out[key] = canonicalize(record[key]);
+    }
+    return out;
+  }
+  return value;
+}
+
+/**
  * Deterministic canonical hash of a tool call's arguments.
  *
- * - Key-ordered so JSON key order does not matter.
+ * - Key-ordered *recursively* so nested JSON key order does not matter.
  * - Strips `approvalId` — a replayed call with only the approval id
  *   changed is the same action, not a new one.
  * - Does NOT include credentials; only the tool name and observable
  *   arguments participate.
  */
 export function normalizeArgsHash(call: AgentToolCall): string {
-  const sorted = Object.keys(call.args)
-    .filter((key) => key !== 'approvalId')
-    .sort();
-  const pairs: string[] = [];
-  for (const key of sorted) {
-    pairs.push(`${key}:${JSON.stringify(call.args[key])}`);
+  const stripped: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(call.args)) {
+    if (key === 'approvalId') continue;
+    stripped[key] = value;
   }
-  return pairs.join('|');
+  return JSON.stringify(canonicalize(stripped));
 }

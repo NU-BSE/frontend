@@ -30,7 +30,8 @@ export type AgentToolResultStatus =
   | 'success'
   | 'error'
   | 'user_denied'
-  | 'approval_required';
+  | 'approval_required'
+  | 'outcome_unknown';
 
 export interface AgentToolResult {
   status: AgentToolResultStatus;
@@ -170,6 +171,7 @@ export type AgentErrorCode =
   | 'USER_DENIED'
   | 'TOOL_VALIDATION_ERROR'
   | 'TOOL_EXECUTION_ERROR'
+  | 'OUTCOME_UNKNOWN'
   | 'MODEL_ERROR'
   | 'RATE_LIMITED'
   | 'NETWORK_ERROR'

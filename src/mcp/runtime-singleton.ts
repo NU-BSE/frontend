@@ -6,6 +6,7 @@ import { InMemoryApprovalService } from '@mobile-agent/approval-core';
 import { DefaultPolicyEngine } from '@mobile-agent/policy-core';
 import {
   InMemoryConnectionStore,
+  isDisposableConnector,
   type ConnectionStore,
 } from '@mobile-agent/connector-core';
 import {
@@ -62,6 +63,32 @@ export function getConnectionStore(): ConnectionStore {
 }
 
 /**
+ * Marks connected-but-credential-less connections as `reconnect_required` so
+ * their tools are never exposed. A connection can claim `connected` while its
+ * credential has vanished (web reload with an in-memory vault, SecureStore
+ * reset, partial restore, migration) — reconciliation turns that into an
+ * honest state instead of a tool that 401s at call time.
+ */
+async function reconcileConnectionCredentials(
+  connectionStore: ConnectionStore,
+  credentialVault: CredentialVault,
+): Promise<void> {
+  const connections = await connectionStore.list();
+  for (const connection of connections) {
+    if (connection.status !== 'connected') continue;
+    if (!connection.credentialReference) continue;
+    const credential = await credentialVault.get(connection.credentialReference);
+    if (!credential) {
+      await connectionStore.save({
+        ...connection,
+        status: 'reconnect_required',
+        updatedAt: Date.now(),
+      });
+    }
+  }
+}
+
+/**
  * Secrets live only in the vault. Connection records carry a
  * `credentialReference` pointing here — never the credential itself.
  */
@@ -104,6 +131,12 @@ export function getLocalMcpRuntime(
     runtimePromise = (async () => {
       if (mode === 'production') {
         await removeDevelopmentConnections(connectionStore);
+        // A persistent connection whose credential has vanished must not keep
+        // claiming `connected` — reconcile before the registry reads it.
+        await reconcileConnectionCredentials(
+          connectionStore,
+          getCredentialVault(),
+        );
       } else if (!devConnectionsSeeded) {
         const telegramMode = resolveTelegramAdapterMode(mode);
         await seedDevelopmentConnections(connectionStore, {
@@ -174,6 +207,18 @@ export function getCurrentRegistry(): ConnectorRegistry | null {
 }
 
 /**
+ * The ids actually registered in this build's runtime. The UI uses this to
+ * decide whether a catalogue tile is really connectable — a mock connector
+ * omitted from a production registry must not be offered as available.
+ */
+export async function getRegisteredConnectorIds(): Promise<Set<string>> {
+  await getLocalMcpRuntime();
+  const registry = getCurrentRegistry();
+  if (!registry) return new Set();
+  return new Set(registry.listConnectors().map((connector) => connector.id));
+}
+
+/**
  * Rebuilds the runtime so newly connected/disconnected accounts change the
  * tool list. ConnectionService calls this after every connect/disconnect.
  */
@@ -228,19 +273,23 @@ export async function closeLocalMcpRuntime(): Promise<void> {
 
   const runtime = await runtimePromise;
 
-  if (currentRegistry) {
-    for (const connector of currentRegistry.listConnectors()) {
-      const disposable = (connector as { dispose?: () => Promise<void> }).dispose;
-      if (disposable) {
-        try { await disposable(); } catch { /* best-effort */ }
+  try {
+    if (currentRegistry) {
+      for (const connector of currentRegistry.listConnectors()) {
+        if (isDisposableConnector(connector)) {
+          try { await connector.dispose(); } catch { /* best-effort */ }
+        }
       }
     }
+
+    await runtime.close();
+  } finally {
+    // A close failure must never strand the singleton on a stale runtime:
+    // clearing these lets the next getLocalMcpRuntime()/restart rebuild clean.
+    runtimePromise = null;
+    runtimeMode = null;
+    currentRegistry = null;
+    approvalStore = null;
+    approvalService = null;
   }
-
-  await runtime.close();
-
-  runtimePromise = null;
-  currentRegistry = null;
-  approvalStore = null;
-  approvalService = null;
 }

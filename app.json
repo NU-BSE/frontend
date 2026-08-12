@@ -28,9 +28,6 @@
       "./plugins/with-attestation-native-probes",
       "expo-web-browser"
     ],
-    "scheme": [
-      "creepyim",
-      "com.googleusercontent.apps.113810819709-javkhtvie8tjsuph29flcoesr0h4sio6"
-    ]
+    "scheme": "creepyim"
   }
 }

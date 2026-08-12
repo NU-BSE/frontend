@@ -60,6 +60,7 @@ function googleAuthOptions(
         ...tokens,
         ...(identity.email ? { email: identity.email } : {}),
         ...(identity.name ? { name: identity.name } : {}),
+        ...(identity.sub ? { externalAccountId: identity.sub } : {}),
       };
     },
     revoke: async (token: string) => {

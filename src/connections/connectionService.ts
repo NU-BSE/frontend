@@ -128,6 +128,20 @@ export async function reconnectConnection(
   const fresh = await connectConnector(record.connectorId);
   if (fresh.id !== connectionId) {
     await store.remove(connectionId);
+
+    // The old record may point at a credential the fresh record no longer
+    // uses — drop it so a re-keyed account does not leak a stale grant.
+    if (
+      record.credentialReference &&
+      record.credentialReference !== fresh.credentialReference
+    ) {
+      try {
+        await getCredentialVault().remove(record.credentialReference);
+      } catch {
+        // Best-effort: unreachable either way once the record is gone.
+      }
+    }
+
     await restartLocalMcpRuntime();
   }
 }

@@ -3,6 +3,7 @@ import type { AgentMcpClient } from '@mobile-agent/mcp-client';
 import { mapMcpTools } from './toolMapper';
 import { executeApprovedToolCall, executeToolCall } from './toolExecutor';
 import { ToolExecutionLedger } from './toolExecutionLedger';
+import type { ToolExecutionRecord } from './toolExecutionLedger';
 import { detectStepProgress } from './routing/progressTracker';
 import type { StepToolResult } from './routing/progressTracker';
 import {
@@ -14,6 +15,7 @@ import {
   type AgentRunState,
   type AgentRunStep,
   type AgentToolCall,
+  type AgentToolDefinition,
   type AgentToolResult,
   type ConnectionSummary,
   type PendingApproval,
@@ -330,36 +332,44 @@ export class AgentRuntime {
               this.toolLedger.findDuplicate(call);
 
             if (duplicate) {
-              const dedupResult: AgentToolResult = {
-                status: 'success',
-                data: { deduplicated: true, originalCallId: duplicate.toolCallId },
-              };
+              const dedupResult =
+                buildDeduplicatedResult(duplicate);
 
-              stepToolResults.push({
-                call,
-                result: dedupResult,
-                deduplicated: true,
-              });
-
-              this.routingMonitor.recordToolResult(
+              this.pushToolResult(
                 call,
                 dedupResult,
-                toolDef?.risk,
+                toolDef,
+                stepToolResults,
+                steps,
+                true,
               );
 
-              steps.push({
-                type: 'tool_result',
-                toolName: call.toolName,
-                success: true,
-              });
+              continue;
+            }
 
-              this.pushMessage({
-                id: this.nextId('msg'),
-                role: 'tool',
-                toolCallId: call.id,
-                toolName: call.toolName,
-                result: dedupResult,
-              });
+            // An uncertain side effect (timeout after submission) must not be
+            // auto-replayed — the physical effect may already have happened.
+            const uncertain =
+              this.toolLedger.findUncertain(call);
+
+            if (uncertain) {
+              const uncertainResult: AgentToolResult = {
+                status: 'outcome_unknown',
+                error:
+                  'The previous action may have completed, but confirmation ' +
+                  'was not received. Ask the user whether it went through ' +
+                  'before repeating it.',
+                errorCode: 'OUTCOME_UNKNOWN',
+              };
+
+              this.pushToolResult(
+                call,
+                uncertainResult,
+                toolDef,
+                stepToolResults,
+                steps,
+                false,
+              );
 
               continue;
             }
@@ -377,30 +387,14 @@ export class AgentRuntime {
 
           this.toolLedger.record(call, toolResult);
 
-          stepToolResults.push({
-            call,
-            result: toolResult,
-          });
-
-          this.routingMonitor.recordToolResult(
+          this.pushToolResult(
             call,
             toolResult,
-            toolDef?.risk,
+            toolDef,
+            stepToolResults,
+            steps,
+            false,
           );
-
-          steps.push({
-            type: 'tool_result',
-            toolName: call.toolName,
-            success: toolResult.status === 'success',
-          });
-
-          this.pushMessage({
-            id: this.nextId('msg'),
-            role: 'tool',
-            toolCallId: call.id,
-            toolName: call.toolName,
-            result: toolResult,
-          });
         }
 
         // Progress tracking: detect whether this step moved the run forward.
@@ -609,6 +603,42 @@ export class AgentRuntime {
     this.options.onMessages?.(this.messageSnapshot);
   }
 
+  /** Records a tool result into progress tracking, run record, and messages. */
+  private pushToolResult(
+    call: AgentToolCall,
+    toolResult: AgentToolResult,
+    toolDef: AgentToolDefinition | undefined,
+    stepToolResults: StepToolResult[],
+    steps: AgentRunStep[],
+    deduplicated: boolean,
+  ): void {
+    stepToolResults.push({
+      call,
+      result: toolResult,
+      ...(deduplicated ? { deduplicated: true } : {}),
+    });
+
+    this.routingMonitor.recordToolResult(
+      call,
+      toolResult,
+      toolDef?.risk,
+    );
+
+    steps.push({
+      type: 'tool_result',
+      toolName: call.toolName,
+      success: toolResult.status === 'success',
+    });
+
+    this.pushMessage({
+      id: this.nextId('msg'),
+      role: 'tool',
+      toolCallId: call.id,
+      toolName: call.toolName,
+      result: toolResult,
+    });
+  }
+
   private setState(state: AgentRunState): void {
     this.runState = state;
     this.options.onState?.(state);
@@ -635,4 +665,30 @@ function tierRank(tier: ModelTier): number {
     case 'expert':
       return 2;
   }
+}
+
+/**
+ * Rebuilds the result for a deduplicated side effect. The original output is
+ * preserved (event id, message id, …) so a dependent next step can consume it,
+ * with `deduplicated`/`originalCallId` appended rather than replacing it.
+ */
+function buildDeduplicatedResult(
+  duplicate: ToolExecutionRecord,
+): AgentToolResult {
+  const original = duplicate.result;
+  const meta = { deduplicated: true, originalCallId: duplicate.toolCallId };
+
+  if (
+    original &&
+    typeof original.data === 'object' &&
+    original.data !== null &&
+    !Array.isArray(original.data)
+  ) {
+    return {
+      ...original,
+      data: { ...(original.data as Record<string, unknown>), ...meta },
+    };
+  }
+
+  return { status: 'success', data: meta };
 }

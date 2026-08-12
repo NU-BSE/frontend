@@ -116,3 +116,21 @@ export function isConnectable(
     'function'
   );
 }
+
+/**
+ * Optional lifecycle contract: connectors that hold native or long-lived
+ * resources (e.g. a TDLib client) implement `dispose()` so the runtime can
+ * release them on shutdown or restart. The runtime must use
+ * `isDisposableConnector` rather than an ad-hoc cast.
+ */
+export interface DisposableConnector {
+  dispose(): Promise<void>;
+}
+
+export function isDisposableConnector(
+  connector: Connector,
+): connector is Connector & DisposableConnector {
+  return (
+    typeof (connector as unknown as DisposableConnector).dispose === 'function'
+  );
+}

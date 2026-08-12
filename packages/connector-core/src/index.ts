@@ -17,12 +17,13 @@ export type {
   ConnectorId,
   ConnectorImplementationStatus,
   ConnectorTool,
+  DisposableConnector,
   ToolExecutionContext,
   ToolImplementationStatus,
   ToolRisk,
 } from "./types";
 
-export { isConnectable } from "./types";
+export { isConnectable, isDisposableConnector } from "./types";
 
 export { ConnectorError, RateLimitError } from "./errors";
 

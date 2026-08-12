@@ -2,6 +2,8 @@ import { McpServer } from '@modelcontextprotocol/server';
 import * as z from 'zod/v4';
 
 import type { ConnectorRegistry } from '@mobile-agent/connector-registry';
+import type { ConnectorTool } from '@mobile-agent/connector-core';
+import { ConnectorError } from '@mobile-agent/connector-core';
 import type { PolicyEngine } from '@mobile-agent/policy-core';
 import { DEFAULT_APPROVAL_POLICY } from '@mobile-agent/policy-core';
 import type { ApprovalService } from '@mobile-agent/approval-core';
@@ -58,6 +60,45 @@ function errorResult(message: string) {
   };
 }
 
+/**
+ * Recursively key-sorted canonical JSON so two schema objects with the same
+ * shape compare equal regardless of property order.
+ */
+function stable(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(stable);
+  if (typeof value === 'object' && value !== null) {
+    const record = value as Record<string, unknown>;
+    const out: Record<string, unknown> = {};
+    for (const key of Object.keys(record).sort()) {
+      out[key] = stable(record[key]);
+    }
+    return out;
+  }
+  return value;
+}
+
+/**
+ * A comparable signature for a tool definition. Two connectors accidentally
+ * publishing the same MCP tool name with incompatible definitions (risk,
+ * schema, scopes, capabilities) must fail closed rather than silently using
+ * the first-registered schema/risk.
+ */
+function toolSignature(tool: ConnectorTool): string {
+  return JSON.stringify(
+    stable({
+      title: tool.title,
+      description: tool.description,
+      risk: tool.risk,
+      capabilities: [...tool.capabilities].sort(),
+      requiredScopes: [...tool.requiredScopes].sort(),
+      inputSchema: z.toJSONSchema(tool.inputSchema as z.ZodType),
+      ...(tool.outputSchema
+        ? { outputSchema: z.toJSONSchema(tool.outputSchema as z.ZodType) }
+        : {}),
+    }),
+  );
+}
+
 export async function registerConnectorTools(
   server: McpServer,
   registry: ConnectorRegistry,
@@ -90,6 +131,21 @@ export async function registerConnectorTools(
     // connector always agree, and cross-connector name collisions are
     // resolved at execution time below.
     const primary = entries[0].tool;
+
+    // Fail closed on conflicting duplicate definitions: MCP groups tools
+    // globally by name, so an incompatible second definition must never be
+    // silently shadowed by the first.
+    const signature = toolSignature(primary);
+    for (const entry of entries) {
+      if (toolSignature(entry.tool) !== signature) {
+        throw new Error(
+          `Conflicting tool definitions for "${toolName}": connectors ` +
+            `${entries.map((e) => e.connection.connectorId).join(', ')} ` +
+            'published incompatible schemas/risk/scopes.',
+        );
+      }
+    }
+
     const gated = mayRequireApproval(primary.risk);
 
     // registerTool overloads are narrow; cast the config to avoid type conflicts
@@ -220,6 +276,21 @@ export async function registerConnectorTools(
             idempotencyKey: policy.idempotencyKey,
           });
         } catch (error) {
+          // A side effect whose outcome is unknown (e.g. provider timeout
+          // after submission) must not be surfaced as a plain failure, or the
+          // model would retry it and risk duplicating the physical effect.
+          if (
+            error instanceof ConnectorError &&
+            error.code === 'OUTCOME_UNKNOWN'
+          ) {
+            return {
+              content: [{ type: 'text', text: error.message }],
+              structuredContent: {
+                status: 'outcome_unknown',
+                error: error.message,
+              },
+            };
+          }
           return errorResult(
             error instanceof Error ? error.message : 'Tool execution failed',
           );

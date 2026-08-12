@@ -10,6 +10,7 @@ export class ConnectorError extends Error {
       | 'VALIDATION_FAILED'
       | 'PROVIDER_ERROR'
       | 'UNSUPPORTED'
+      | 'OUTCOME_UNKNOWN'
       | 'CANCELLED',
     readonly retryable: boolean = false,
   ) {

@@ -3,13 +3,25 @@ name: Build
 on:
   push:
     branches:
-      - agent/add-npm-build
+      - main
   pull_request:
 
+env:
+  # Build-time-only dummy values. These are never used for real authentication
+  # and carry no secret: they exist so the Expo config and JS bundle can be
+  # produced in CI. Real credentials live in GitHub secrets and are only
+  # injected by the deploy workflow.
+  EXPO_PUBLIC_API_URL: https://api.creepy.im
+  EXPO_PUBLIC_MCP_RUNTIME_MODE: development
+  EXPO_PUBLIC_TELEGRAM_ADAPTER: mock
+  EXPO_PUBLIC_TELEGRAM_API_ID: "000000"
+  EXPO_PUBLIC_TELEGRAM_API_HASH: "00000000000000000000000000000000"
+  EXPO_PUBLIC_OAUTH: "000000000000-xxxxxxxxxxxxxxxxxxxxxxxx.apps.googleusercontent.com"
+
 jobs:
-  build:
+  verify:
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 30
 
     steps:
       - name: Checkout
@@ -21,11 +33,54 @@ jobs:
           node-version: 22
           cache: npm
 
+      # `legacy-peer-deps` is configured in `.npmrc`, so `npm ci` needs no flag.
       - name: Install dependencies
-        run: npm install --legacy-peer-deps
+        run: npm ci
 
-      - name: Typecheck
-        run: npm run typecheck
+      - name: Verify (typecheck + lint + unit/verification suites)
+        run: npm run verify
 
-      - name: Build Android and Web
-        run: npm run build
+      - name: Build web
+        run: npm run build:web
+
+  android:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Setup Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Prebuild native Android project
+        run: npx expo prebuild --clean --platform android
+
+      # Compiles the real Gradle project: config plugins, AndroidManifest,
+      # react-native-tdlib / llama.rn native modules, and JNI/native linking.
+      - name: Assemble debug APK
+        working-directory: android
+        run: ./gradlew assembleDebug --no-daemon
+
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: app-debug
+          path: android/app/build/outputs/apk/debug/app-debug.apk
+          if-no-files-found: error

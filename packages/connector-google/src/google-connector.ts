@@ -1,13 +1,11 @@
 import * as z from 'zod/v4';
 import type {
   ConnectionRecord,
-  ConnectorTool,
   StoreBackedConnectorOptions,
 } from '@mobile-agent/connector-core';
 import {
   ConnectorError,
   StoreBackedConnector,
-  connId,
   dt,
   opt,
   str,
@@ -151,6 +149,11 @@ export interface GoogleAuthorization {
   tokenType?: string;
   email?: string;
   name?: string;
+  /**
+   * The stable Google account id (`sub` from the OpenID userinfo). Used to
+   * derive the connection id so two Google accounts can coexist.
+   */
+  externalAccountId?: string;
 }
 
 export interface GoogleConnectorOptions extends StoreBackedConnectorOptions {
@@ -163,6 +166,33 @@ export interface GoogleConnectorOptions extends StoreBackedConnectorOptions {
 }
 
 export const GOOGLE_CONNECTION_ID = 'google-account';
+
+/** Pre-multi-account credential key: the old connector stored the OAuth grant
+ *  under the fixed connection id. Kept for backward-compatible disconnect. */
+const LEGACY_GOOGLE_CREDENTIAL_KEY = GOOGLE_CONNECTION_ID;
+
+/**
+ * Stable fallback account id for the rare case where Google's userinfo omits
+ * `sub`. Uses a random value (never the fixed legacy id) so a fresh sign-in
+ * can never overwrite an existing account.
+ */
+function generateFallbackAccountId(): string {
+  const random =
+    typeof globalThis.crypto?.randomUUID === 'function'
+      ? globalThis.crypto.randomUUID()
+      : `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
+  return `google:anon:${random}`;
+}
+
+function connectionIdForAccount(externalAccountId?: string): string {
+  return externalAccountId
+    ? `google:${externalAccountId}`
+    : generateFallbackAccountId();
+}
+
+function credentialReferenceFor(connectionId: string): string {
+  return `google.oauth:${connectionId}`;
+}
 
 export class GoogleConnector extends StoreBackedConnector {
   readonly id = 'google' as const;
@@ -211,8 +241,13 @@ export class GoogleConnector extends StoreBackedConnector {
     const grant = await this.authorize();
     const now = Date.now();
 
+    // Multi-account: one connection per Google identity. The id follows the
+    // account, so personal and work Google accounts coexist.
+    const connectionId = connectionIdForAccount(grant.externalAccountId);
+    const credentialReference = credentialReferenceFor(connectionId);
+
     if (this.vault) {
-      await this.vault.save(GOOGLE_CONNECTION_ID, {
+      await this.vault.save(credentialReference, {
         kind: 'oauth',
         accessToken: grant.accessToken,
         scopes: grant.scopes,
@@ -224,14 +259,19 @@ export class GoogleConnector extends StoreBackedConnector {
       });
     }
 
-    const existing = await this.store.get(GOOGLE_CONNECTION_ID);
+    const existing = await this.store.get(connectionId);
     const record: ConnectionRecord = {
-      id: GOOGLE_CONNECTION_ID,
+      id: connectionId,
       connectorId: this.id,
+      ...(grant.externalAccountId
+        ? { externalAccountId: grant.externalAccountId }
+        : {}),
       displayName: grant.email ?? grant.name ?? 'Google',
       status: 'connected',
       scopes: grant.scopes,
       capabilities: ['google.read'],
+      // The record points at the credential rather than holding it.
+      credentialReference,
       createdAt: existing?.createdAt ?? now,
       updatedAt: now,
     };
@@ -242,13 +282,26 @@ export class GoogleConnector extends StoreBackedConnector {
 
   /** Revoke at Google and delete the local credential before forgetting it. */
   async disconnect(connectionId: string): Promise<void> {
-    if (this.vault && this.revoke) {
-      const stored = await this.vault.get(connectionId);
-      if (stored?.kind === 'oauth') {
-        await this.revoke(stored.refreshToken ?? stored.accessToken);
+    const record = await this.store.get(connectionId);
+
+    // Follow the record's credential pointer. A pre-multi-account connection
+    // (id `google-account`, no pointer) still revokes its legacy credential.
+    const credentialReference =
+      record?.credentialReference ??
+      (connectionId === GOOGLE_CONNECTION_ID
+        ? LEGACY_GOOGLE_CREDENTIAL_KEY
+        : null);
+
+    if (this.vault && credentialReference) {
+      if (this.revoke) {
+        const stored = await this.vault.get(credentialReference);
+        if (stored?.kind === 'oauth') {
+          await this.revoke(stored.refreshToken ?? stored.accessToken);
+        }
       }
+      await this.vault.remove(credentialReference);
     }
-    await this.vault?.remove(connectionId);
+
     await super.disconnect(connectionId);
   }
 }

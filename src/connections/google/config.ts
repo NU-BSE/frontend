@@ -13,10 +13,11 @@
  * subtraction, and Expo only inlines dot-accessible names.)
  */
 
+import { googleSchemeFromClientId } from './scheme';
+
 const CLIENT_ID = (process.env.EXPO_PUBLIC_OAUTH ?? '').trim();
 
-/** Whether Google sign-in can be attempted at all. */
-export const isGoogleOAuthConfigured = (): boolean => CLIENT_ID.length > 0;
+/** Whether Google sign-in can be attempted at all. */export const isGoogleOAuthConfigured = (): boolean => CLIENT_ID.length > 0;
 
 export const googleClientId = (): string => {
   if (!CLIENT_ID) {
@@ -30,18 +31,12 @@ export const googleClientId = (): string => {
 
 /**
  * Google requires Android clients to redirect to the reverse-DNS form of the
- * client id. It is derived rather than configured so it cannot drift from the
- * client id it must match — a mismatch fails late, inside the browser, with an
- * opaque `redirect_uri_mismatch`.
- *
- * The scheme must also be declared in the Android manifest, which
- * `app.json`'s `scheme` array does.
+ * client id, derived from a single source of truth so it cannot drift from the
+ * client id it must match. The same helper feeds the Expo config generation so
+ * the Android manifest always carries the scheme for the client id in use.
  */
 export const googleRedirectScheme = (): string =>
-  `com.googleusercontent.apps.${googleClientId().replace(
-    /\.apps\.googleusercontent\.com$/u,
-    '',
-  )}`;
+  googleSchemeFromClientId(googleClientId());
 
 export const googleRedirectUri = (): string =>
   `${googleRedirectScheme()}:/oauth2redirect`;

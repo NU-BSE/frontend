@@ -251,6 +251,7 @@ async function main(): Promise<void> {
     const registry = createConnectorRegistry({
       mode: 'development',
       connectionStore: store,
+      credentialVault: new InMemoryCredentialVault(),
     });
     const active = await registry.listActiveTools();
 
@@ -390,6 +391,7 @@ async function main(): Promise<void> {
     const registry = createConnectorRegistry({
       mode: 'production',
       connectionStore: store,
+      credentialVault: new InMemoryCredentialVault(),
     });
 
     const ids = registry.listConnectors().map((connector) => connector.id);

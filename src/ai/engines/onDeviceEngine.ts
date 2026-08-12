@@ -74,15 +74,32 @@ export function createOnDeviceEngine(config: OnDeviceEngineConfig): LlmEngine {
   let context: LlamaContext | null = null;
   let preparing: Promise<void> | null = null;
 
+  // Guard against a prepare()/dispose() race: if the engine is disposed (or a
+  // newer prepare() supersedes the in-flight one) while `initLlama` is still
+  // running, the late result must be released immediately and never assigned.
+  let lifecycleGeneration = 0;
+  let disposed = false;
+
+  // A native context can only serve one decode loop at a time. Two
+  // independent consumers must not share it uncontrolled.
+  let generating = false;
+
   return {
     id: 'creepyim-on-device',
     label: 'On-device model',
-    isReady: () => context !== null,
+    isReady: () => context !== null && !disposed,
 
     prepare() {
+      if (disposed) {
+        return Promise.reject(
+          new OnDeviceUnavailableError('engine has been disposed'),
+        );
+      }
       // Concurrent screens may both trigger preparation; share one load.
       if (context) return Promise.resolve();
       if (preparing) return preparing;
+
+      const generation = lifecycleGeneration;
 
       preparing = (async () => {
         const binding = loadBinding();
@@ -91,11 +108,20 @@ export function createOnDeviceEngine(config: OnDeviceEngineConfig): LlmEngine {
             'the llama.rn native module is not present in this build',
           );
         }
-        context = await binding.initLlama({
+        const created = await binding.initLlama({
           model: modelPath,
           n_ctx: contextSize,
           n_gpu_layers: gpuLayers,
         });
+
+        // The engine was disposed or a newer preparation took over while the
+        // native init was running — release this context so it never leaks.
+        if (disposed || generation !== lifecycleGeneration) {
+          await created.release().catch(() => undefined);
+          return;
+        }
+
+        context = created;
       })().finally(() => {
         preparing = null;
       });
@@ -107,7 +133,21 @@ export function createOnDeviceEngine(config: OnDeviceEngineConfig): LlmEngine {
       prompts: EnginePrompt[],
       options: EngineGenerateOptions = {},
     ) {
+      if (disposed) throw new OnDeviceUnavailableError('engine has been disposed');
       if (!context) throw new OnDeviceUnavailableError('context not initialised');
+
+      // Do not start native inference for an already-aborted request.
+      if (options.signal?.aborted) return;
+
+      // Reject a second concurrent generation rather than letting two
+      // consumers drive the same native context.
+      if (generating) {
+        throw new OnDeviceUnavailableError(
+          'engine is already running a generation',
+        );
+      }
+      generating = true;
+
       const active = context;
 
       const queue = new AsyncQueue<string>();
@@ -137,14 +177,22 @@ export function createOnDeviceEngine(config: OnDeviceEngineConfig): LlmEngine {
       try {
         yield* queue.drain();
       } finally {
+        generating = false;
         options.signal?.removeEventListener('abort', onAbort);
       }
     },
 
     async dispose() {
+      disposed = true;
+      lifecycleGeneration += 1;
+
       const active = context;
       context = null;
-      if (active) await active.release().catch(() => undefined);
+      if (active) {
+        // Best-effort: stop any in-flight decode before releasing the context.
+        await active.stopCompletion().catch(() => undefined);
+        await active.release().catch(() => undefined);
+      }
     },
   };
 }

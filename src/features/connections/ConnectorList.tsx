@@ -12,6 +12,7 @@ import {
   useConnectConnector,
   useConnections,
   useDisconnectConnection,
+  useRegisteredConnectorIds,
 } from '@/connections/useConnections';
 import { palette, radius, spacing } from '@/theme/tokens';
 
@@ -35,6 +36,7 @@ const GRID_GAP = spacing.md;
  */
 export function ConnectorList() {
   const { data: connections, isPending } = useConnections();
+  const { data: registeredIds } = useRegisteredConnectorIds();
   const connect = useConnectConnector();
   const disconnect = useDisconnectConnection();
 
@@ -70,14 +72,20 @@ export function ConnectorList() {
 
               const connection = entry.connectorId
                 ? connections?.find(
-                    (record) =>
-                      record.connectorId === entry.connectorId &&
-                      record.status === 'connected',
+                    (record) => record.connectorId === entry.connectorId,
                   )
                 : undefined;
 
-              const connected = Boolean(connection);
-              const connectable = Boolean(entry.connectorId);
+              const connected =
+                Boolean(connection) && connection?.status === 'connected';
+              const reconnectRequired = connection?.status === 'reconnect_required';
+
+              // Availability comes from the live registry, not the catalogue:
+              // a connector the registry omitted is "Coming soon", not tappable.
+              const available = entry.connectorId
+                ? registeredIds?.has(entry.connectorId) ?? false
+                : false;
+              const connectable = Boolean(entry.connectorId) && available;
               const busy =
                 (connect.isPending && connect.variables === entry.connectorId) ||
                 (disconnect.isPending && disconnect.variables === connection?.id);
@@ -92,18 +100,18 @@ export function ConnectorList() {
                   }}
                   accessibilityLabel={
                     connectable
-                      ? `${entry.label}. ${connected ? 'Connected. Tap to disconnect' : entry.summary}`
-                      : `${entry.label}. ${entry.note ?? 'Unavailable'}`
+                      ? `${entry.label}. ${connected ? 'Connected. Tap to disconnect' : reconnectRequired ? 'Reconnect required. Tap to reconnect' : entry.summary}`
+                      : `${entry.label}. ${entry.note ?? 'Coming soon'}`
                   }
                   disabled={!connectable || busy || isPending}
                   onPress={() => {
-                    if (connected && connection) disconnect.mutate(connection.id);
-                    else if (entry.connectorId) {
-                      if (entry.connectorId === 'telegram-user') {
-                        router.push('/connect/telegram');
-                      } else {
-                        connect.mutate(entry.connectorId);
-                      }
+                    if (!entry.connectorId) return;
+                    if (connected && connection) {
+                      disconnect.mutate(connection.id);
+                    } else if (entry.connectorId === 'telegram-user') {
+                      router.push('/connect/telegram');
+                    } else {
+                      connect.mutate(entry.connectorId);
                     }
                   }}
                   style={({ pressed }) => [
@@ -132,7 +140,9 @@ export function ConnectorList() {
                       ? 'Working…'
                       : connected
                         ? (connection?.displayName ?? 'Connected')
-                        : (entry.note ?? entry.summary)}
+                        : reconnectRequired
+                          ? 'Reconnect required'
+                          : (entry.note ?? entry.summary)}
                   </Text>
                   {connected ? (
                     <Text variant="tag" tone="brand" uppercase>

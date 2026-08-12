@@ -12,6 +12,7 @@ import { router } from 'expo-router';
 
 import { Text } from '@/components/Text';
 import { Button } from '@/components/Button';
+import { LocalQrCode } from '@/components/LocalQrCode';
 import { palette, radius, spacing } from '@/theme/tokens';
 import { getCurrentRegistry, getLocalMcpRuntime } from '@/mcp/runtime-singleton';
 import { useConnectConnector } from '@/connections/useConnections';
@@ -28,10 +29,33 @@ export default function TelegramAuthScreen() {
   const [password, setPassword] = useState('');
   const [firstName, setFirstName] = useState('');
   const [lastName, setLastName] = useState('');
-  const [termsAccepted, setTermsAccepted] = useState(false);
+  const [termsAcceptedKey, setTermsAcceptedKey] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [initializing, setInitializing] = useState(true);
+
+  // Acceptance belongs to a specific Terms document. When TDLib re-sends
+  // `wait_registration` with changed terms (same state, new document), the key
+  // changes and acceptance is derived to false, so it can never transfer to
+  // new terms. Never persisted — in-memory only.
+  const registrationTermsKey =
+    authState.type === 'wait_registration'
+      ? [
+          authState.termsOfServiceText ?? '',
+          authState.minUserAge ?? '',
+          authState.showTermsPopup ?? '',
+        ].join('|')
+      : null;
+
+  const termsAccepted =
+    registrationTermsKey !== null &&
+    termsAcceptedKey === registrationTermsKey;
+
+  const toggleTermsAccepted = useCallback(() => {
+    setTermsAcceptedKey(
+      termsAccepted ? null : registrationTermsKey,
+    );
+  }, [termsAccepted, registrationTermsKey]);
 
   const connect = useConnectConnector();
   const completingRef = useRef(false);
@@ -101,10 +125,6 @@ export default function TelegramAuthScreen() {
         unsub = adapter.setAuthStateListener((state) => {
           setAuthState(state);
           setLoading(false);
-
-          if (state.type !== 'wait_registration') {
-            setTermsAccepted(false);
-          }
 
           if (state.type === 'ready' && !cancelled) {
             void completeConnect();
@@ -405,15 +425,13 @@ export default function TelegramAuthScreen() {
                     {authState.termsOfServiceText}
                   </Text>
                 </ScrollView>
-                {authState.showTermsPopup !== false ? (
-                  <View style={styles.checkRow}>
-                    <Button
-                      label={termsAccepted ? '☑ I accept the Terms of Service' : '☐ I accept the Terms of Service'}
-                      variant="ghost"
-                      onPress={() => setTermsAccepted(!termsAccepted)}
-                    />
-                  </View>
-                ) : null}
+                <View style={styles.checkRow}>
+                  <Button
+                    label={termsAccepted ? '☑ I accept the Terms of Service' : '☐ I accept the Terms of Service'}
+                    variant="ghost"
+                    onPress={toggleTermsAccepted}
+                  />
+                </View>
               </>
             ) : null}
             <TextInput
@@ -451,6 +469,20 @@ export default function TelegramAuthScreen() {
               Open Telegram on a device where you are already signed in
               and confirm this login attempt.
             </Text>
+            {authState.link ? (
+              <>
+                <LocalQrCode value={authState.link} size={220} />
+                <Text variant="bodySmall" tone="secondary" style={styles.description}>
+                  Scan this code with Telegram, or open the link below on your
+                  signed-in device.
+                </Text>
+              </>
+            ) : (
+              <Text variant="body" tone="danger" style={styles.description}>
+                Telegram did not provide a confirmation link. Please go back and
+                try again.
+              </Text>
+            )}
           </>
         ) : authState.type === 'wait_premium_purchase' ? (
           <>

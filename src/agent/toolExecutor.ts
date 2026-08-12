@@ -46,6 +46,7 @@ interface StructuredToolContent {
   approvalId?: string;
   preview?: unknown;
   data?: unknown;
+  error?: string;
 }
 
 /**
@@ -93,10 +94,34 @@ export async function executeToolCall(
     | undefined;
 
   if (structured?.status === 'approval_required') {
+    // The approval protocol requires a non-empty approvalId; without one the
+    // UI has nothing to confirm. Reject the malformed response rather than
+    // opening an approval sheet for an empty id.
+    if (
+      typeof structured.approvalId !== 'string' ||
+      structured.approvalId.length === 0
+    ) {
+      return {
+        status: 'error',
+        error: 'Tool returned an invalid approval response.',
+        errorCode: 'TOOL_VALIDATION_ERROR',
+      };
+    }
     return {
       status: 'approval_required',
       approvalId: structured.approvalId,
       approvalPreview: structured.preview,
+    };
+  }
+
+  if (structured?.status === 'outcome_unknown') {
+    return {
+      status: 'outcome_unknown',
+      error:
+        typeof structured.error === 'string'
+          ? structured.error
+          : 'The action may have completed, but confirmation was not received.',
+      errorCode: 'OUTCOME_UNKNOWN',
     };
   }
 

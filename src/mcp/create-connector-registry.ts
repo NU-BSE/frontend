@@ -1,6 +1,6 @@
 import type { ConnectionStore } from '@mobile-agent/connector-core';
 import { ConnectorRegistry } from '@mobile-agent/connector-registry';
-import { getCredentialVault } from '@/mcp/runtime-singleton';
+import type { CredentialVault } from '@mobile-agent/credential-vault';
 import { AndroidConnector } from '@mobile-agent/connector-android';
 import { GoogleConnector } from '@mobile-agent/connector-google';
 import {
@@ -25,6 +25,7 @@ import { resolveTelegramAdapterMode } from './telegram-adapter-mode';
 export interface AppRegistryOptions {
   mode: McpRuntimeMode;
   connectionStore: ConnectionStore;
+  credentialVault: CredentialVault;
 }
 
 /**
@@ -45,10 +46,13 @@ export interface AppRegistryOptions {
  * `expo-auth-session` cannot load there. Without these the connector still
  * registers, and `connect()` reports that sign-in is unavailable.
  */
-function googleAuthOptions(connectionStore: ConnectionStore) {
+function googleAuthOptions(
+  connectionStore: ConnectionStore,
+  credentialVault: CredentialVault,
+) {
   return {
     store: connectionStore,
-    vault: getCredentialVault(),
+    vault: credentialVault,
     authorize: async () => {
       const { authorizeGoogle } = await import('@/connections/google/authorize');
       const { tokens, identity } = await authorizeGoogle();
@@ -68,7 +72,7 @@ function googleAuthOptions(connectionStore: ConnectionStore) {
 export function createConnectorRegistry(
   options: AppRegistryOptions,
 ): ConnectorRegistry {
-  const { mode, connectionStore } = options;
+  const { mode, connectionStore, credentialVault } = options;
   const development = mode === 'development';
   const store = { store: connectionStore };
 
@@ -80,7 +84,7 @@ export function createConnectorRegistry(
 
   const connectors = [
     new AndroidConnector(store),
-    new GoogleConnector(googleAuthOptions(connectionStore)),
+    new GoogleConnector(googleAuthOptions(connectionStore, credentialVault)),
     new TelegramUserConnector({
       store: connectionStore,
       adapterFactory:

@@ -207,20 +207,10 @@ export function validatePhoneNumber(raw: string): string {
   return cleaned;
 }
 
-/**
- * Extracts country code and local number from a validated E.164 number.
- *
- * `react-native-tdlib`'s `login()` concatenates `countrycode + phoneNumber`,
- * so we pass the full cleaned number as `phoneNumber` with an empty
- * countrycode to avoid any splitting ambiguity.
- */
 export function parsePhoneNumber(_phoneNumber: string): {
   countrycode: string;
   phoneNumber: string;
 } {
-  // `react-native-tdlib` simply concatenates the two fields.
-  // Passing the full E.164 string as phoneNumber avoids incorrect
-  // splitting of country codes.
   const normalized = _phoneNumber.replace(/[\s()\-–]/gu, '');
-  return { countrycode: '', phoneNumber: normalized };
+  return { countrycode: '+', phoneNumber: normalized.slice(1) };
 }

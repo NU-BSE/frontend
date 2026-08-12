@@ -14,6 +14,13 @@ import { mapTdlibError } from './tdlib-error-mapper';
 
 type ReactNativeTdLib = typeof import('react-native-tdlib').default;
 
+const LOG_PREFIX = '[TDLIB]';
+
+function logError(context: string, error: unknown): void {
+  const message = error instanceof Error ? error.message : String(error);
+  console.error(`${LOG_PREFIX} ${context}:`, message, error);
+}
+
 interface TelegramConfig {
   apiId: number;
   apiHash: string;
@@ -26,7 +33,8 @@ function loadTdLib(): ReactNativeTdLib {
     // eslint-disable-next-line @typescript-eslint/no-require-imports
     const module = require('react-native-tdlib');
     return (module.default ?? module) as ReactNativeTdLib;
-  } catch {
+  } catch (error) {
+    logError('loadTdLib: module not available', error);
     throw new TdlibUnavailableError(
       'react-native-tdlib is not available in this native build.',
     );
@@ -71,6 +79,7 @@ export class NativeTdlibAdapter implements TdlibAdapter {
 
   private readonly pendingSends = new Map<string, PendingSend>();
   private readonly earlySendResults = new Map<string, EarlySendResult>();
+  private authStateChangeResolver: (() => void) | null = null;
   private static readonly SEND_TIMEOUT_MS = 30_000;
   private static readonly AUTH_REQUEST_TIMEOUT_MS = 15_000;
 
@@ -95,7 +104,7 @@ export class NativeTdlibAdapter implements TdlibAdapter {
         application_version: config.applicationVersion,
       });
     } catch (error) {
-      // Clean up so the next initialize() can retry from scratch.
+      logError('initialize: startTdLib failed', error);
       if (this.emitterSubscription) {
         this.emitterSubscription.remove();
         this.emitterSubscription = null;
@@ -137,6 +146,7 @@ export class NativeTdlibAdapter implements TdlibAdapter {
     try {
       await tdlib.login({ countrycode, phoneNumber: localNumber });
     } catch (error) {
+      logError('requestPhoneNumber: login failed', error);
       throw mapTdlibError(error, 'phone number submission');
     }
   }
@@ -147,6 +157,7 @@ export class NativeTdlibAdapter implements TdlibAdapter {
     try {
       await tdlib.verifyPhoneNumber(code);
     } catch (error) {
+      logError('submitAuthCode: verifyPhoneNumber failed', error);
       throw mapTdlibError(error, 'code verification');
     }
   }
@@ -157,6 +168,7 @@ export class NativeTdlibAdapter implements TdlibAdapter {
     try {
       await tdlib.verifyPassword(password);
     } catch (error) {
+      logError('submitPassword: verifyPassword failed', error);
       throw mapTdlibError(error, 'password verification');
     }
   }
@@ -175,6 +187,7 @@ export class NativeTdlibAdapter implements TdlibAdapter {
         email_address: normalized,
       });
     } catch (error) {
+      logError('submitEmailAddress: sendAuthRequest failed', error);
       throw mapTdlibError(error, 'email submission');
     }
   }
@@ -191,6 +204,7 @@ export class NativeTdlibAdapter implements TdlibAdapter {
         },
       });
     } catch (error) {
+      logError('submitEmailCode: sendAuthRequest failed', error);
       throw mapTdlibError(error, 'email code verification');
     }
   }
@@ -216,6 +230,7 @@ export class NativeTdlibAdapter implements TdlibAdapter {
         disable_notification: false,
       });
     } catch (error) {
+      logError('submitRegistration: sendAuthRequest failed', error);
       throw mapTdlibError(error, 'registration');
     }
   }
@@ -234,6 +249,7 @@ export class NativeTdlibAdapter implements TdlibAdapter {
         .slice(0, limit)
         .map((chat) => normalizeChat(chat as Record<string, unknown>));
     } catch (error) {
+      logError('searchChats: searchChats failed', error);
       throw mapTdlibError(error, 'search');
     }
   }
@@ -251,6 +267,7 @@ export class NativeTdlibAdapter implements TdlibAdapter {
         .filter((raw): raw is Record<string, unknown> => raw != null)
         .map(normalizeMessage);
     } catch (error) {
+      logError('getRecentMessages: getChatHistory failed', error);
       throw mapTdlibError(error, 'reading messages');
     }
   }
@@ -261,6 +278,7 @@ export class NativeTdlibAdapter implements TdlibAdapter {
     try {
       result = await tdlib.sendMessage(Number(chatId), text);
     } catch (error) {
+      logError('sendMessage: sendMessage call failed', error);
       throw mapTdlibError(error, 'sending message');
     }
 
@@ -269,6 +287,7 @@ export class NativeTdlibAdapter implements TdlibAdapter {
 
     const tempId = raw.id;
     if (!isValidMessageId(tempId)) {
+      logError('sendMessage: no message id', { raw });
       throw new Error('Telegram did not confirm the message (no message id).');
     }
 
@@ -278,6 +297,7 @@ export class NativeTdlibAdapter implements TdlibAdapter {
     if (sendingState === 'messageSendingStateFailed') {
       const stateObj = raw.sending_state as Record<string, unknown> | undefined;
       const err = stateObj?.error as Record<string, unknown> | undefined;
+      logError('sendMessage: sendingStateFailed', err ?? 'unknown');
       throw mapTdlibError(
         new Error(
           typeof err?.message === 'string'
@@ -316,6 +336,7 @@ export class NativeTdlibAdapter implements TdlibAdapter {
     return new Promise<TdSentMessage>((resolve, reject) => {
       const timer = setTimeout(() => {
         this.pendingSends.delete(tempKey);
+        logError('sendMessage: confirmation timeout', { tempKey });
         reject(
           mapTdlibError(
             new Error('Telegram did not confirm the message within the timeout.'),
@@ -339,6 +360,7 @@ export class NativeTdlibAdapter implements TdlibAdapter {
     try {
       await tdlib.logout();
     } catch (error) {
+      logError('logOut: logout failed', error);
       throw mapTdlibError(error, 'logout');
     }
   }
@@ -354,6 +376,9 @@ export class NativeTdlibAdapter implements TdlibAdapter {
     if (this.emitterSubscription) {
       this.emitterSubscription.remove();
       this.emitterSubscription = null;
+    }
+    if (this.authStateChangeResolver) {
+      this.authStateChangeResolver = null;
     }
     this.listener = null;
     this.tdlib = null;
@@ -373,6 +398,10 @@ export class NativeTdlibAdapter implements TdlibAdapter {
 
   private assertAuthState(expected: TdlibAuthState['type']): void {
     if (this.state.type !== expected) {
+      logError('assertAuthState: state mismatch', {
+        expected,
+        actual: this.state.type,
+      });
       throw new ConnectorError(
         `Telegram authorization state changed. Expected ${expected}, got ${this.state.type}.`,
         'VALIDATION_FAILED',
@@ -380,55 +409,42 @@ export class NativeTdlibAdapter implements TdlibAdapter {
     }
   }
 
-  /**
-   * Sends a low-level TDLib request and waits for an authorization-state
-   * change. `react-native-tdlib`'s `td_json_client_send()` is fire-and-forget
-   * on Android — this helper polls `getAuthorizationState()` until the
-   * state changes, confirming TDLib processed the request.
-   */
   private async sendAuthRequest(
     tdlib: ReactNativeTdLib,
     request: Record<string, unknown>,
   ): Promise<void> {
-    const before = this.state.type;
+    const changePromise = this.waitForAuthStateChange(
+      NativeTdlibAdapter.AUTH_REQUEST_TIMEOUT_MS,
+    );
     await tdlib.td_json_client_send(request);
+    await changePromise;
+  }
 
-    const deadline = Date.now() + NativeTdlibAdapter.AUTH_REQUEST_TIMEOUT_MS;
-
-    while (Date.now() < deadline) {
-      await sleep(200);
-      try {
-        const raw = await tdlib.getAuthorizationState();
-        const parsed = JSON.parse(raw) as Record<string, unknown>;
-
-        // Feed the same state machine used by events and reconciliation.
-        if (isTdlibReadyState(parsed)) {
-          await this.resolveReadyUser(tdlib);
-          return;
-        }
-
-        const next = mapAuthorizationState(parsed);
-        if (next.type !== before) {
-          this.transition(next);
-          return;
-        }
-      } catch {
-        continue;
-      }
-    }
-
-    throw new Error('Telegram did not respond to the authorization request.');
+  private waitForAuthStateChange(timeoutMs: number): Promise<void> {
+    return new Promise<void>((resolve, reject) => {
+      const timer = setTimeout(() => {
+        this.authStateChangeResolver = null;
+        logError('waitForAuthStateChange: timeout', { timeoutMs });
+        reject(new Error('Telegram did not respond to the authorization request.'));
+      }, timeoutMs);
+      this.authStateChangeResolver = () => {
+        clearTimeout(timer);
+        this.authStateChangeResolver = null;
+        resolve();
+      };
+    });
   }
 
   private async reconcileAuthorizationState(
     tdlib: ReactNativeTdLib,
   ): Promise<void> {
     try {
-      const raw = await tdlib.getAuthorizationState();
-      const parsed = JSON.parse(raw) as Record<string, unknown>;
-      await this.handleAuthorizationState(tdlib, parsed);
-    } catch {
-      this.transition({
+        const raw = await tdlib.getAuthorizationState();
+        const parsed = JSON.parse(raw) as Record<string, unknown>;
+        await this.handleAuthorizationState(tdlib, parsed);
+      } catch (error) {
+        logError('reconcileAuthorizationState: failed', error);
+        this.transition({
         type: 'error',
         message: 'Failed to reconcile Telegram authorization state.',
       });
@@ -457,6 +473,7 @@ export class NativeTdlibAdapter implements TdlibAdapter {
       const user = mapTdUser(profile);
 
       if (!user.id) {
+        logError('resolveReadyUser: no user id in profile', profile);
         this.transition({
           type: 'error',
           message: 'Telegram profile did not return a valid user id.',
@@ -465,7 +482,8 @@ export class NativeTdlibAdapter implements TdlibAdapter {
       }
 
       this.transition({ type: 'ready', user });
-    } catch {
+    } catch (error) {
+      logError('resolveReadyUser: getProfile/mapUser failed', error);
       this.transition({
         type: 'error',
         message: 'Failed to load Telegram profile. Please try reconnecting.',
@@ -507,6 +525,7 @@ export class NativeTdlibAdapter implements TdlibAdapter {
         if (authState) {
           await this.handleAuthorizationState(tdlib, authState);
         }
+        this.authStateChangeResolver?.();
         break;
       }
 
@@ -533,7 +552,7 @@ export class NativeTdlibAdapter implements TdlibAdapter {
     const message = update.message as Record<string, unknown> | undefined;
 
     if (!message || !isValidMessageId(message.id)) {
-      // Malformed update — reject or store as error.
+      logError('handleSendSucceeded: malformed update', update);
       const pending = this.pendingSends.get(oldId);
       if (pending) {
         clearTimeout(pending.timer);
@@ -571,6 +590,8 @@ export class NativeTdlibAdapter implements TdlibAdapter {
       typeof error?.message === 'string'
         ? error.message
         : 'Telegram failed to send the message.';
+
+    logError('handleSendFailed', { oldId, errorMsg, update });
 
     const pending = this.pendingSends.get(oldId);
     if (pending) {
@@ -627,10 +648,6 @@ function assertNotTdlibError(raw: Record<string, unknown>): void {
       typeof raw.message === 'string' ? raw.message : 'TDLib returned an error.';
     throw new Error(`TDLib error ${String(code)}: ${message}`);
   }
-}
-
-function sleep(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 interface PendingSend {

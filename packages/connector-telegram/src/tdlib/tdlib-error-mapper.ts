@@ -7,10 +7,27 @@ const NETWORK_RE =
   /network|timeout|connection refused|ETIMEDOUT|ENETUNREACH|ECONNREFUSED/iu;
 
 const RATE_LIMIT_RE =
-  /FLOOD_WAIT|too many requests|rate limit|429/iu;
+  /FLOOD|too many requests|rate limit|429/iu;
 
 const CHAT_NOT_FOUND_RE =
   /chat not found|CHAT_NOT_FOUND|404/iu;
+
+const RETRY_AFTER_RE = /FLOOD_WAIT_(\d+)|retry after (\d+)/iu;
+
+function extractRetryAfter(message: string): number | null {
+  const match = RETRY_AFTER_RE.exec(message);
+  if (!match) return null;
+  const seconds = Number.parseInt(match[1] ?? match[2] ?? '', 10);
+  return Number.isFinite(seconds) && seconds > 0 ? seconds : null;
+}
+
+function formatRetryAfter(seconds: number): string {
+  if (seconds < 60) return `~${seconds} seconds`;
+  const minutes = Math.ceil(seconds / 60);
+  if (minutes < 60) return `~${minutes} minutes`;
+  const hours = Math.ceil(minutes / 60);
+  return `~${hours} hours`;
+}
 
 /**
  * Maps a raw TDLib error (string message or object with `message`)
@@ -35,8 +52,11 @@ export function mapTdlibError(error: unknown, _context: string): ConnectorError 
   }
 
   if (RATE_LIMIT_RE.test(message)) {
+    const retryAfter = extractRetryAfter(message);
+    const suffix =
+      retryAfter != null ? ` Retry in ${formatRetryAfter(retryAfter)}.` : '';
     return new ConnectorError(
-      'Telegram rate-limited this request. Please wait and try again.',
+      `Telegram rate-limited this request.${suffix}`,
       'RATE_LIMITED',
       true,
     );

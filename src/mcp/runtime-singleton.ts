@@ -117,7 +117,11 @@ export function getLocalMcpRuntime(
         devConnectionsSeeded = true;
       }
 
-      const registry = createConnectorRegistry({ mode, connectionStore });
+      const registry = createConnectorRegistry({
+        mode,
+        connectionStore,
+        credentialVault: getCredentialVault(),
+      });
       currentRegistry = registry;
 
       return createLocalMcpRuntime(

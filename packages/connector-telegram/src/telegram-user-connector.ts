@@ -183,11 +183,10 @@ export class TelegramUserConnector extends StoreBackedConnector {
       name: 'telegram.user.search_chats',
       title: 'Search Telegram chats',
       description:
-        "Search the connected user's personal Telegram chats, groups and " +
-        'channels by name or username. Use this first whenever the user ' +
-        'refers to a person or chat by name and you do not have a chat id ' +
-        'yet. Returns a bounded list of chats with stable ids. Read-only; ' +
-        'requires no approval.',
+        'Find Telegram recipients, personal contacts, chats, groups and ' +
+        'channels by display name or username. Searches the authenticated ' +
+        "user's contacts and known chats, and can resolve an exact Telegram " +
+        '@username. Use this before sending when a chat ID is not already known.',
       inputSchema: z.object({
         connectionId: connectionIdField,
         query: z
@@ -201,7 +200,22 @@ export class TelegramUserConnector extends StoreBackedConnector {
       implementationStatus: status,
       execute: async (input: { query: string }) => {
         await this.ensureSession();
+        if (typeof __DEV__ === 'boolean' && __DEV__) {
+          console.log('[telegram-search] start', { query: input.query });
+        }
         const chats = await adapter.searchChats(input.query, 10);
+        if (typeof __DEV__ === 'boolean' && __DEV__) {
+          console.log('[telegram-search] result', {
+            query: input.query,
+            count: chats.length,
+            chats: chats.map((chat) => ({
+              id: chat.id,
+              title: chat.title,
+              username: chat.username,
+              type: chat.type,
+            })),
+          });
+        }
         return { chats };
       },
     };

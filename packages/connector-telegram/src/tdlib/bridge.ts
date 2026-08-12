@@ -80,8 +80,10 @@ export class NativeTdlibAdapter implements TdlibAdapter {
   private readonly pendingSends = new Map<string, PendingSend>();
   private readonly earlySendResults = new Map<string, EarlySendResult>();
   private authStateChangeResolver: (() => void) | null = null;
+  private pendingTdRequest: PendingTdRequest | null = null;
   private static readonly SEND_TIMEOUT_MS = 30_000;
   private static readonly AUTH_REQUEST_TIMEOUT_MS = 15_000;
+  private static readonly TD_REQUEST_TIMEOUT_MS = 15_000;
 
   async initialize(): Promise<void> {
     if (this.tdlib) return;
@@ -241,17 +243,224 @@ export class NativeTdlibAdapter implements TdlibAdapter {
 
   async searchChats(query: string, limit = 10): Promise<TdChat[]> {
     const tdlib = this.assertModule();
+    const { rawQuery, normalizedUsername, isUsernameQuery } =
+      normalizeSearchQuery(query);
+    if (!rawQuery) return [];
+
+    const results: RankedChat[] = [];
+
+    // 1. Exact public username (@username or a username-shaped query).
+    if (isUsernameQuery) {
+      const chat = await this.safeSearchPublicChat(tdlib, normalizedUsername);
+      if (chat) results.push({ chat, source: 'public' });
+    }
+
+    // 2. Telegram contacts (the critical source searchChats misses).
+    const contacts = await this.safeSearchContacts(tdlib, rawQuery, limit);
+    for (const chat of contacts) results.push({ chat, source: 'contact' });
+
+    // 3. Locally known chats.
+    const local = await this.safeSearchLocalChats(tdlib, rawQuery, limit);
+    for (const chat of local) results.push({ chat, source: 'local' });
+
+    // 4. Server-known chats.
+    const server = await this.safeSearchServerChats(tdlib, rawQuery, limit);
+    for (const chat of server) results.push({ chat, source: 'server' });
+
+    if (typeof __DEV__ === 'boolean' && __DEV__) {
+      console.log('[telegram-search]', {
+        queryType: isUsernameQuery ? 'username' : 'name',
+        exactUsername: results.filter((r) => r.source === 'public').length,
+        contacts: contacts.length,
+        localChats: local.length,
+        serverChats: server.length,
+        merged: new Set(results.map((r) => r.chat.id)).size,
+      });
+    }
+
+    return dedupeAndRank(results, rawQuery, normalizedUsername, isUsernameQuery).slice(
+      0,
+      limit,
+    );
+  }
+
+  // ------------------------------------------------------------------
+  // Recipient discovery helpers (composite search)
+  // ------------------------------------------------------------------
+
+  private async safeSearchPublicChat(
+    tdlib: ReactNativeTdLib,
+    username: string,
+  ): Promise<TdChat | null> {
+    try {
+      const raw = await tdlib.searchPublicChat(username);
+      const parsed = JSON.parse(raw) as Record<string, unknown>;
+      return await this.toTdChat(tdlib, parsed);
+    } catch (error) {
+      // Not-found / failure is an empty source, never a whole-search error.
+      if (typeof __DEV__ === 'boolean' && __DEV__) {
+        console.log('[telegram-search] searchPublicChat skipped', error instanceof Error ? error.message : error);
+      }
+      return null;
+    }
+  }
+
+  private async safeSearchContacts(
+    tdlib: ReactNativeTdLib,
+    query: string,
+    limit: number,
+  ): Promise<TdChat[]> {
+    try {
+      const response = await this.sendTdRequest(tdlib, 'users', {
+        '@type': 'searchContacts',
+        query,
+        limit: Math.min(Math.max(limit, 1), 50),
+      });
+      const userIds = response.user_ids;
+      if (!Array.isArray(userIds)) return [];
+      const chats: TdChat[] = [];
+      for (const id of userIds) {
+        const chat = await this.resolvePrivateChat(tdlib, Number(id));
+        if (chat) chats.push(chat);
+      }
+      return chats;
+    } catch (error) {
+      if (typeof __DEV__ === 'boolean' && __DEV__) {
+        console.log('[telegram-search] searchContacts skipped', error instanceof Error ? error.message : error);
+      }
+      return [];
+    }
+  }
+
+  private async safeSearchLocalChats(
+    tdlib: ReactNativeTdLib,
+    query: string,
+    limit: number,
+  ): Promise<TdChat[]> {
     try {
       const raw = await tdlib.searchChats(query, Math.min(limit, 20));
       const parsed = JSON.parse(raw);
       if (!Array.isArray(parsed)) return [];
-      return parsed
-        .slice(0, limit)
-        .map((chat) => normalizeChat(chat as Record<string, unknown>));
+      return parsed.map((chat) => normalizeChat(chat as Record<string, unknown>));
     } catch (error) {
-      logError('searchChats: searchChats failed', error);
-      throw mapTdlibError(error, 'search');
+      if (typeof __DEV__ === 'boolean' && __DEV__) {
+        console.log('[telegram-search] local searchChats skipped', error instanceof Error ? error.message : error);
+      }
+      return [];
     }
+  }
+
+  private async safeSearchServerChats(
+    tdlib: ReactNativeTdLib,
+    query: string,
+    limit: number,
+  ): Promise<TdChat[]> {
+    try {
+      const response = await this.sendTdRequest(tdlib, 'chats', {
+        '@type': 'searchChatsOnServer',
+        query,
+        limit: Math.min(Math.max(limit, 1), 50),
+      });
+      const chatIds = response.chat_ids;
+      if (!Array.isArray(chatIds)) return [];
+      const chats: TdChat[] = [];
+      for (const id of chatIds) {
+        const chat = await this.resolveChat(tdlib, Number(id));
+        if (chat) chats.push(chat);
+      }
+      return chats;
+    } catch (error) {
+      if (typeof __DEV__ === 'boolean' && __DEV__) {
+        console.log('[telegram-search] searchChatsOnServer skipped', error instanceof Error ? error.message : error);
+      }
+      return [];
+    }
+  }
+
+  private async resolvePrivateChat(
+    tdlib: ReactNativeTdLib,
+    userId: number,
+  ): Promise<TdChat | null> {
+    try {
+      const raw = await tdlib.createPrivateChat(userId);
+      const parsed = JSON.parse(raw) as Record<string, unknown>;
+      return await this.toTdChat(tdlib, parsed);
+    } catch {
+      return null;
+    }
+  }
+
+  private async resolveChat(
+    tdlib: ReactNativeTdLib,
+    chatId: number,
+  ): Promise<TdChat | null> {
+    try {
+      const result = await tdlib.getChat(chatId);
+      const raw = parseResultRaw(result as TdRawResultLike);
+      return await this.toTdChat(tdlib, raw);
+    } catch {
+      return null;
+    }
+  }
+
+  /** Normalize a raw chat and enrich a private chat's username from its user. */
+  private async toTdChat(
+    tdlib: ReactNativeTdLib,
+    rawChat: Record<string, unknown>,
+  ): Promise<TdChat> {
+    const chat = normalizeChat(rawChat);
+    if (chat.type === 'private' && !chat.username) {
+      const rawType = rawChat.type as Record<string, unknown> | undefined;
+      const userId = rawType?.user_id;
+      if (typeof userId === 'number') {
+        try {
+          const userRaw = await tdlib.getUserProfile(userId);
+          const user = mapTdUser(JSON.parse(userRaw) as Record<string, unknown>);
+          if (user.username) return { ...chat, username: user.username };
+        } catch {
+          // Username is cosmetic enrichment; never fail the search over it.
+        }
+      }
+    }
+    return chat;
+  }
+
+  /**
+   * Sends a raw TDLib JSON request through `td_json_client_send` and waits for
+   * the correlated direct response. `react-native-tdlib` is fire-and-forget:
+   * the response arrives on the `tdlib-update` stream with its own `@type`
+   * (e.g. `users` for searchContacts, `chats` for searchChatsOnServer).
+   *
+   * Only one such request may be in flight at a time; the composite search
+   * sends them sequentially, so response-type correlation is unambiguous.
+   */
+  private sendTdRequest(
+    tdlib: ReactNativeTdLib,
+    expectedType: string,
+    request: Record<string, unknown>,
+  ): Promise<Record<string, unknown>> {
+    if (this.pendingTdRequest) {
+      return Promise.reject(
+        new Error('Another correlated TDLib request is already in flight'),
+      );
+    }
+    return new Promise<Record<string, unknown>>((resolve, reject) => {
+      const pending: PendingTdRequest = {
+        expectedType,
+        resolve,
+        reject,
+        timer: setTimeout(() => {
+          if (this.pendingTdRequest === pending) this.pendingTdRequest = null;
+          reject(new Error(`TDLib ${expectedType} request timed out`));
+        }, NativeTdlibAdapter.TD_REQUEST_TIMEOUT_MS),
+      };
+      this.pendingTdRequest = pending;
+      void tdlib.td_json_client_send(request).catch((error) => {
+        if (this.pendingTdRequest === pending) this.pendingTdRequest = null;
+        clearTimeout(pending.timer);
+        reject(error);
+      });
+    });
   }
 
   async getRecentMessages(chatId: string, limit = 20): Promise<TdMessage[]> {
@@ -373,6 +582,12 @@ export class NativeTdlibAdapter implements TdlibAdapter {
     this.pendingSends.clear();
     this.earlySendResults.clear();
 
+    if (this.pendingTdRequest) {
+      clearTimeout(this.pendingTdRequest.timer);
+      this.pendingTdRequest.reject(new Error('Adapter was closed.'));
+      this.pendingTdRequest = null;
+    }
+
     if (this.emitterSubscription) {
       this.emitterSubscription.remove();
       this.emitterSubscription = null;
@@ -482,6 +697,13 @@ export class NativeTdlibAdapter implements TdlibAdapter {
       }
 
       this.transition({ type: 'ready', user });
+
+      // Best-effort preload of recent chats so local `searchChats` has data on
+      // a fresh session. Never blocks readiness, and failure does not
+      // invalidate the Telegram session.
+      void tdlib
+        .loadChats(100)
+        .catch(() => undefined);
     } catch (error) {
       logError('resolveReadyUser: getProfile/mapUser failed', error);
       this.transition({
@@ -512,6 +734,39 @@ export class NativeTdlibAdapter implements TdlibAdapter {
     tdlib: ReactNativeTdLib,
     event: { type: string; raw: string },
   ): Promise<void> {
+    // Resolve correlated direct responses (from td_json_client_send) before
+    // treating the event as a normal Telegram update.
+    const pending = this.pendingTdRequest;
+    if (pending) {
+      let parsed: Record<string, unknown> | undefined;
+      try {
+        parsed = JSON.parse(event.raw) as Record<string, unknown>;
+      } catch {
+        parsed = undefined;
+      }
+      if (parsed) {
+        const responseType = String(parsed['@type'] ?? '');
+        if (responseType === 'error') {
+          this.pendingTdRequest = null;
+          clearTimeout(pending.timer);
+          pending.reject(
+            new Error(
+              typeof parsed.message === 'string'
+                ? parsed.message
+                : 'TDLib returned an error.',
+            ),
+          );
+          return;
+        }
+        if (responseType === pending.expectedType) {
+          this.pendingTdRequest = null;
+          clearTimeout(pending.timer);
+          pending.resolve(parsed);
+          return;
+        }
+      }
+    }
+
     switch (event.type) {
       case 'updateAuthorizationState': {
         let update: Record<string, unknown>;
@@ -658,6 +913,13 @@ interface PendingSend {
   timer: ReturnType<typeof setTimeout>;
 }
 
+interface PendingTdRequest {
+  expectedType: string;
+  resolve: (value: Record<string, unknown>) => void;
+  reject: (error: unknown) => void;
+  timer: ReturnType<typeof setTimeout>;
+}
+
 interface EarlySendResult {
   type: 'succeeded' | 'failed';
   message?: Record<string, unknown>;
@@ -684,4 +946,88 @@ function isValidMessageId(value: unknown): value is string | number {
   if (typeof value === 'number' && Number.isFinite(value)) return true;
   if (typeof value === 'string' && value.length > 0) return true;
   return false;
+}
+
+// ------------------------------------------------------------------
+// Recipient search helpers (pure, exported for tests)
+// ------------------------------------------------------------------
+
+const USERNAME_RE = /^[A-Za-z0-9_]{5,32}$/u;
+
+export function normalizeSearchQuery(query: string): {
+  rawQuery: string;
+  normalizedUsername: string;
+  isUsernameQuery: boolean;
+} {
+  const rawQuery = query.trim();
+  const normalizedUsername = rawQuery.startsWith('@')
+    ? rawQuery.slice(1)
+    : rawQuery;
+  const isUsernameQuery =
+    rawQuery.startsWith('@') || USERNAME_RE.test(rawQuery);
+  return { rawQuery, normalizedUsername, isUsernameQuery };
+}
+
+export type SearchSource = 'public' | 'contact' | 'local' | 'server';
+
+export interface RankedChat {
+  chat: TdChat;
+  source: SearchSource;
+}
+
+/**
+ * Deduplicates strictly by `chat.id` (never title) and ranks: exact username
+ * > exact title > username prefix > title prefix > other contacts > rest.
+ */
+export function dedupeAndRank(
+  results: RankedChat[],
+  rawQuery: string,
+  normalizedUsername: string,
+  isUsernameQuery: boolean,
+): TdChat[] {
+  const seen = new Set<string>();
+  const unique: RankedChat[] = [];
+  for (const entry of results) {
+    if (!entry.chat.id || seen.has(entry.chat.id)) continue;
+    seen.add(entry.chat.id);
+    unique.push(entry);
+  }
+
+  const lowerQuery = rawQuery.toLowerCase();
+  const lowerUsername = normalizedUsername.toLowerCase();
+
+  return unique
+    .map((entry) => ({
+      entry,
+      score: scoreChat(entry, lowerQuery, lowerUsername, isUsernameQuery),
+    }))
+    .sort(
+      (a, b) =>
+        a.score - b.score ||
+        String(a.entry.chat.id).localeCompare(String(b.entry.chat.id)),
+    )
+    .map(({ entry }) => entry.chat);
+}
+
+function scoreChat(
+  entry: RankedChat,
+  lowerQuery: string,
+  lowerUsername: string,
+  isUsernameQuery: boolean,
+): number {
+  const title = (entry.chat.title ?? '').toLowerCase();
+  const username = (entry.chat.username ?? '').toLowerCase();
+  const isContact = entry.source === 'contact';
+
+  if (isUsernameQuery && username && username === lowerUsername) return 0;
+  if (title && title === lowerQuery) return 1;
+  if (isUsernameQuery && username && username.startsWith(lowerUsername)) {
+    return 2;
+  }
+  if (title && title.startsWith(lowerQuery)) return 3;
+  if (!isUsernameQuery && username && username.startsWith(lowerQuery)) {
+    return 3;
+  }
+  if (isContact) return 4;
+  return 5;
 }

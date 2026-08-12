@@ -1,5 +1,6 @@
 import type { AgentMcpClient } from '@mobile-agent/mcp-client';
 
+import { INTERNAL_TOOL_ARGUMENTS } from './internalToolFields';
 import {
   AgentError,
   type AgentErrorCode,
@@ -8,6 +9,8 @@ import {
 } from './types';
 
 const MAX_ERROR_CHARS = 600;
+
+const DEV_LOG = typeof __DEV__ === 'boolean' && __DEV__;
 
 /**
  * Maps sanitized MCP/tool error text onto the agent error model so the UI
@@ -50,15 +53,35 @@ interface StructuredToolContent {
 }
 
 /**
- * Executes one model-emitted tool call through MCP and normalizes every
- * outcome — success, approval_required, or failure — into a structured
- * result that can always be returned to the model. Malformed arguments,
- * unknown tools and connector failures never crash the app: they become
- * tool errors the model can reason about.
+ * Removes protocol-only fields (`approvalId`, ...) from model-originated
+ * arguments. The LLM is untrusted and must never be able to control the
+ * approval state — even if it hallucinates a field, it is dropped here.
  */
-export async function executeToolCall(
+export function sanitizeModelArgs(
+  args: Record<string, unknown>,
+): Record<string, unknown> {
+  const out: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(args)) {
+    if (INTERNAL_TOOL_ARGUMENTS.has(key)) {
+      if (DEV_LOG) {
+        console.log(`[approval] stripped model-supplied reserved argument: ${key}`);
+      }
+      continue;
+    }
+    out[key] = value;
+  }
+  return out;
+}
+
+/**
+ * The single low-level MCP invocation: sends the exact arguments given and
+ * normalizes every outcome into a structured `AgentToolResult`. Never strips
+ * or injects protocol fields — callers decide what the arguments are.
+ */
+async function callMcpTool(
   mcp: AgentMcpClient,
-  call: AgentToolCall,
+  name: string,
+  args: Record<string, unknown>,
   signal?: AbortSignal,
 ): Promise<AgentToolResult> {
   if (signal?.aborted) {
@@ -67,7 +90,7 @@ export async function executeToolCall(
 
   let raw: Awaited<ReturnType<AgentMcpClient['callTool']>>;
   try {
-    raw = await mcp.callTool({ name: call.toolName, arguments: call.args });
+    raw = await mcp.callTool({ name, arguments: args });
   } catch (error) {
     if (signal?.aborted) {
       throw new AgentError('CANCELLED', 'The run was stopped', error);
@@ -76,12 +99,20 @@ export async function executeToolCall(
       error instanceof Error ? error.message : 'Tool execution failed';
     const isToolError =
       error instanceof Error && error.name === 'ToolExecutionError';
+    const errorCode: AgentErrorCode = isToolError
+      ? classifyToolError(message)
+      : 'TOOL_EXECUTION_ERROR';
+    if (DEV_LOG) {
+      console.error('[tool] call failed', {
+        tool: name,
+        errorCode,
+        message,
+      });
+    }
     return {
       status: 'error',
       error: sanitizeForModel(message),
-      errorCode: isToolError
-        ? classifyToolError(message)
-        : 'TOOL_EXECUTION_ERROR',
+      errorCode,
     };
   }
 
@@ -132,10 +163,22 @@ export async function executeToolCall(
 }
 
 /**
- * Re-invokes a gated tool with the approval id after the user confirmed.
- * The arguments are byte-identical to the approved payload (the MCP server
- * hashes them), so an approved payload executes exactly once — replays and
- * tampered payloads are rejected by the approval service.
+ * Executes one model-emitted tool call through MCP. This is the untrusted
+ * path: any protocol-only field the model may have emitted (`approvalId`) is
+ * stripped before the MCP server ever sees the arguments.
+ */
+export async function executeToolCall(
+  mcp: AgentMcpClient,
+  call: AgentToolCall,
+  signal?: AbortSignal,
+): Promise<AgentToolResult> {
+  return callMcpTool(mcp, call.toolName, sanitizeModelArgs(call.args), signal);
+}
+
+/**
+ * Re-invokes a gated tool with the trusted approval id after the user
+ * confirmed. The model's original arguments are sanitized, then the real
+ * `approvalId` is injected internally — the LLM never chooses it.
  */
 export async function executeApprovedToolCall(
   mcp: AgentMcpClient,
@@ -143,9 +186,9 @@ export async function executeApprovedToolCall(
   approvalId: string,
   signal?: AbortSignal,
 ): Promise<AgentToolResult> {
-  return executeToolCall(
-    mcp,
-    { ...call, args: { ...call.args, approvalId } },
-    signal,
-  );
+  const args = {
+    ...sanitizeModelArgs(call.args),
+    approvalId,
+  };
+  return callMcpTool(mcp, call.toolName, args, signal);
 }

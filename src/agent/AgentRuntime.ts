@@ -1,7 +1,11 @@
 import type { AgentMcpClient } from '@mobile-agent/mcp-client';
 
 import { mapMcpTools } from './toolMapper';
-import { executeApprovedToolCall, executeToolCall } from './toolExecutor';
+import {
+  executeApprovedToolCall,
+  executeToolCall,
+  sanitizeModelArgs,
+} from './toolExecutor';
 import { ToolExecutionLedger } from './toolExecutionLedger';
 import type { ToolExecutionRecord } from './toolExecutionLedger';
 import { detectStepProgress } from './routing/progressTracker';
@@ -598,9 +602,17 @@ export class AgentRuntime {
         typeof call.args.connectionId === 'string'
           ? call.args.connectionId
           : undefined,
-      args: call.args,
+      // Freeze the sanitized payload — no protocol field the model may have
+      // emitted ever appears in the sheet or the approved execution.
+      args: sanitizeModelArgs(call.args),
       preview: toolResult.approvalPreview,
     };
+
+    if (typeof __DEV__ === 'boolean' && __DEV__) {
+      console.log(
+        `[approval] awaiting user confirmation id=${approval.approvalId} tool=${call.toolName}`,
+      );
+    }
 
     steps.push({
       type: 'approval',
@@ -620,6 +632,12 @@ export class AgentRuntime {
         status: 'user_denied',
         error: 'The user declined this action. Do not retry it unchanged.',
       };
+    }
+
+    if (typeof __DEV__ === 'boolean' && __DEV__) {
+      console.log(
+        `[approval] approved id=${approval.approvalId} tool=${call.toolName}`,
+      );
     }
 
     steps.push({

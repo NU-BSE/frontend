@@ -9,6 +9,8 @@ import { DEFAULT_APPROVAL_POLICY } from '@mobile-agent/policy-core';
 import type { ApprovalService } from '@mobile-agent/approval-core';
 import { hashArgs } from '@mobile-agent/approval-core';
 
+const DEV_LOG = typeof __DEV__ === 'boolean' && __DEV__;
+
 const approvalIdField = z
   .string()
   .min(1)
@@ -235,6 +237,9 @@ export async function registerConnectorTools(
         if (policy.requiresApproval) {
           if (!approvalId) {
             const approval = await approvalService.create({ connection, tool, input });
+            if (DEV_LOG) {
+              console.log(`[approval] created id=${approval.id} tool=${tool.name}`);
+            }
 
             return {
               content: [{ type: 'text', text: 'User confirmation required' }],
@@ -253,7 +258,13 @@ export async function registerConnectorTools(
            * fails here rather than reaching the connector.
            */
           try {
+            if (DEV_LOG) {
+              console.log(`[approval] consuming id=${approvalId} tool=${tool.name}`);
+            }
             await approvalService.consume(approvalId, hashArgs(input));
+            if (DEV_LOG) {
+              console.log(`[approval] consumed id=${approvalId} tool=${tool.name}`);
+            }
           } catch (error) {
             return errorResult(
               error instanceof Error ? error.message : 'Approval could not be used',
@@ -276,6 +287,12 @@ export async function registerConnectorTools(
             idempotencyKey: policy.idempotencyKey,
           });
         } catch (error) {
+          if (DEV_LOG) {
+            console.error('[tool] connector execution failed', {
+              tool: toolName,
+              error: error instanceof Error ? error.message : String(error),
+            });
+          }
           // A side effect whose outcome is unknown (e.g. provider timeout
           // after submission) must not be surfaced as a plain failure, or the
           // model would retry it and risk duplicating the physical effect.

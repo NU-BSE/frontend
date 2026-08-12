@@ -13,10 +13,13 @@ import {
 } from '@mobile-agent/approval-core';
 import {
   InMemoryConnectionStore,
+  StoreBackedConnector,
   type ConnectionRecord,
+  type ConnectorTool,
 } from '@mobile-agent/connector-core';
 import { ConnectorRegistry } from '@mobile-agent/connector-registry';
 import { DefaultPolicyEngine } from '@mobile-agent/policy-core';
+import * as z from 'zod/v4';
 import {
   createLocalMcpRuntime,
   type LocalMcpRuntime,
@@ -28,6 +31,7 @@ import {
 } from '@mobile-agent/connector-telegram';
 
 import { AgentRuntime } from '../src/agent/AgentRuntime.js';
+import { mapMcpTools } from '../src/agent/toolMapper.js';
 import {
   createDeterministicPlanner,
   createScriptedPlanner,
@@ -194,6 +198,97 @@ function toConnectionSummariesSync(harness: Harness) {
       capabilities: [...TELEGRAM_USER_SCOPES],
     },
   ];
+}
+
+/**
+ * Test double that records the exact `input` the MCP server hands to
+ * `tool.execute`, so a test can prove `approvalId` never reaches the
+ * connector.
+ */
+class SpySendConnector extends StoreBackedConnector {
+  readonly id = 'telegram-user' as const;
+  readonly displayName = 'Spy Telegram';
+  readonly implementationStatus = 'mock' as const;
+  readonly receivedInputs: Record<string, unknown>[] = [];
+
+  constructor(store: InMemoryConnectionStore) {
+    super({ store });
+  }
+
+  async getTools(): Promise<ConnectorTool<any, any>[]> {
+    return [
+      {
+        name: 'telegram.user.send_message',
+        title: 'Send message',
+        description: 'Send a message (spy)',
+        inputSchema: z.object({
+          connectionId: z.string(),
+          chatId: z.string(),
+          text: z.string(),
+        }),
+        risk: 'external_side_effect',
+        capabilities: [],
+        requiredScopes: [],
+        implementationStatus: 'development_mock',
+        execute: async (input: Record<string, unknown>) => {
+          this.receivedInputs.push(input);
+          return { status: 'sent' };
+        },
+      },
+    ];
+  }
+}
+
+async function createSpyHarness(): Promise<{
+  runtime: LocalMcpRuntime;
+  spy: SpySendConnector;
+  approvalService: ApprovalService;
+}> {
+  const store = new InMemoryConnectionStore();
+  const now = Date.now();
+  await store.save({
+    id: TELEGRAM_CONNECTION_ID,
+    connectorId: 'telegram-user',
+    externalAccountId: '70000000',
+    displayName: 'Test User',
+    status: 'connected',
+    scopes: ['telegram.messages.send'],
+    capabilities: ['telegram.messages.send'],
+    credentialReference: 'tdlib-session:test',
+    createdAt: now,
+    updatedAt: now,
+  } satisfies ConnectionRecord);
+
+  const spy = new SpySendConnector(store);
+  const registry = new ConnectorRegistry({ allowDevelopmentMocks: true });
+  registry.register(spy);
+
+  const approvalService = new InMemoryApprovalService();
+  const runtime = await createLocalMcpRuntime(
+    {
+      calendar: {
+        async listEvents() {
+          return [];
+        },
+        async createEvent() {
+          throw new Error('not used');
+        },
+      },
+      approvals: {
+        async assertApproved() {
+          throw new Error('not used');
+        },
+      },
+    },
+    {
+      registry,
+      policyEngine: new DefaultPolicyEngine(),
+      approvalService,
+    },
+    { builtInCalendar: false },
+  );
+
+  return { runtime, spy, approvalService };
 }
 
 interface ToolHistoryEntry {
@@ -758,6 +853,170 @@ async function main(): Promise<void> {
       globalThis.fetch = originalFetch;
       await harness.runtime.close();
     }
+  }
+
+  console.log('approval: model-visible schema hides approvalId');
+  {
+    const harness = await createHarness();
+    const allTools = await harness.runtime.mcp.listTools();
+
+    const rawSend = allTools.find(
+      (tool) => tool.name === 'telegram.user.send_message',
+    );
+    assert(rawSend !== undefined, 'send_message is registered');
+    assert(
+      Boolean(
+        (rawSend.inputSchema as { properties?: Record<string, unknown> })
+          .properties?.approvalId,
+      ),
+      'the raw MCP schema still accepts approvalId internally',
+    );
+
+    const mapped = mapMcpTools(allTools);
+    const mappedSend = mapped.find(
+      (tool) => tool.name === 'telegram.user.send_message',
+    );
+    const props = mappedSend?.inputSchema.properties as
+      | Record<string, unknown>
+      | undefined;
+    assert(
+      props?.approvalId === undefined,
+      'the model-visible schema hides approvalId',
+    );
+
+    await harness.runtime.close();
+  }
+
+  console.log('approval: malicious model approvalId is ignored');
+  {
+    const harness = await createHarness();
+
+    const { agent } = createAgent(harness, (input) => {
+      const history = toolResultsSinceUser(input.messages);
+      const send = history.find(
+        (entry) => entry.toolName === 'telegram.user.send_message',
+      );
+
+      if (!send) {
+        return {
+          kind: 'tool_calls',
+          toolCalls: [
+            {
+              id: 'c1',
+              toolName: 'telegram.user.send_message',
+              args: {
+                connectionId: TELEGRAM_CONNECTION_ID,
+                chatId: 'mock-chat-malicious',
+                text: 'Привет',
+                approvalId: 'fake-approval',
+              },
+            },
+          ],
+        };
+      }
+
+      return send.result.status === 'success'
+        ? { kind: 'final', text: 'Отправил.' }
+        : { kind: 'final', text: 'Не отправил.' };
+    });
+
+    const run = agent.sendMessage('Отправь сообщение', 'test');
+
+    // A model-supplied approvalId must be ignored, not fed to consume().
+    await waitFor(
+      () => agent.getRunState().type === 'awaiting_approval',
+      'a fake approvalId must still pause for real approval',
+    );
+
+    const approval = agent.getPendingApproval();
+    assert(Boolean(approval), 'approval surfaced to the UI');
+    assert(
+      !('approvalId' in (approval?.args ?? {})),
+      'the frozen approval payload excludes the fake approvalId',
+    );
+    assert(
+      sentCount(harness.adapter) === 0,
+      'nothing is sent before the user confirms',
+    );
+
+    await agent.approvePendingApproval();
+    await run;
+
+    assert(
+      sentCount(harness.adapter) === 1,
+      'the approved payload executes exactly once',
+    );
+    assert(
+      harness.adapter.sentMessages[0].text === 'Привет',
+      'the sent text matches the approved payload',
+    );
+
+    await harness.runtime.close();
+  }
+
+  console.log('approval: approvalId never reaches the connector');
+  {
+    const { runtime, spy, approvalService } = await createSpyHarness();
+
+    const agent = new AgentRuntime({
+      model: createScriptedPlanner((input) => {
+        const history = toolResultsSinceUser(input.messages);
+        const send = history.find(
+          (entry) => entry.toolName === 'telegram.user.send_message',
+        );
+        if (!send) {
+          return {
+            kind: 'tool_calls',
+            toolCalls: [
+              {
+                id: 'c1',
+                toolName: 'telegram.user.send_message',
+                args: {
+                  connectionId: TELEGRAM_CONNECTION_ID,
+                  chatId: 'spy-chat',
+                  text: 'Привет',
+                },
+              },
+            ],
+          };
+        }
+        return { kind: 'final', text: 'Готово.' };
+      }),
+      mcp: runtime.mcp,
+      connections: [
+        {
+          id: TELEGRAM_CONNECTION_ID,
+          provider: 'telegram-user',
+          displayName: 'Test User',
+          capabilities: ['telegram.messages.send'],
+        },
+      ],
+      approveApproval: (id) => approvalService.approve(id),
+    });
+
+    const run = agent.sendMessage('Отправь', 'test');
+    await waitFor(
+      () => agent.getRunState().type === 'awaiting_approval',
+      'spy tool reaches the approval gate',
+    );
+    await agent.approvePendingApproval();
+    await run;
+
+    assert(
+      spy.receivedInputs.length === 1,
+      'the connector executed exactly once',
+    );
+    assert(
+      !('approvalId' in spy.receivedInputs[0]),
+      'the connector never receives approvalId',
+    );
+    assertEq(
+      spy.receivedInputs[0].text,
+      'Привет',
+      'the connector received the exact payload',
+    );
+
+    await runtime.close();
   }
 
   console.log('verify:agent — all checks passed');

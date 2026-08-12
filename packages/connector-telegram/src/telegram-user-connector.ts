@@ -276,14 +276,30 @@ export class TelegramUserConnector extends StoreBackedConnector {
         input: { chatId: string | number; text: string },
         _context: ToolExecutionContext,
       ) => {
-        await this.ensureSession();
-        const sent = await adapter.sendMessage(String(input.chatId), input.text);
-        return {
-          status: 'sent',
-          messageId: sent.messageId,
-          chatId: sent.chatId,
-          sentAt: sent.sentAt,
-        };
+        if (typeof __DEV__ === 'boolean' && __DEV__) {
+          console.log(
+            '[telegram-send] start',
+            { chatId: input.chatId, textLength: input.text.length },
+          );
+        }
+        try {
+          await this.ensureSession();
+          const sent = await adapter.sendMessage(String(input.chatId), input.text);
+          if (typeof __DEV__ === 'boolean' && __DEV__) {
+            console.log('[telegram-send] ok', { messageId: sent.messageId });
+          }
+          return {
+            status: 'sent',
+            messageId: sent.messageId,
+            chatId: sent.chatId,
+            sentAt: sent.sentAt,
+          };
+        } catch (error) {
+          if (typeof __DEV__ === 'boolean' && __DEV__) {
+            console.error('[telegram-send] failed', error);
+          }
+          throw error;
+        }
       },
     };
 

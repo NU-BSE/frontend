@@ -1,27 +1,11 @@
-import * as AuthSession from 'expo-auth-session';
-import * as WebBrowser from 'expo-web-browser';
+import { GOOGLE_MCP_SCOPES, type GoogleAuthorizationBridge } from '@mobile-agent/connector-google';
 
-import {
-  GOOGLE_DISCOVERY,
-  GOOGLE_SCOPES,
-  googleClientId,
-  googleRedirectUri,
-} from './config';
-
-/**
- * Finish any auth session left open by a previous attempt. Safe to call more
- * than once, and required on Android so a dismissed browser tab does not keep
- * the next attempt from resolving.
- */
-WebBrowser.maybeCompleteAuthSession();
+import { GOOGLE_USERINFO_ENDPOINT } from './config';
+import { getGoogleAuthorizationBridge } from './native-bridge';
 
 export interface GoogleTokens {
   accessToken: string;
-  refreshToken?: string;
-  /** Epoch millis. Absent when Google omits `expires_in`. */
-  accessTokenExpiresAt?: number;
-  scopes: string[];
-  tokenType?: string;
+  grantedScopes: string[];
 }
 
 export interface GoogleIdentity {
@@ -38,88 +22,50 @@ export class GoogleAuthCancelled extends Error {
 }
 
 /**
- * Run the Google authorization-code flow with PKCE.
+ * Run the Google Identity authorization flow via the native bridge.
  *
- * Android OAuth clients have no secret, so PKCE is what stops an app that
- * registers the same redirect scheme from redeeming an intercepted code: the
- * verifier never leaves this process, and the token endpoint refuses an
- * exchange whose verifier does not hash to the challenge sent up front.
+ * `AuthorizationClient.authorize()` prompts for consent only when the user has
+ * not yet granted the requested scopes; otherwise it returns a fresh
+ * short-lived access token without UI. No refresh token is returned or stored.
  *
- * `expo-auth-session` generates and carries the verifier when
- * `usePKCE` is left at its default, and `exchangeCodeAsync` sends it back.
+ * Identity (`sub`, email, name) is resolved from the userinfo endpoint using
+ * the access token, because `AuthorizationResult` does not carry the account
+ * identity on its own.
  */
 export async function authorizeGoogle(): Promise<{
   tokens: GoogleTokens;
   identity: GoogleIdentity;
 }> {
-  const clientId = googleClientId();
-  const redirectUri = googleRedirectUri();
-
-  const request = new AuthSession.AuthRequest({
-    clientId,
-    redirectUri,
-    scopes: [...GOOGLE_SCOPES],
-    responseType: AuthSession.ResponseType.Code,
-    /*
-     * `offline` is what makes Google return a refresh token, and `consent`
-     * forces the consent screen so a re-connect after disconnecting still
-     * yields one — Google omits the refresh token on silent re-authorization,
-     * which would leave the connection unable to outlive its access token.
-     */
-    extraParams: { access_type: 'offline', prompt: 'consent' },
-  });
-
-  const result = await request.promptAsync(GOOGLE_DISCOVERY);
-
-  if (result.type === 'cancel' || result.type === 'dismiss') {
-    throw new GoogleAuthCancelled();
-  }
-  if (result.type === 'error') {
+  const bridge = getGoogleAuthorizationBridge();
+  if (!bridge) {
     throw new Error(
-      result.params.error_description ??
-        result.error?.message ??
-        'Google returned an authorization error.',
+      'Google sign-in is unavailable on this platform (no native authorization bridge).',
     );
   }
-  if (result.type !== 'success' || !result.params.code) {
-    throw new Error('Google did not return an authorization code.');
-  }
 
-  const exchanged = await AuthSession.exchangeCodeAsync(
-    {
-      clientId,
-      redirectUri,
-      code: result.params.code,
-      extraParams: request.codeVerifier
-        ? { code_verifier: request.codeVerifier }
-        : {},
-    },
-    GOOGLE_DISCOVERY,
-  );
+  const { accessToken, grantedScopes } = await bridge.authorize({
+    scopes: [...GOOGLE_MCP_SCOPES],
+    selectAccount: true,
+  });
 
-  const tokens: GoogleTokens = {
-    accessToken: exchanged.accessToken,
-    scopes: exchanged.scope ? exchanged.scope.split(' ') : [...GOOGLE_SCOPES],
-    ...(exchanged.refreshToken ? { refreshToken: exchanged.refreshToken } : {}),
-    ...(exchanged.tokenType ? { tokenType: exchanged.tokenType } : {}),
-    ...(exchanged.expiresIn
-      ? { accessTokenExpiresAt: Date.now() + exchanged.expiresIn * 1000 }
-      : {}),
-  };
-
-  return { tokens, identity: await fetchIdentity(tokens.accessToken) };
+  const identity = await fetchIdentity(accessToken);
+  return { tokens: { accessToken, grantedScopes }, identity };
 }
 
-/**
- * Read the account's display identity so the connection tile can name it.
- *
- * Failure here is not fatal: the grant is already valid, and a connection
- * labelled "Google" is better than discarding a completed authorization
- * because a cosmetic lookup failed.
- */
+/** Re-mint a token for an already-connected account (no consent UI). */
+export async function getGoogleAccessToken(
+  bridge: GoogleAuthorizationBridge,
+  accountName?: string,
+): Promise<{ accessToken: string; grantedScopes: string[] }> {
+  return bridge.getAccessToken({
+    scopes: [...GOOGLE_MCP_SCOPES],
+    ...(accountName ? { accountName } : {}),
+  });
+}
+
 async function fetchIdentity(accessToken: string): Promise<GoogleIdentity> {
   try {
-    const response = await fetch(GOOGLE_DISCOVERY.userInfoEndpoint, {
+    const response = await fetch(GOOGLE_USERINFO_ENDPOINT, {
       headers: { Authorization: `Bearer ${accessToken}` },
     });
     if (!response.ok) return {};
@@ -131,19 +77,5 @@ async function fetchIdentity(accessToken: string): Promise<GoogleIdentity> {
     };
   } catch {
     return {};
-  }
-}
-
-/** Best-effort revocation so disconnecting also ends the grant at Google. */
-export async function revokeGoogleToken(token: string): Promise<void> {
-  try {
-    await fetch(GOOGLE_DISCOVERY.revocationEndpoint, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-      body: `token=${encodeURIComponent(token)}`,
-    });
-  } catch {
-    // The local credential is deleted regardless; a stale grant at Google is
-    // better than a connection the user cannot remove.
   }
 }

@@ -382,7 +382,7 @@ async function main(): Promise<void> {
     );
   }
 
-  console.log('production registry refuses mock connectors:');
+  console.log('production registry registers partial, refuses mock:');
   {
     const store = new InMemoryConnectionStore();
     await store.save(record({ id: 'google-default', connectorId: 'google' }));
@@ -396,14 +396,22 @@ async function main(): Promise<void> {
 
     const ids = registry.listConnectors().map((connector) => connector.id);
     assert(
-      !ids.includes('google') && !ids.includes('android'),
-      'mock connectors are not registered in production',
+      ids.includes('google'),
+      'Google (partial) is registered in production',
+    );
+    assert(
+      !ids.includes('android'),
+      'mock connectors are still not registered in production',
     );
 
     const active = await registry.listActiveTools();
     assert(
-      active.length === 0,
+      !active.some(({ tool }) => tool.name.startsWith('android.')),
       'seeded mock connections expose no tools in production',
+    );
+    assert(
+      active.some(({ tool }) => tool.name === 'google.calendar.list_events'),
+      'the partial Google connector exposes real read-only tools',
     );
   }
 

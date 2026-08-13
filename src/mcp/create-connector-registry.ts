@@ -21,6 +21,8 @@ import { IntentConnector } from '@mobile-agent/connector-intents';
 
 import type { McpRuntimeMode } from './runtime-mode';
 import { resolveTelegramAdapterMode } from './telegram-adapter-mode';
+import { getGoogleAuthorizationBridge } from '@/connections/google/native-bridge';
+import { createGoogleFileSink } from '@/connections/google/file-sink';
 
 export interface AppRegistryOptions {
   mode: McpRuntimeMode;
@@ -43,8 +45,9 @@ export interface AppRegistryOptions {
 /**
  * Google's real sign-in, injected here rather than imported by the connector
  * package: the package is bundled for Node by the verification scripts, and
- * `expo-auth-session` cannot load there. Without these the connector still
- * registers, and `connect()` reports that sign-in is unavailable.
+ * the native AuthorizationClient bridge cannot load there. Without these the
+ * connector still registers, and `connect()` reports that sign-in is
+ * unavailable.
  */
 function googleAuthOptions(
   connectionStore: ConnectionStore,
@@ -53,19 +56,18 @@ function googleAuthOptions(
   return {
     store: connectionStore,
     vault: credentialVault,
+    bridge: getGoogleAuthorizationBridge() ?? undefined,
+    fileSink: createGoogleFileSink() ?? undefined,
     authorize: async () => {
       const { authorizeGoogle } = await import('@/connections/google/authorize');
       const { tokens, identity } = await authorizeGoogle();
       return {
-        ...tokens,
+        accessToken: tokens.accessToken,
+        grantedScopes: tokens.grantedScopes,
         ...(identity.email ? { email: identity.email } : {}),
         ...(identity.name ? { name: identity.name } : {}),
         ...(identity.sub ? { externalAccountId: identity.sub } : {}),
       };
-    },
-    revoke: async (token: string) => {
-      const { revokeGoogleToken } = await import('@/connections/google/authorize');
-      await revokeGoogleToken(token);
     },
   };
 }

@@ -1,181 +1,69 @@
 import * as z from 'zod/v4';
 import type {
   ConnectionRecord,
+  ConnectorTool,
   StoreBackedConnectorOptions,
 } from '@mobile-agent/connector-core';
 import {
   ConnectorError,
   StoreBackedConnector,
-  dt,
-  opt,
   str,
-  t,
 } from '@mobile-agent/connector-core';
 import type { CredentialVault } from '@mobile-agent/credential-vault';
 
-const calRead = [
-  t('google.calendar.list_events', 'List events', 'List calendar events in a range', 'read',
-    z.object({ connectionId: str, calendarId: str.default('primary'), start: dt, end: dt, maxResults: z.number().int().min(1).max(100).default(20) }),
-    { items: [{ id: 'ev1', summary: 'Team standup', start: { dateTime: '2026-08-07T10:00:00+05:00' }, end: { dateTime: '2026-08-07T11:00:00+05:00' } }] }),
-  t('google.calendar.get_event', 'Get event', 'Get a single calendar event', 'read',
-    z.object({ connectionId: str, calendarId: str.default('primary'), eventId: str }),
-    { id: 'ev1', summary: 'Team standup', start: { dateTime: '2026-08-07T10:00:00+05:00' }, end: { dateTime: '2026-08-07T11:00:00+05:00' } }),
-  t('google.calendar.check_availability', 'Check availability', 'Check free/busy for a time range', 'read',
-    z.object({ connectionId: str, start: dt, end: dt }),
-    { busy: [{ start: '2026-08-07T10:00:00+05:00', end: '2026-08-07T11:00:00+05:00' }] }),
-];
-const calWrite = [
-  t('google.calendar.create_event', 'Create event', 'Create a new calendar event', 'write',
-    z.object({ connectionId: str, calendarId: str.default('primary'), title: str, start: dt, end: dt, description: opt, attendees: z.array(z.object({ email: str })).optional(), location: opt }),
-    { id: 'ev2', status: 'confirmed' }),
-  t('google.calendar.update_event', 'Update event', 'Update an existing event', 'write',
-    z.object({ connectionId: str, calendarId: str.default('primary'), eventId: str, title: opt, start: opt, end: opt, description: opt, location: opt }),
-    { id: 'ev1', status: 'updated' }),
-  t('google.calendar.delete_event', 'Delete event', 'Delete a calendar event', 'destructive',
-    z.object({ connectionId: str, calendarId: str.default('primary'), eventId: str }),
-    { deleted: true }),
-];
+import { GoogleApiClient, mapGoogleError } from './google-api-client';
+import type { GoogleAuthorizationBridge } from './google-authorization-bridge';
+import {
+  createGoogleAccessTokenProvider,
+  type GoogleAccessTokenProvider,
+} from './google-access-token-provider';
+import type { GoogleFileSink } from './google-file-sink';
+import {
+  GOOGLE_CALENDAR_READONLY,
+  GOOGLE_DRIVE_READONLY,
+} from './scopes';
 
-const gmailRead = [
-  t('google.gmail.search', 'Search mail', 'Search Gmail messages', 'read',
-    z.object({ connectionId: str, query: str, maxResults: z.number().int().min(1).max(50).default(10) }),
-    { messages: [{ id: 'm1', threadId: 't1' }] }),
-  t('google.gmail.get_message', 'Get message', 'Get full message content', 'read',
-    z.object({ connectionId: str, messageId: str }),
-    { id: 'm1', threadId: 't1', from: 'sender@example.com', subject: 'Hello', snippet: 'Hi there...', payload: { body: { data: 'SGk=' } } }),
-  t('google.gmail.get_thread', 'Get thread', 'Get all messages in a thread', 'read',
-    z.object({ connectionId: str, threadId: str }),
-    { id: 't1', messages: [{ id: 'm1', snippet: 'Hi' }, { id: 'm2', snippet: 'Re: Hi' }] }),
-  t('google.gmail.list_drafts', 'List drafts', 'List email drafts', 'read',
-    z.object({ connectionId: str, maxResults: z.number().int().min(1).max(50).default(10) }),
-    { drafts: [{ id: 'd1', message: { id: 'dm1', threadId: 't1' } }] }),
-];
-const gmailWrite = [
-  t('google.gmail.create_draft', 'Create draft', 'Create an email draft', 'write',
-    z.object({ connectionId: str, to: str, subject: str, body: str }),
-    { id: 'd2', status: 'draft' }),
-  t('google.gmail.update_draft', 'Update draft', 'Update an existing draft', 'write',
-    z.object({ connectionId: str, draftId: str, to: opt, subject: opt, body: opt }),
-    { id: 'd1', status: 'updated' }),
-];
-const gmailExt = [
-  t('google.gmail.send_draft', 'Send draft', 'Send an existing draft', 'external_side_effect',
-    z.object({ connectionId: str, draftId: str }),
-    { id: 'd1', status: 'sent' }),
-  t('google.gmail.archive', 'Archive', 'Archive a message', 'write',
-    z.object({ connectionId: str, messageId: str }),
-    { archived: true }),
-  t('google.gmail.mark_read', 'Mark read', 'Mark a message as read', 'write',
-    z.object({ connectionId: str, messageId: str }),
-    { read: true }),
-];
+const CALENDAR_BASE = 'https://www.googleapis.com/calendar/v3';
+const DRIVE_BASE = 'https://www.googleapis.com/drive/v3';
 
-const drive = [
-  t('google.drive.search', 'Search Drive', 'Search files in Google Drive', 'read',
-    z.object({ connectionId: str, query: str, maxResults: z.number().int().min(1).max(100).default(20) }),
-    { files: [{ id: 'f1', name: 'report.pdf', mimeType: 'application/pdf', sizeBytes: 102400 }] }),
-  t('google.drive.get_metadata', 'Get metadata', 'Get file/folder metadata', 'read',
-    z.object({ connectionId: str, fileId: str }),
-    { id: 'f1', name: 'report.pdf', mimeType: 'application/pdf', sizeBytes: 102400 }),
-  t('google.drive.download', 'Download', 'Download a file', 'read',
-    z.object({ connectionId: str, fileId: str }),
-    { fileId: 'f1', localUri: 'file://mock/report.pdf', name: 'report.pdf', mimeType: 'application/pdf' }),
-  t('google.drive.upload', 'Upload', 'Upload a file to Drive', 'write',
-    z.object({ connectionId: str, name: str, mimeType: str, parentFolderId: opt }),
-    { id: 'f2', name: 'uploaded.txt' }),
-  t('google.drive.create_folder', 'Create folder', 'Create a new folder', 'write',
-    z.object({ connectionId: str, name: str, parentFolderId: opt }),
-    { id: 'folder1', name: 'New Folder' }),
-  t('google.drive.share', 'Share', 'Share a file/folder', 'external_side_effect',
-    z.object({ connectionId: str, fileId: str, email: str, role: str.default('reader') }),
-    { shared: true, permissionId: 'p1' }),
-  t('google.drive.delete', 'Delete', 'Move file to trash', 'destructive',
-    z.object({ connectionId: str, fileId: str }),
-    { deleted: true }),
-];
-
-const people = [
-  t('google.people.search', 'Search contacts', 'Search Google contacts', 'read',
-    z.object({ connectionId: str, query: str }),
-    { results: [{ resourceName: 'p1', names: [{ displayName: 'Daniyar' }], emailAddresses: [{ value: 'd@example.com' }] }] }),
-  t('google.people.get', 'Get contact', 'Get a single contact', 'read',
-    z.object({ connectionId: str, resourceName: str }),
-    { resourceName: 'p1', names: [{ displayName: 'Daniyar' }], emailAddresses: [{ value: 'd@example.com' }] }),
-  t('google.people.create', 'Create contact', 'Create a new contact', 'write',
-    z.object({ connectionId: str, givenName: str, familyName: opt, email: opt, phone: opt }),
-    { resourceName: 'p2', names: [{ displayName: 'New Contact' }] }),
-  t('google.people.update', 'Update contact', 'Update an existing contact', 'write',
-    z.object({ connectionId: str, resourceName: str, givenName: opt, familyName: opt, email: opt, phone: opt }),
-    { resourceName: 'p1', updated: true }),
-  t('google.people.delete', 'Delete contact', 'Delete a contact', 'destructive',
-    z.object({ connectionId: str, resourceName: str }),
-    { deleted: true }),
-];
-
-const tasks = [
-  t('google.tasks.list_tasklists', 'List task lists', 'List all task lists', 'read',
-    z.object({ connectionId: str }),
-    { items: [{ id: 'tl1', title: 'Work' }] }),
-  t('google.tasks.list', 'List tasks', 'List tasks in a task list', 'read',
-    z.object({ connectionId: str, tasklistId: str.default('@default'), maxResults: z.number().int().min(1).max(100).default(20) }),
-    { items: [{ id: 't1', title: 'Review PR', status: 'needsAction' }] }),
-  t('google.tasks.create', 'Create task', 'Create a new task', 'write',
-    z.object({ connectionId: str, tasklistId: str.default('@default'), title: str, notes: opt, due: opt }),
-    { id: 't2', title: 'New task', status: 'needsAction' }),
-  t('google.tasks.update', 'Update task', 'Update an existing task', 'write',
-    z.object({ connectionId: str, tasklistId: str.default('@default'), taskId: str, title: opt, notes: opt, due: opt }),
-    { id: 't1', status: 'updated' }),
-  t('google.tasks.complete', 'Complete task', 'Mark a task as completed', 'write',
-    z.object({ connectionId: str, tasklistId: str.default('@default'), taskId: str }),
-    { id: 't1', status: 'completed' }),
-  t('google.tasks.delete', 'Delete task', 'Delete a task', 'destructive',
-    z.object({ connectionId: str, tasklistId: str.default('@default'), taskId: str }),
-    { deleted: true }),
-];
+const iso = z.string().min(1);
 
 /**
  * What a completed Google authorization hands back.
  *
- * Kept as a plain shape so this package stays free of Expo and React Native
- * imports — it is bundled for Node by the verification scripts, and importing
- * `expo-auth-session` here would break them. The app injects the real
- * implementation; tests inject a fake.
+ * No refresh token: Google's Android identity flow returns a short-lived
+ * access token, and the bridge re-mints one on demand. Kept as a plain shape
+ * so this package stays free of Expo/React Native imports (it is bundled for
+ * Node by the verification scripts).
  */
 export interface GoogleAuthorization {
   accessToken: string;
-  refreshToken?: string;
-  accessTokenExpiresAt?: number;
-  scopes: string[];
-  tokenType?: string;
+  /** Scopes Google actually granted. */
+  grantedScopes: string[];
+  /** Stable Google account id (`sub` from the OpenID userinfo). */
+  externalAccountId?: string;
   email?: string;
   name?: string;
-  /**
-   * The stable Google account id (`sub` from the OpenID userinfo). Used to
-   * derive the connection id so two Google accounts can coexist.
-   */
-  externalAccountId?: string;
 }
 
 export interface GoogleConnectorOptions extends StoreBackedConnectorOptions {
-  /** Runs the OAuth flow. Absent in Node and in tests. */
+  /** Runs the Google Identity authorization flow. Absent in Node/tests. */
   authorize?: () => Promise<GoogleAuthorization>;
-  /** Where the tokens go. Absent means "do not persist secrets". */
+  /** Where identity metadata goes. Absent means "do not persist". */
   vault?: CredentialVault;
-  /** Best-effort revocation on disconnect. */
-  revoke?: (token: string) => Promise<void>;
+  /** Native AuthorizationClient bridge (Android). Absent in Node/tests. */
+  bridge?: GoogleAuthorizationBridge;
+  /** Download writer. Absent means download reports unavailability. */
+  fileSink?: GoogleFileSink;
+  /** Injectable fetch for tests. */
+  fetchFn?: typeof fetch;
 }
 
 export const GOOGLE_CONNECTION_ID = 'google-account';
 
-/** Pre-multi-account credential key: the old connector stored the OAuth grant
- *  under the fixed connection id. Kept for backward-compatible disconnect. */
+/** Pre-multi-account credential key, kept for backward-compatible disconnect. */
 const LEGACY_GOOGLE_CREDENTIAL_KEY = GOOGLE_CONNECTION_ID;
 
-/**
- * Stable fallback account id for the rare case where Google's userinfo omits
- * `sub`. Uses a random value (never the fixed legacy id) so a fresh sign-in
- * can never overwrite an existing account.
- */
 function generateFallbackAccountId(): string {
   const random =
     typeof globalThis.crypto?.randomUUID === 'function'
@@ -194,41 +82,413 @@ function credentialReferenceFor(connectionId: string): string {
   return `google.oauth:${connectionId}`;
 }
 
+/** Escape a raw user query for a safe Drive `name contains '...'` clause. */
+function escapeDriveQuery(value: string): string {
+  return value.replace(/([\\'])/g, '\\$1').trim();
+}
+
+function normalizeCalendarEvent(raw: Record<string, unknown>) {
+  const start = raw.start as Record<string, unknown> | undefined;
+  const end = raw.end as Record<string, unknown> | undefined;
+  return {
+    id: raw.id,
+    summary: raw.summary,
+    ...(raw.description !== undefined ? { description: raw.description } : {}),
+    ...(raw.location !== undefined ? { location: raw.location } : {}),
+    start: start?.dateTime ?? start?.date,
+    end: end?.dateTime ?? end?.date,
+    status: raw.status,
+    ...(raw.htmlLink !== undefined ? { htmlLink: raw.htmlLink } : {}),
+    ...(raw.organizer !== undefined ? { organizer: raw.organizer } : {}),
+    ...(raw.attendees !== undefined ? { attendees: raw.attendees } : {}),
+  };
+}
+
+function normalizeDriveFile(raw: Record<string, unknown>) {
+  return {
+    id: raw.id,
+    name: raw.name,
+    mimeType: raw.mimeType,
+    ...(raw.size !== undefined ? { size: raw.size } : {}),
+    ...(raw.modifiedTime !== undefined ? { modifiedTime: raw.modifiedTime } : {}),
+    ...(raw.parents !== undefined ? { parents: raw.parents } : {}),
+    ...(raw.webViewLink !== undefined ? { webViewLink: raw.webViewLink } : {}),
+  };
+}
+
+const WORKSPACE_EXPORT_DEFAULTS: Record<string, string> = {
+  'application/vnd.google-apps.document': 'application/pdf',
+  'application/vnd.google-apps.spreadsheet':
+    'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+  'application/vnd.google-apps.presentation':
+    'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+  'application/vnd.google-apps.drawing': 'application/pdf',
+};
+
+function isGoogleWorkspaceMime(mimeType: string): boolean {
+  return mimeType.startsWith('application/vnd.google-apps.');
+}
+
+/**
+ * Google connector: real read-only Calendar + Drive tools over the Google
+ * REST API, with tokens minted on-demand via the Android AuthorizationClient.
+ *
+ * `partial`: Calendar/Drive reads are real; writes, Gmail, People and Tasks
+ * are not implemented and are therefore not registered at all — they can
+ * never report a fixture success in production.
+ */
 export class GoogleConnector extends StoreBackedConnector {
   readonly id = 'google' as const;
   readonly displayName = 'Google';
+  readonly implementationStatus = 'partial' as const;
 
   private readonly authorize?: () => Promise<GoogleAuthorization>;
   private readonly vault?: CredentialVault;
-  private readonly revoke?: (token: string) => Promise<void>;
+  private readonly bridge?: GoogleAuthorizationBridge;
+  private readonly fileSink?: GoogleFileSink;
+  private readonly apiClient: GoogleApiClient;
 
   constructor(options: GoogleConnectorOptions) {
     super(options);
     if (options.authorize) this.authorize = options.authorize;
     if (options.vault) this.vault = options.vault;
-    if (options.revoke) this.revoke = options.revoke;
+    if (options.bridge) this.bridge = options.bridge;
+    if (options.fileSink) this.fileSink = options.fileSink;
+
+    const tokenProvider: GoogleAccessTokenProvider = this.bridge
+      ? createGoogleAccessTokenProvider({
+          connectionStore: options.store,
+          vault: options.vault,
+          bridge: this.bridge,
+        })
+      : {
+          getValidAccessToken: async () => {
+            throw new ConnectorError(
+              'Google token provider is unavailable in this runtime.',
+              'UNSUPPORTED',
+            );
+          },
+        };
+
+    this.apiClient = new GoogleApiClient({
+      getAccessToken: (connectionId) =>
+        tokenProvider.getValidAccessToken(connectionId),
+      clearToken: (token) => this.bridge?.clearToken(token) ?? Promise.resolve(),
+      fetchFn: options.fetchFn,
+    });
   }
 
-  /*
-   * Still `mock` until the tools call the real API: the connector can now
-   * obtain a genuine grant, but every tool below returns a fixture. Claiming
-   * `implemented` here would let the production registry publish tools that
-   * report fake success, which is the exact failure this flag exists to stop.
-   */
-  readonly implementationStatus = 'mock' as const;
+  async getTools(_connection: ConnectionRecord): Promise<ConnectorTool<any, any>[]> {
+    return [
+      // --- Calendar (read-only) ---
+      {
+        name: 'google.calendar.list_events',
+        title: 'List events',
+        description:
+          'List calendar events in a time range from the connected Google Calendar.',
+        inputSchema: z.object({
+          connectionId: str,
+          calendarId: str.default('primary'),
+          start: iso,
+          end: iso,
+          maxResults: z.number().int().min(1).max(100).default(20),
+        }),
+        risk: 'read',
+        capabilities: ['google.calendar.read'],
+        requiredScopes: [GOOGLE_CALENDAR_READONLY],
+        implementationStatus: 'real',
+        execute: async (
+          input: {
+            connectionId: string;
+            calendarId: string;
+            start: string;
+            end: string;
+            maxResults: number;
+          },
+          context,
+        ) => {
+          try {
+            const data = await this.apiClient.requestJson(
+              context.connection.id,
+              'GET',
+              `${CALENDAR_BASE}/calendars/${encodeURIComponent(input.calendarId)}/events`,
+              {
+                query: {
+                  timeMin: input.start,
+                  timeMax: input.end,
+                  singleEvents: 'true',
+                  orderBy: 'startTime',
+                  maxResults: String(input.maxResults),
+                },
+              },
+            );
+            const items = Array.isArray(data.items)
+              ? data.items.map((event) =>
+                  normalizeCalendarEvent(event as Record<string, unknown>),
+                )
+              : [];
+            return {
+              items,
+              ...(data.nextPageToken
+                ? { nextPageToken: data.nextPageToken }
+                : {}),
+            };
+          } catch (error) {
+            throw mapGoogleError(error, 'listing calendar events');
+          }
+        },
+      },
+      {
+        name: 'google.calendar.get_event',
+        title: 'Get event',
+        description: 'Get a single calendar event by id.',
+        inputSchema: z.object({
+          connectionId: str,
+          calendarId: str.default('primary'),
+          eventId: str,
+        }),
+        risk: 'read',
+        capabilities: ['google.calendar.read'],
+        requiredScopes: [GOOGLE_CALENDAR_READONLY],
+        implementationStatus: 'real',
+        execute: async (
+          input: { connectionId: string; calendarId: string; eventId: string },
+          context,
+        ) => {
+          try {
+            const data = await this.apiClient.requestJson(
+              context.connection.id,
+              'GET',
+              `${CALENDAR_BASE}/calendars/${encodeURIComponent(input.calendarId)}/events/${encodeURIComponent(input.eventId)}`,
+            );
+            return normalizeCalendarEvent(data);
+          } catch (error) {
+            throw mapGoogleError(error, 'getting calendar event');
+          }
+        },
+      },
+      {
+        name: 'google.calendar.check_availability',
+        title: 'Check availability',
+        description: 'Check free/busy for a time range on the primary calendar.',
+        inputSchema: z.object({
+          connectionId: str,
+          start: iso,
+          end: iso,
+        }),
+        risk: 'read',
+        capabilities: ['google.calendar.read'],
+        requiredScopes: [GOOGLE_CALENDAR_READONLY],
+        implementationStatus: 'real',
+        execute: async (
+          input: { connectionId: string; start: string; end: string },
+          context,
+        ) => {
+          try {
+            const data = await this.apiClient.requestJson(
+              context.connection.id,
+              'POST',
+              `${CALENDAR_BASE}/freeBusy`,
+              {
+                body: {
+                  timeMin: input.start,
+                  timeMax: input.end,
+                  items: [{ id: 'primary' }],
+                },
+              },
+            );
+            const calendars = data.calendars as
+              | Record<string, { busy?: unknown[] }>
+              | undefined;
+            const primary = calendars?.['primary'];
+            const busy = Array.isArray(primary?.busy)
+              ? primary.busy.map((block) => {
+                  const b = block as Record<string, unknown>;
+                  return { start: b.start, end: b.end };
+                })
+              : [];
+            return { busy };
+          } catch (error) {
+            throw mapGoogleError(error, 'checking calendar availability');
+          }
+        },
+      },
 
-  async getTools(_c: ConnectionRecord) {
-    return [...calRead, ...calWrite, ...gmailRead, ...gmailWrite, ...gmailExt, ...drive, ...people, ...tasks];
+      // --- Drive (read-only) ---
+      {
+        name: 'google.drive.search',
+        title: 'Search Drive',
+        description: 'Search files in Google Drive by name.',
+        inputSchema: z.object({
+          connectionId: str,
+          query: str,
+          maxResults: z.number().int().min(1).max(100).default(20),
+        }),
+        risk: 'read',
+        capabilities: ['google.drive.read'],
+        requiredScopes: [GOOGLE_DRIVE_READONLY],
+        implementationStatus: 'real',
+        execute: async (
+          input: { connectionId: string; query: string; maxResults: number },
+          context,
+        ) => {
+          try {
+            const q = `name contains '${escapeDriveQuery(input.query)}' and trashed = false`;
+            const data = await this.apiClient.requestJson(
+              context.connection.id,
+              'GET',
+              `${DRIVE_BASE}/files`,
+              {
+                query: {
+                  q,
+                  pageSize: String(input.maxResults),
+                  supportsAllDrives: 'true',
+                  includeItemsFromAllDrives: 'true',
+                  fields:
+                    'nextPageToken,files(id,name,mimeType,size,modifiedTime,parents,webViewLink)',
+                },
+              },
+            );
+            const files = Array.isArray(data.files)
+              ? data.files.map((file) =>
+                  normalizeDriveFile(file as Record<string, unknown>),
+                )
+              : [];
+            return {
+              files,
+              ...(data.nextPageToken
+                ? { nextPageToken: data.nextPageToken }
+                : {}),
+            };
+          } catch (error) {
+            throw mapGoogleError(error, 'searching Drive');
+          }
+        },
+      },
+      {
+        name: 'google.drive.get_metadata',
+        title: 'Get metadata',
+        description: 'Get file/folder metadata from Google Drive.',
+        inputSchema: z.object({ connectionId: str, fileId: str }),
+        risk: 'read',
+        capabilities: ['google.drive.read'],
+        requiredScopes: [GOOGLE_DRIVE_READONLY],
+        implementationStatus: 'real',
+        execute: async (
+          input: { connectionId: string; fileId: string },
+          context,
+        ) => {
+          try {
+            const data = await this.apiClient.requestJson(
+              context.connection.id,
+              'GET',
+              `${DRIVE_BASE}/files/${encodeURIComponent(input.fileId)}`,
+              {
+                query: {
+                  supportsAllDrives: 'true',
+                  fields:
+                    'id,name,mimeType,size,modifiedTime,parents,webViewLink,capabilities',
+                },
+              },
+            );
+            return normalizeDriveFile(data);
+          } catch (error) {
+            throw mapGoogleError(error, 'getting Drive metadata');
+          }
+        },
+      },
+      {
+        name: 'google.drive.download',
+        title: 'Download',
+        description:
+          'Download a file from Google Drive to local storage. Google Docs/Sheets/Slides are exported via `exportMimeType` (defaults to a printable format).',
+        inputSchema: z.object({
+          connectionId: str,
+          fileId: str,
+          exportMimeType: z.string().optional(),
+        }),
+        risk: 'read',
+        capabilities: ['google.drive.read'],
+        requiredScopes: [GOOGLE_DRIVE_READONLY],
+        implementationStatus: 'real',
+        execute: async (
+          input: { connectionId: string; fileId: string; exportMimeType?: string },
+          context,
+        ) => {
+          if (!this.fileSink) {
+            throw new ConnectorError(
+              'File download is unavailable in this runtime.',
+              'UNSUPPORTED',
+            );
+          }
+          try {
+            const metadata = await this.apiClient.requestJson(
+              context.connection.id,
+              'GET',
+              `${DRIVE_BASE}/files/${encodeURIComponent(input.fileId)}`,
+              {
+                query: {
+                  supportsAllDrives: 'true',
+                  fields: 'id,name,mimeType,capabilities',
+                },
+              },
+            );
+
+            const name = typeof metadata.name === 'string' ? metadata.name : 'file';
+            const mimeType = typeof metadata.mimeType === 'string'
+              ? metadata.mimeType
+              : 'application/octet-stream';
+
+            let downloadMimeType: string | undefined;
+            let url: string;
+            if (isGoogleWorkspaceMime(mimeType)) {
+              // Native Google Workspace documents have no `alt=media`; export.
+              downloadMimeType =
+                input.exportMimeType ??
+                WORKSPACE_EXPORT_DEFAULTS[mimeType] ??
+                'application/pdf';
+              url = `${DRIVE_BASE}/files/${encodeURIComponent(input.fileId)}/export`;
+            } else {
+              url = `${DRIVE_BASE}/files/${encodeURIComponent(input.fileId)}`;
+            }
+
+            const { bytes } = await this.apiClient.requestBytes(
+              context.connection.id,
+              'GET',
+              url,
+              {
+                query: {
+                  ...(downloadMimeType
+                    ? { mimeType: downloadMimeType }
+                    : { alt: 'media' }),
+                },
+              },
+            );
+
+            const { localUri } = await this.fileSink.saveFile({
+              fileName: name,
+              mimeType: downloadMimeType ?? mimeType,
+              bytes,
+            });
+
+            return {
+              fileId: input.fileId,
+              localUri,
+              name,
+              mimeType: downloadMimeType ?? mimeType,
+            };
+          } catch (error) {
+            throw mapGoogleError(error, 'downloading Drive file');
+          }
+        },
+      },
+    ];
   }
 
   /**
-   * Sign in with Google and persist the connection.
-   *
-   * Tokens are written to the credential vault, which on Android wraps them
-   * with a non-exportable Keystore key; only ciphertext is stored. They are
-   * never sent to the Creepy.IM backend, so the server never learns which
-   * Google account — or indeed whether any — is linked. The ConnectionRecord
-   * itself holds no secret, only the account label and granted scopes.
+   * Sign in with Google via the Android identity flow and persist the
+   * connection. Only identity metadata is stored — no refresh token and no
+   * long-lived access token is written to the vault or the record.
    */
   async connect(): Promise<ConnectionRecord> {
     if (!this.authorize) {
@@ -241,8 +501,6 @@ export class GoogleConnector extends StoreBackedConnector {
     const grant = await this.authorize();
     const now = Date.now();
 
-    // Multi-account: one connection per Google identity. The id follows the
-    // account, so personal and work Google accounts coexist.
     const connectionId = connectionIdForAccount(grant.externalAccountId);
     const credentialReference = credentialReferenceFor(connectionId);
 
@@ -250,12 +508,8 @@ export class GoogleConnector extends StoreBackedConnector {
       await this.vault.save(credentialReference, {
         kind: 'oauth',
         accessToken: grant.accessToken,
-        scopes: grant.scopes,
-        ...(grant.refreshToken ? { refreshToken: grant.refreshToken } : {}),
-        ...(grant.accessTokenExpiresAt
-          ? { accessTokenExpiresAt: grant.accessTokenExpiresAt }
-          : {}),
-        ...(grant.tokenType ? { tokenType: grant.tokenType } : {}),
+        scopes: grant.grantedScopes,
+        ...(grant.email ? { accountName: grant.email } : {}),
       });
     }
 
@@ -268,9 +522,8 @@ export class GoogleConnector extends StoreBackedConnector {
         : {}),
       displayName: grant.email ?? grant.name ?? 'Google',
       status: 'connected',
-      scopes: grant.scopes,
-      capabilities: ['google.read'],
-      // The record points at the credential rather than holding it.
+      scopes: grant.grantedScopes,
+      capabilities: ['google.calendar.read', 'google.drive.read'],
       credentialReference,
       createdAt: existing?.createdAt ?? now,
       updatedAt: now,
@@ -280,12 +533,10 @@ export class GoogleConnector extends StoreBackedConnector {
     return record;
   }
 
-  /** Revoke at Google and delete the local credential before forgetting it. */
+  /** Revoke access at Google and delete the local credential + record. */
   async disconnect(connectionId: string): Promise<void> {
     const record = await this.store.get(connectionId);
 
-    // Follow the record's credential pointer. A pre-multi-account connection
-    // (id `google-account`, no pointer) still revokes its legacy credential.
     const credentialReference =
       record?.credentialReference ??
       (connectionId === GOOGLE_CONNECTION_ID
@@ -293,10 +544,17 @@ export class GoogleConnector extends StoreBackedConnector {
         : null);
 
     if (this.vault && credentialReference) {
-      if (this.revoke) {
-        const stored = await this.vault.get(credentialReference);
-        if (stored?.kind === 'oauth') {
-          await this.revoke(stored.refreshToken ?? stored.accessToken);
+      const stored = await this.vault.get(credentialReference);
+      const scopes =
+        record?.scopes ?? (stored?.kind === 'oauth' ? stored.scopes : []);
+      const accountName =
+        stored?.kind === 'oauth' ? stored.accountName : undefined;
+
+      if (this.bridge) {
+        try {
+          await this.bridge.revoke({ accountName, scopes });
+        } catch {
+          // Best-effort: the local credential/record is deleted regardless.
         }
       }
       await this.vault.remove(credentialReference);

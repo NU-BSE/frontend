@@ -112,7 +112,7 @@ export function WebAuthGate({ children }: { children: React.ReactNode }) {
             ]}
           >
             {submitting ? (
-              <ActivityIndicator color={palette.white} />
+              <ActivityIndicator color={palette.onBrand} />
             ) : (
               <Text variant="button" tone="inverse">
                 Sign in

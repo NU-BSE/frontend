@@ -66,9 +66,9 @@ export function OnboardingNavBar({
         ]}
       >
         {advanceIcon === 'check' ? (
-          <Icon source={Check} size={16} height={12} color={palette.white} />
+          <Icon source={Check} size={16} height={12} color={palette.onBrand} />
         ) : (
-          <Icon source={ChevronRightWhite} size={7} height={12} color={palette.white} />
+          <Icon source={ChevronRightWhite} size={7} height={12} color={palette.onBrand} />
         )}
         <Text variant="labelSmall" tone="inverse" uppercase style={styles.tracked}>
           {advanceLabel}

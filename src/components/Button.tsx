@@ -54,7 +54,7 @@ export function Button({
       {loading ? (
         <ActivityIndicator
           size="small"
-          color={variant === 'primary' ? palette.white : palette.brand}
+          color={variant === 'primary' ? palette.onBrand : palette.brand}
         />
       ) : (
         <View style={styles.content}>

@@ -89,9 +89,11 @@ const styles = StyleSheet.create({
     ...shadow.raised,
   },
   // The mascot sits directly on the pill so the blue background stays seamless.
+  // The well matches the glyph rather than padding it: the artwork is already
+  // cropped to its bounding box, so extra room here only shrinks it optically.
   mascotWell: {
-    width: 24,
-    height: 24,
+    width: 26,
+    height: 26,
     alignItems: 'center',
     justifyContent: 'center',
   },

@@ -20,7 +20,7 @@ const TONE_COLOR: Record<Tone, string> = {
   faint: palette.textFaint,
   brand: palette.brand,
   gold: palette.gold,
-  inverse: palette.white,
+  inverse: palette.onBrand,
   danger: palette.danger,
 };
 

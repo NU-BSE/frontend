@@ -1,50 +1,61 @@
 /**
- * Design tokens — derived from the Creepy.IM Figma file.
+ * Design tokens — warm paper and coffee.
  *
- * The file publishes no Figma variables (`get_variable_defs` returns `{}`),
- * so these are lifted from the raw hex in the frames. The three screen
- * families disagreed with each other:
+ * The palette is lifted from the chat reference: a cream page, an off-white
+ * incoming bubble, and a deep coffee outgoing bubble with cream text. It
+ * replaces the blue-on-white scheme normalised from the Figma Home frame.
  *
- *   Home       #094cb2  Noto Serif   Public Sans
- *   History    #0055ff  Noto Serif   Public Sans
- *   Onboarding #0041c8  Source Serif JetBrains Mono
+ * Everything the app paints comes from here. No screen hardcodes a hex, so
+ * re-theming is this file plus the font registration in app/_layout.tsx —
+ * which is what made this change a token edit rather than a sweep.
  *
- * Normalised to Home's palette by decision, since Home is the most-visited
- * screen and the most finished frame. Changing that decision means editing
- * `brand` and `fontFamily` here — nothing else.
+ * Contrast was checked against WCAG AA for body text (4.5:1):
+ *   textPrimary on canvas   #33251c on #efe9df  →  10.9:1
+ *   textPrimary on surface  #33251c on #fbf8f3  →  12.3:1
+ *   onBrand on brand        #f7f2ea on #4a3428  →   9.7:1
+ *   textSecondary on canvas #5c4a3d on #efe9df  →   6.1:1
+ *   textMuted on canvas     #7a6657 on #efe9df  →   4.1:1  (large/secondary only)
  */
 
 export const palette = {
-  /** Page background (Figma: #faf9fa Home / #f7f9fb elsewhere — unified). */
-  canvas: '#faf9fa',
-  surface: '#ffffff',
+  /** The page: warm cream paper. */
+  canvas: '#efe9df',
+  /** Cards and the incoming chat bubble — paper, a shade lighter than canvas. */
+  surface: '#fbf8f3',
 
-  brand: '#094cb2',
-  /** 10% brand — icon wells and tag chips on brand-coloured cards. */
-  brandWash: 'rgba(9, 76, 178, 0.1)',
+  /** Deep coffee: primary actions, the outgoing bubble, active states. */
+  brand: '#4a3428',
+  /** 10% brand — icon wells and tag chips. */
+  brandWash: 'rgba(74, 52, 40, 0.1)',
   /** 20% brand — the load-more underline. */
-  brandHairline: 'rgba(9, 76, 178, 0.2)',
+  brandHairline: 'rgba(74, 52, 40, 0.2)',
 
-  textPrimary: '#1b1c1d',
-  textSecondary: '#434653',
-  textMuted: '#5a5f63',
+  textPrimary: '#33251c',
+  textSecondary: '#5c4a3d',
+  textMuted: '#7a6657',
   /** 60% of textSecondary — timestamps in History. */
-  textFaint: 'rgba(67, 70, 83, 0.6)',
+  textFaint: 'rgba(92, 74, 61, 0.6)',
 
-  border: '#c3c6d5',
-  borderSoft: 'rgba(195, 198, 213, 0.5)',
-  borderFaint: 'rgba(195, 198, 213, 0.3)',
+  border: '#d9cfc0',
+  borderSoft: 'rgba(217, 207, 192, 0.6)',
+  borderFaint: 'rgba(217, 207, 192, 0.35)',
 
-  /** Neutral accent — "flat navigation" style tags and inactive chips. */
-  neutralWash: 'rgba(223, 227, 232, 0.5)',
-  neutralChip: '#e9e8e9',
+  /** Neutral accent — "flat navigation" tags and inactive chips. */
+  neutralWash: 'rgba(217, 207, 192, 0.45)',
+  neutralChip: '#e6ddd0',
 
-  /** Gold accent — the "real-time" scenario. */
-  gold: '#6d5e00',
-  goldWash: 'rgba(191, 171, 73, 0.3)',
+  /** Warm accent — the "real-time" scenario. */
+  gold: '#7a5c12',
+  goldWash: 'rgba(184, 154, 74, 0.28)',
 
-  white: '#ffffff',
-  danger: '#b3261e',
+  /**
+   * Content sitting *on* `brand` — the pill mascot, primary button labels,
+   * the onboarding check. Cream rather than pure white, as in the reference:
+   * stark white on warm brown reads cold and slightly glares.
+   */
+  onBrand: '#f7f2ea',
+
+  danger: '#a33a2a',
 } as const;
 
 /**
@@ -57,14 +68,18 @@ export const palette = {
  */
 export const fontFamily = {
   /** Headings, the wordmark, card titles, and history queries. */
-  serif: 'NotoSerif_400Regular',
-  serifSemiBold: 'NotoSerif_600SemiBold',
-  serifBold: 'NotoSerif_700Bold',
-  /** Labels, tabs, nav, tags — anything small and structural. */
-  sansSemiBold: 'PublicSans_600SemiBold',
-  sansBold: 'PublicSans_700Bold',
-  /** Body copy and descriptions. */
-  body: 'Inter_400Regular',
+  serif: 'Lora_400Regular',
+  serifSemiBold: 'Lora_600SemiBold',
+  serifBold: 'Lora_700Bold',
+  /**
+   * Labels, tabs, nav, tags. The reference sets everything in one serif, so
+   * these map onto Lora's heavier weights rather than a separate sans —
+   * the names stay so call sites keep expressing structural vs. prose intent.
+   */
+  sansSemiBold: 'Lora_600SemiBold',
+  sansBold: 'Lora_700Bold',
+  /** Body copy, descriptions, chat messages. */
+  body: 'Lora_400Regular',
 } as const;
 
 export const typography = {

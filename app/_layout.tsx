@@ -1,10 +1,7 @@
 import React, { useEffect, useMemo } from "react";
-import { Inter_400Regular } from "@expo-google-fonts/inter/400Regular";
-import { NotoSerif_400Regular } from "@expo-google-fonts/noto-serif/400Regular";
-import { NotoSerif_600SemiBold } from "@expo-google-fonts/noto-serif/600SemiBold";
-import { NotoSerif_700Bold } from "@expo-google-fonts/noto-serif/700Bold";
-import { PublicSans_600SemiBold } from "@expo-google-fonts/public-sans/600SemiBold";
-import { PublicSans_700Bold } from "@expo-google-fonts/public-sans/700Bold";
+import { Lora_400Regular } from "@expo-google-fonts/lora/400Regular";
+import { Lora_600SemiBold } from "@expo-google-fonts/lora/600SemiBold";
+import { Lora_700Bold } from "@expo-google-fonts/lora/700Bold";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { useFonts } from "expo-font";
 import { Stack } from "expo-router";
@@ -26,13 +23,15 @@ registerAppMcpDependencies();
 void SplashScreen.preventAutoHideAsync();
 
 export default function RootLayout() {
+  /*
+   * One serif family, three weights. React Native has no synthetic bolding on
+   * Android — a missing weight silently renders as regular — so each weight is
+   * loaded and named explicitly rather than relying on `fontWeight`.
+   */
   const [fontsLoaded, fontError] = useFonts({
-    NotoSerif_400Regular,
-    NotoSerif_600SemiBold,
-    NotoSerif_700Bold,
-    PublicSans_600SemiBold,
-    PublicSans_700Bold,
-    Inter_400Regular,
+    Lora_400Regular,
+    Lora_600SemiBold,
+    Lora_700Bold,
   });
 
   const queryClient = useMemo(

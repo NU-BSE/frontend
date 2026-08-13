@@ -50,7 +50,7 @@ export function TopAppBar({ scenarioId }: { scenarioId?: string }) {
         style={({ pressed }) => [styles.askPill, pressed && styles.pressed]}
       >
         <View style={styles.mascotWell}>
-          <CreepyMascot width={18} height={18} color={palette.white} />
+          <CreepyMascot width={18} height={18} color={palette.onBrand} />
         </View>
         <Text variant="button" tone="inverse">
           Ask Creepy

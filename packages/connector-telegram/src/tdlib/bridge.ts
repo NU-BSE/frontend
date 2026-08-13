@@ -465,8 +465,9 @@ export class NativeTdlibAdapter implements TdlibAdapter {
 
   async getRecentMessages(chatId: string, limit = 20): Promise<TdMessage[]> {
     const tdlib = this.assertModule();
+    const numericChatId = parseChatId(chatId);
     try {
-      const items = await tdlib.getChatHistory(Number(chatId), 0, Math.min(limit, 50), 0);
+      const items = await tdlib.getChatHistory(numericChatId, 0, Math.min(limit, 50), 0);
       if (!Array.isArray(items)) return [];
       return items
         .map((item) => {
@@ -483,9 +484,10 @@ export class NativeTdlibAdapter implements TdlibAdapter {
 
   async sendMessage(chatId: string, text: string): Promise<TdSentMessage> {
     const tdlib = this.assertModule();
+    const numericChatId = parseChatId(chatId);
     let result: TdRawResultLike;
     try {
-      result = await tdlib.sendMessage(Number(chatId), text);
+      result = await tdlib.sendMessage(numericChatId, text);
     } catch (error) {
       logError('sendMessage: sendMessage call failed', error);
       throw mapTdlibError(error, 'sending message');
@@ -946,6 +948,32 @@ function isValidMessageId(value: unknown): value is string | number {
   if (typeof value === 'number' && Number.isFinite(value)) return true;
   if (typeof value === 'string' && value.length > 0) return true;
   return false;
+}
+
+/**
+ * Defense in depth: a TDLib chat id is a decimal integer, never a username,
+ * @username, display name or phone number. Reject non-numeric input before it
+ * ever reaches native TDLib, so a model mistake fails fast as a recoverable
+ * validation error instead of a `400 Chat not found`.
+ */
+function parseChatId(chatId: string): number {
+  if (typeof chatId !== 'string' || !/^-?\d+$/.test(chatId)) {
+    throw new ConnectorError(
+      'Invalid Telegram chatId. Expected the numeric id returned by ' +
+        'telegram.user.search_chats; usernames such as @example are not chat IDs.',
+      'VALIDATION_FAILED',
+    );
+  }
+
+  const value = Number(chatId);
+  if (!Number.isFinite(value)) {
+    throw new ConnectorError(
+      'Telegram chatId is not a valid numeric ID.',
+      'VALIDATION_FAILED',
+    );
+  }
+
+  return value;
 }
 
 // ------------------------------------------------------------------

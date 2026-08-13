@@ -34,13 +34,17 @@ const connectionIdField = z
   .describe('Id of the connected Telegram account to act on.');
 
 /**
- * Chat ids come back from `search_chats` as strings, but models (and the
- * schema regression tests) may emit numbers; both are accepted and
- * normalised to the string form TDLib uses.
+ * A TDLib chat id, not a username. Search results already expose ids as
+ * strings, so a strict decimal-string regex is enforced: the model can no
+ * longer pass a `@username`, display name, or invented value.
  */
-const chatIdField = z
-  .union([z.string().min(1), z.number()])
-  .describe('Chat id returned by telegram.user.search_chats.');
+export const chatIdField = z
+  .string()
+  .regex(/^-?\d+$/, 'chatId must be a numeric TDLib chat ID')
+  .describe(
+    'Exact numeric `id` copied from a result of telegram.user.search_chats. ' +
+      'Example: "123456789". NOT "@username".',
+  );
 
 /**
  * Telegram on behalf of the authenticated *user* (not a bot), through TDLib.
@@ -186,7 +190,10 @@ export class TelegramUserConnector extends StoreBackedConnector {
         'Find Telegram recipients, personal contacts, chats, groups and ' +
         'channels by display name or username. Searches the authenticated ' +
         "user's contacts and known chats, and can resolve an exact Telegram " +
-        '@username. Use this before sending when a chat ID is not already known.',
+        '@username. Use this before sending when a chat ID is not already ' +
+        'known. The `id` field of each result is the value that MUST be ' +
+        'passed as `chatId` to subsequent Telegram tools; `username` is ' +
+        'display/identity information only and MUST NOT be used as chatId.',
       inputSchema: z.object({
         connectionId: connectionIdField,
         query: z
@@ -244,14 +251,13 @@ export class TelegramUserConnector extends StoreBackedConnector {
       capabilities: ['telegram.messages.read'],
       requiredScopes: ['telegram.messages.read'],
       implementationStatus: status,
-      execute: async (input: { chatId: string | number; limit?: number }) => {
+      execute: async (input: { chatId: string; limit?: number }) => {
         await this.ensureSession();
-        const chatId = String(input.chatId);
         const messages = await adapter.getRecentMessages(
-          chatId,
+          input.chatId,
           input.limit ?? 20,
         );
-        return { chatId, messages };
+        return { chatId: input.chatId, messages };
       },
     };
 
@@ -259,13 +265,13 @@ export class TelegramUserConnector extends StoreBackedConnector {
       name: 'telegram.user.send_message',
       title: 'Send Telegram message',
       description:
-        "Send a Telegram text message from the connected user's personal " +
-        'Telegram account. Use telegram.user.search_chats first when only a ' +
-        "person's name is known, then pass the chat id from its result. " +
-        'Causes an external side effect and ALWAYS requires explicit user ' +
-        'approval: the first call returns status "approval_required", and ' +
-        'the message is sent only after the user confirms. Do not claim the ' +
-        'message was sent unless a call returns status "success".',
+        'Send a Telegram text message from the connected personal account. ' +
+        'IMPORTANT: `chatId` MUST be the exact numeric `id` returned by ' +
+        'telegram.user.search_chats. Never put a username, @username, display ' +
+        'name, phone number or invented value into chatId. If only a name or ' +
+        'username is known, ALWAYS call telegram.user.search_chats first and ' +
+        'copy the selected result\'s `id` verbatim into chatId. Sending ' +
+        'causes an external side effect and requires explicit user approval.',
       inputSchema: z.object({
         connectionId: connectionIdField,
         chatId: chatIdField,
@@ -287,7 +293,7 @@ export class TelegramUserConnector extends StoreBackedConnector {
       requiredScopes: ['telegram.messages.send'],
       implementationStatus: status,
       execute: async (
-        input: { chatId: string | number; text: string },
+        input: { chatId: string; text: string },
         _context: ToolExecutionContext,
       ) => {
         if (typeof __DEV__ === 'boolean' && __DEV__) {
@@ -298,7 +304,7 @@ export class TelegramUserConnector extends StoreBackedConnector {
         }
         try {
           await this.ensureSession();
-          const sent = await adapter.sendMessage(String(input.chatId), input.text);
+          const sent = await adapter.sendMessage(input.chatId, input.text);
           if (typeof __DEV__ === 'boolean' && __DEV__) {
             console.log('[telegram-send] ok', { messageId: sent.messageId });
           }

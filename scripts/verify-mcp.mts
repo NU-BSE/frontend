@@ -290,7 +290,7 @@ async function main(): Promise<void> {
       connectionId: tool.name.startsWith('telegram.bot')
         ? 'telegram-bot-default'
         : 'telegram-user-default',
-      chatId: 1,
+      chatId: '1',
       text: 'x',
       messageId: 1,
       document: 'x',

@@ -181,7 +181,7 @@ export class MockTdlibAdapter implements TdlibAdapter {
     if (/empty|пусто/iu.test(trimmed)) return [];
 
     const chat: TdChat = {
-      id: `mock-chat-${slugify(trimmed)}`,
+      id: String(mockChatIdFor(trimmed)),
       title: trimmed,
       type: 'private',
     };
@@ -259,7 +259,7 @@ export class MockTdlibAdapter implements TdlibAdapter {
   }
 
   private assertChatUsable(chatId: string): void {
-    if (chatId.includes('fail')) {
+    if (chatId === MOCK_FAIL_CHAT_ID) {
       throw new ConnectorError(
         'Telegram rejected the request for this chat (mock failure)',
         'PROVIDER_ERROR',
@@ -273,12 +273,20 @@ export class MockTdlibAdapter implements TdlibAdapter {
   }
 }
 
-function slugify(value: string): string {
-  return (
-    value
-      .toLowerCase()
-      .replace(/[^\p{L}\p{N}]+/gu, '-')
-      .replace(/^-+|-+$/gu, '')
-      .slice(0, 40) || 'chat'
-  );
+/**
+ * A reserved numeric chat id that makes `sendMessage`/`getRecentMessages`
+ * fail, mirroring a provider-side rejection. Used by the tool-error test.
+ */
+const MOCK_FAIL_CHAT_ID = '-1';
+
+/**
+ * Deterministic numeric chat id for a query, so the mock still exposes real
+ * TDLib-shaped ids (a decimal string) rather than a slug.
+ */
+function mockChatIdFor(value: string): number {
+  let hash = 0;
+  for (let i = 0; i < value.length; i++) {
+    hash = (hash * 31 + value.charCodeAt(i)) >>> 0;
+  }
+  return 1_000_000_000 + (hash % 900_000_000);
 }

@@ -2,6 +2,7 @@ export { TelegramBotConnector } from './telegram-bot-connector';
 export {
   TelegramUserConnector,
   TELEGRAM_USER_SCOPES,
+  chatIdField,
   type TelegramUserConnectorOptions,
 } from './telegram-user-connector';
 export { MockTdlibAdapter } from './tdlib/mock-adapter';

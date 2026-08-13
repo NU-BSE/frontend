@@ -13,6 +13,7 @@ import {
   normalizeSearchQuery,
   type RankedChat,
 } from '../packages/connector-telegram/src/tdlib/bridge.js';
+import { chatIdField } from '../packages/connector-telegram/src/telegram-user-connector.js';
 import { resolveDefaultRuntimeMode } from '../src/mcp/runtime-mode.js';
 
 function assert(condition: unknown, message: string): asserts condition {
@@ -328,6 +329,19 @@ console.log('recipient search: dedupe and rank');
 }
 
 // -----------------------------------------------------------------------
+// chatId schema — a username is never a valid chatId
+// -----------------------------------------------------------------------
+
+console.log('chatId schema: only numeric ids are accepted');
+{
+  assert(!chatIdField.safeParse('@aassppann').success, 'a @username is rejected as chatId');
+  assert(!chatIdField.safeParse('Aspan').success, 'a display name is rejected as chatId');
+  assert(!chatIdField.safeParse('chat-1').success, 'a non-numeric slug is rejected as chatId');
+  assert(chatIdField.safeParse('123456789').success, 'a numeric string is accepted');
+  assert(chatIdField.safeParse('-1001234567890').success, 'a negative TDLib id is accepted');
+}
+
+// -----------------------------------------------------------------------
 // Recipient search — composite search over a fake TDLib
 // -----------------------------------------------------------------------
 
@@ -493,6 +507,28 @@ void (async () => {
 
     const unknown = await adapter.searchChats('NoSuchPerson', 10);
     assertEq(unknown.length, 0, 'an unknown person yields an empty list');
+  }
+
+  console.log('recipient search: send_message adapter defense');
+  {
+    let nativeSendCalled = false;
+    const adapter = new NativeTdlibAdapter() as AnyAdapter;
+    adapter.state = { type: 'ready', user: { id: '1' } };
+    adapter.tdlib = {
+      sendMessage: async () => {
+        nativeSendCalled = true;
+        return { raw: '{}' };
+      },
+    };
+
+    let code = '';
+    try {
+      await adapter.sendMessage('@aassppann', 'hello');
+    } catch (error) {
+      code = (error as { code?: string })?.code ?? '';
+    }
+    assertEq(code, 'VALIDATION_FAILED', 'sendMessage rejects a @username with VALIDATION_FAILED');
+    assert(!nativeSendCalled, 'native TDLib sendMessage is never invoked for a username');
   }
 
   console.log('verify:telegram — search checks passed');

@@ -472,7 +472,7 @@ async function main(): Promise<void> {
               toolName: 'telegram.user.send_message',
               args: {
                 connectionId: TELEGRAM_CONNECTION_ID,
-                chatId: 'mock-chat-даниар',
+                chatId: '123456789',
                 text: 'Привет',
               },
             },
@@ -537,7 +537,7 @@ async function main(): Promise<void> {
               toolName: 'telegram.user.send_message',
               args: {
                 connectionId: TELEGRAM_CONNECTION_ID,
-                chatId: 'mock-chat-fail',
+                chatId: '-1',
                 text: 'Привет',
               },
             },
@@ -906,7 +906,7 @@ async function main(): Promise<void> {
               toolName: 'telegram.user.send_message',
               args: {
                 connectionId: TELEGRAM_CONNECTION_ID,
-                chatId: 'mock-chat-malicious',
+                chatId: '123456789',
                 text: 'Привет',
                 approvalId: 'fake-approval',
               },

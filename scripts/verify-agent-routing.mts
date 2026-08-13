@@ -408,7 +408,7 @@ async function main(): Promise<void> {
                   toolName: 'telegram.user.send_message',
                   args: {
                     connectionId: TELEGRAM_CONNECTION_ID,
-                    chatId: 'mock-chat-fail',
+                    chatId: '-1',
                     text: 'test',
                   },
                 },
@@ -459,7 +459,8 @@ async function main(): Promise<void> {
     );
     await agent.approvePendingApproval();
 
-    // The send fails (mock-chat-fail). The run will continue to step 2.
+    // The send fails (chatId -1 is the mock's provider-failure sentinel).
+    // The run will continue to step 2.
     // Step 2 will try again — approval again.
     await waitFor(
       () =>
@@ -649,7 +650,7 @@ async function main(): Promise<void> {
                 toolName: 'telegram.user.send_message',
                 args: {
                   connectionId: TELEGRAM_CONNECTION_ID,
-                  chatId: 'mock-chat-success',
+                  chatId: '123456789',
                   text: 'Hello world',
                 },
               },
@@ -667,7 +668,7 @@ async function main(): Promise<void> {
                 toolName: 'telegram.user.send_message',
                 args: {
                   connectionId: TELEGRAM_CONNECTION_ID,
-                  chatId: 'mock-chat-success',
+                  chatId: '123456789',
                   text: 'Hello world',
                 },
               },
@@ -737,7 +738,7 @@ async function main(): Promise<void> {
                 toolName: 'telegram.user.send_message',
                 args: {
                   connectionId: TELEGRAM_CONNECTION_ID,
-                  chatId: 'mock-chat-success',
+                  chatId: '123456789',
                   text: 'Hello Daniyar',
                 },
               },
@@ -754,7 +755,7 @@ async function main(): Promise<void> {
                 toolName: 'telegram.user.send_message',
                 args: {
                   connectionId: TELEGRAM_CONNECTION_ID,
-                  chatId: 'mock-chat-success',
+                  chatId: '123456789',
                   text: 'Hello Aidar',
                 },
               },

@@ -7,9 +7,7 @@
     "packages/*"
   ],
   "dependencies": {
-    "@expo-google-fonts/inter": "^0.4.2",
-    "@expo-google-fonts/noto-serif": "^0.4.2",
-    "@expo-google-fonts/public-sans": "^0.4.2",
+    "@expo-google-fonts/lora": "^0.4.2",
     "@expo/metro-runtime": "~57.0.7",
     "@mobile-agent/approval-core": "*",
     "@mobile-agent/connector-android": "*",

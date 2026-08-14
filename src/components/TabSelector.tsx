@@ -59,13 +59,22 @@ const styles = StyleSheet.create({
     paddingHorizontal: 20,
     paddingVertical: 9,
     borderRadius: radius.lg,
-    ...shadow.card,
   },
+  /*
+   * The selected tab is a plain fill.
+   *
+   * `shadow.card` used to sit on the base style, so it applied to the active
+   * chip too. Its `elevation: 1` makes Android draw a shadow from the view's
+   * outline, which reads as a pale frame around an otherwise solid chip.
+   * Unselected chips keep it — they are surface-coloured on a surface-coloured
+   * bar and need the lift to separate.
+   */
   chipActive: { backgroundColor: palette.brand },
   chipInactive: {
     backgroundColor: palette.surface,
     borderWidth: 1,
     borderColor: palette.border,
+    ...shadow.card,
   },
   pressed: { opacity: 0.8 },
 });

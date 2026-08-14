@@ -121,8 +121,20 @@ export default function Chat() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [promptParam]);
 
+  /*
+   * Settings shows no opening chips.
+   *
+   * Its prompts are the Android guide titles — full questions, six of them,
+   * wrapping to two lines each. They filled the conversation area and pushed
+   * the actual replies off screen. The Settings feed is now the browsable
+   * library for exactly these, so repeating them here costs the whole screen
+   * and adds nothing.
+   */
   const suggestions = useMemo(
-    () => scenario?.suggestions ?? GENERAL_SUGGESTIONS,
+    () =>
+      scenario?.id === 'settings'
+        ? []
+        : (scenario?.suggestions ?? GENERAL_SUGGESTIONS),
     [scenario],
   );
 

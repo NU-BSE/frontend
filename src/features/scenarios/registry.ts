@@ -1,12 +1,12 @@
 import type React from 'react';
 import type { SvgProps } from 'react-native-svg';
 
-import CatDataviz from '@assets/icons/cat-dataviz.svg';
-import CatFinance from '@assets/icons/cat-finance.svg';
-import CatJourney from '@assets/icons/cat-journey.svg';
+import CatCalendar from '@assets/icons/cat-calendar.svg';
+import CatDrive from '@assets/icons/cat-drive.svg';
+import CatEmail from '@assets/icons/cat-email.svg';
 import CatMessaging from '@assets/icons/cat-messaging.svg';
 import CatSettings from '@assets/icons/cat-settings.svg';
-import CatSports from '@assets/icons/cat-sports.svg';
+import { ANDROID_GUIDE_LEAD_PROMPTS } from './androidGuides';
 import { palette } from '@/theme/tokens';
 
 /**
@@ -17,10 +17,9 @@ import { palette } from '@/theme/tokens';
 export type ScenarioId =
   | 'settings'
   | 'messaging'
-  | 'sports'
-  | 'finance'
-  | 'journey'
-  | 'dataviz';
+  | 'email'
+  | 'calendar'
+  | 'drive';
 
 /** Card accent. The Figma cards use three distinct treatments. */
 export type Accent = 'brand' | 'neutral' | 'gold';
@@ -67,16 +66,18 @@ export const SCENARIOS: Scenario[] = [
   {
     id: 'settings',
     title: 'Settings',
-    cardTitle: 'Manage complex system preferences',
-    cardDescription: 'Nested settings and system-level configurations.',
-    tag: 'Hierarchical',
+    cardTitle: 'Fix the Android problem you actually have',
+    cardDescription: 'Ordered paths through real Android settings.',
+    tag: 'Guides',
     accent: 'brand',
     Icon: CatSettings,
-    suggestions: [
-      'What changed in my settings recently?',
-      'Explain the memory allocation options',
-      'Reset everything to defaults',
-    ],
+    /*
+     * One prompt per guide cluster from creepy.im rather than all thirty-six:
+     * the chips wrap, and a wall of them is not browsable. The full library
+     * lives in ./androidGuides and is what a dedicated guide surface should
+     * render.
+     */
+    suggestions: ANDROID_GUIDE_LEAD_PROMPTS,
     deepLinks: [
       { label: 'Android Settings', url: 'android-app://com.android.settings' },
     ],
@@ -104,70 +105,74 @@ export const SCENARIOS: Scenario[] = [
     ],
   },
   {
-    id: 'sports',
-    title: 'Sports',
-    cardTitle: 'Track live match data',
-    cardDescription: 'Real-time updates and interactive scoreboards.',
-    tag: 'Real-time',
+    id: 'email',
+    title: 'Email',
+    cardTitle: 'Get through the inbox faster',
+    cardDescription: 'Find, summarise and draft without opening every thread.',
+    tag: 'Gmail',
     accent: 'gold',
-    Icon: CatSports,
+    Icon: CatEmail,
     suggestions: [
-      'Score right now',
-      'How did the last five games go?',
-      'Who is most likely to lose?',
+      'What needs a reply today?',
+      'Summarise this thread',
+      'Draft a short reply saying I will follow up Monday',
     ],
     deepLinks: [
-      { label: 'Open scoreboard', url: 'creepyim://scoreboard' },
+      { label: 'Gmail', url: 'googlegmail://', webUrl: 'https://mail.google.com' },
     ],
   },
   {
-    id: 'finance',
-    title: 'Finance',
-    cardTitle: 'Track portfolio performance',
-    cardDescription: 'Market analytics and asset growth visualization.',
-    tag: 'Data viz',
-    accent: 'brand',
-    Icon: CatFinance,
-    suggestions: [
-      'How is my portfolio doing?',
-      'What moved the most today?',
-      'Explain this drawdown',
-    ],
-    deepLinks: [{ label: 'Open portfolio', url: 'creepyim://portfolio' }],
-  },
-  {
-    id: 'journey',
-    title: 'Journey',
-    cardTitle: 'Plan where you are going',
-    cardDescription: 'Routes, timings and the places along the way.',
-    tag: 'Wayfinding',
+    id: 'calendar',
+    title: 'Calendar',
+    cardTitle: 'See what the week actually looks like',
+    cardDescription: 'Events, conflicts and the gaps between them.',
+    tag: 'Scheduling',
     accent: 'neutral',
-    Icon: CatJourney,
+    Icon: CatCalendar,
     suggestions: [
-      'Fastest way home right now',
-      'What is on the way?',
-      'Avoid the route I took yesterday',
+      'What is on today?',
+      'Where do I have a free hour this week?',
+      'Do any of my meetings clash?',
     ],
     deepLinks: [
-      { label: 'Maps', url: 'geo:0,0', webUrl: 'https://maps.google.com' },
+      {
+        label: 'Google Calendar',
+        url: 'content://com.android.calendar/time',
+        webUrl: 'https://calendar.google.com',
+      },
     ],
   },
   {
-    id: 'dataviz',
-    title: 'Data',
-    cardTitle: 'See the shape of your data',
-    cardDescription: 'Charts assembled from whatever it has been watching.',
-    tag: 'Data viz',
-    accent: 'gold',
-    Icon: CatDataviz,
+    id: 'drive',
+    title: 'Drive',
+    cardTitle: 'Find the file you half remember',
+    cardDescription: 'Search by what it was about, not what it was called.',
+    tag: 'Files',
+    accent: 'brand',
+    Icon: CatDrive,
     suggestions: [
-      'Chart the last thirty days',
-      'What pattern repeats here?',
-      'Show me the outlier',
+      'Find the document I edited last week',
+      'What did I share with this person?',
+      'Show me my largest files',
     ],
-    deepLinks: [{ label: 'Open dashboard', url: 'creepyim://dashboard' }],
+    deepLinks: [
+      { label: 'Google Drive', url: 'googledrive://', webUrl: 'https://drive.google.com' },
+    ],
   },
 ];
+
+/**
+ * The categories offered in onboarding.
+ *
+ * Settings is excluded. It is not a service you opt into — it is the Android
+ * guide library, always present in the feed regardless of what you pick here,
+ * so asking about it implies a choice that does not exist. Dropping it also
+ * leaves four entries, which fill the two-column grid evenly instead of
+ * stranding a fifth cell alone on its own row.
+ */
+export const ONBOARDING_SCENARIOS: Scenario[] = SCENARIOS.filter(
+  (scenario) => scenario.id !== 'settings',
+);
 
 export function getScenario(id: string | undefined): Scenario | undefined {
   return SCENARIOS.find((scenario) => scenario.id === id);

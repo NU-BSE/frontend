@@ -91,10 +91,13 @@ export default function OnboardingMemory() {
     if (!selectedSupport?.supported) return;
 
     await setMemoryProfile(choice);
-    await setOnboardingComplete();
     void activateSelectedEngine(choice, assessment ?? null);
-    await queryClient.invalidateQueries({ queryKey: ['onboarding-status'] });
-    router.replace('/(tabs)/feed');
+    /*
+     * Onboarding is completed by the subscription step, not here — marking it
+     * done now would let the guard treat the run as finished and skip the
+     * paywall on the next launch.
+     */
+    router.push('/onboarding/subscription');
   }, [activateSelectedEngine, assessment, choice, queryClient, router, support]);
 
   const summary =

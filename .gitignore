@@ -3,6 +3,12 @@ node_modules/
 dist/
 deploy/
 web-build/
+# Unanchored on purpose: any directory called android/ or ios/ is generated
+# output. The consequence is that hand-written native sources must NOT live
+# under a path segment with those names, or they are silently untracked —
+# `git status` never lists them, so the omission is invisible. Keep Kotlin
+# under a native/kotlin/ directory instead; see
+# src/connections/google/native/kotlin/.
 android/
 ios/
 *.log

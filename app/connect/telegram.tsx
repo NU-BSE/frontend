@@ -13,7 +13,8 @@ import { router } from 'expo-router';
 import { Text } from '@/components/Text';
 import { Button } from '@/components/Button';
 import { LocalQrCode } from '@/components/LocalQrCode';
-import { palette, radius, spacing } from '@/theme/tokens';
+import { gutter, palette, radius, spacing } from '@/theme/tokens';
+import { TELEGRAM_CAPABILITY_DESCRIPTIONS } from '@/connections/telegram/scopeCopy';
 import { getCurrentRegistry, getLocalMcpRuntime } from '@/mcp/runtime-singleton';
 import { useConnectConnector } from '@/connections/useConnections';
 import type { TdlibAdapter, TdlibAuthState } from '@mobile-agent/connector-telegram';
@@ -33,6 +34,13 @@ export default function TelegramAuthScreen() {
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [initializing, setInitializing] = useState(true);
+  /*
+   * Consent gates initialization, not just the UI. Mounting this screen used
+   * to call `adapter.initialize()` immediately, so merely opening it started a
+   * real TDLib session before the user had been told anything. Nothing native
+   * runs until Continue is pressed.
+   */
+  const [consented, setConsented] = useState(false);
 
   // Acceptance belongs to a specific Terms document. When TDLib re-sends
   // `wait_registration` with changed terms (same state, new document), the key
@@ -83,6 +91,8 @@ export default function TelegramAuthScreen() {
 
   useEffect(() => {
     mountedRef.current = true;
+    if (!consented) return;
+
     let cancelled = false;
     let unsub: (() => void) | undefined;
 
@@ -154,7 +164,7 @@ export default function TelegramAuthScreen() {
       cleanupRef.current();
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [consented]);
 
   const handleRequestPhone = useCallback(async () => {
     if (!adapter) return;
@@ -237,6 +247,42 @@ export default function TelegramAuthScreen() {
     cleanupRef.current();
     router.back();
   }, []);
+
+  if (!consented) {
+    return (
+      <ScrollView contentContainerStyle={styles.consentContent}>
+        <Text variant="display" style={styles.title}>
+          Connect Telegram
+        </Text>
+        <Text variant="bodyLarge" tone="secondary" style={styles.description}>
+          Signing in gives Creepy a Telegram session on this device. The session
+          stays on the phone and is never sent to our servers.
+        </Text>
+
+        <View style={styles.scopes}>
+          {TELEGRAM_CAPABILITY_DESCRIPTIONS.map((entry) => (
+            <View key={entry.scope} style={styles.scopeRow}>
+              <Text variant="label">{entry.title}</Text>
+              <Text variant="bodySmall" tone="secondary">
+                {entry.detail}
+              </Text>
+            </View>
+          ))}
+        </View>
+
+        <Text variant="bodySmall" tone="secondary" style={styles.description}>
+          Telegram has no permission screen: signing in authorizes your whole
+          account, and the limits above are the ones Creepy imposes on itself.
+          Sign out any time from Account → Connectors.
+        </Text>
+
+        <Button label="Continue" onPress={() => setConsented(true)} />
+        <View style={styles.cancelWrap}>
+          <Button label="Cancel" variant="ghost" onPress={() => router.back()} />
+        </View>
+      </ScrollView>
+    );
+  }
 
   if (initializing) {
     return (
@@ -607,4 +653,21 @@ const styles = StyleSheet.create({
     overflow: 'hidden' as const,
   },
   checkRow: { alignItems: 'center' },
+  consentContent: {
+    flexGrow: 1,
+    justifyContent: 'center',
+    gap: spacing.lg,
+    paddingHorizontal: gutter.screen,
+    paddingVertical: spacing.xxl,
+    backgroundColor: palette.canvas,
+  },
+  scopes: {
+    gap: spacing.lg,
+    padding: spacing.lg,
+    borderWidth: 1,
+    borderColor: palette.borderSoft,
+    borderRadius: radius.md,
+    backgroundColor: palette.surface,
+  },
+  scopeRow: { gap: spacing.xs },
 });

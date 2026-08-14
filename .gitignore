@@ -3,15 +3,14 @@ node_modules/
 dist/
 deploy/
 web-build/
-# Anchored to the repository root on purpose. Unanchored, these match ANY
-# directory called android/ or ios/ — including native module sources kept
-# beside the code that uses them, such as
-# src/connections/google/native/android/ and
-# src/attestation/native/android/. Those were silently untracked, which broke
-# `expo prebuild` for anyone without them: the config plugins copy from those
-# paths and aborted the whole prebuild with ENOENT.
-/android/
-/ios/
+# Unanchored on purpose: any directory called android/ or ios/ is generated
+# output. The consequence is that hand-written native sources must NOT live
+# under a path segment with those names, or they are silently untracked —
+# `git status` never lists them, so the omission is invisible. Keep Kotlin
+# under a native/kotlin/ directory instead; see
+# src/connections/google/native/kotlin/.
+android/
+ios/
 *.log
 .env
 .DS_Store

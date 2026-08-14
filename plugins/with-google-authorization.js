@@ -21,10 +21,15 @@ const SOURCE_FILES = [
  * Copy the native sources, reporting honestly when they are absent.
  *
  * Returns false — rather than throwing — when the Kotlin is missing, so a
- * prebuild is not made impossible by it. The sources live under a directory
- * named `android`, and .gitignore's unanchored `android/` rule matches it, so
- * they are not in the repository: on a fresh clone this plugin used to abort
- * the whole prebuild with an ENOENT, leaving no native project at all.
+ * prebuild is not made impossible by it. This plugin shipped before its native
+ * half was written, and it copied unconditionally: prebuild aborted with an
+ * ENOENT *after* clearing android/, leaving no native project at all. A
+ * missing optional module should cost that module, not the build.
+ *
+ * The source path deliberately avoids a directory segment named `android`,
+ * which .gitignore excludes everywhere. Hand-written sources under such a path
+ * can never be committed, and `git status` does not list them, so the gap is
+ * invisible until a fresh clone fails to build.
  *
  * Skipping is visible, not silent: the warning below names the missing path,
  * and at runtime `authorizeGoogle()` reports "no native authorization bridge"
@@ -33,7 +38,7 @@ const SOURCE_FILES = [
 function copyNativeSources(projectRoot, platformProjectRoot) {
   const sourceRoot = path.join(
     projectRoot,
-    'src/connections/google/native/android/src/main/java/com/creepyim/googleauth',
+    'src/connections/google/native/kotlin/com/creepyim/googleauth',
   );
 
   const missing = SOURCE_FILES.filter(
@@ -43,9 +48,8 @@ function copyNativeSources(projectRoot, platformProjectRoot) {
     console.warn(
       `[with-google-authorization] Skipping the native Google authorization ` +
         `module: ${missing.join(', ')} not found in ${sourceRoot}. Google ` +
-        `sign-in will report that no native bridge is available. These files ` +
-        `are excluded by .gitignore's unanchored "android/" rule — anchor it ` +
-        `to "/android/" and commit them to include the module in builds.`,
+        `sign-in will report that no native bridge is available. Write those ` +
+        `two files to include the module in builds.`,
     );
     return false;
   }

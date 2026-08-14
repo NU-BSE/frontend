@@ -1,0 +1,253 @@
+import React, { useCallback, useEffect, useState } from "react";
+import { useQueryClient } from "@tanstack/react-query";
+import { useRouter } from "expo-router";
+import { Pressable, ScrollView, StyleSheet, View } from "react-native";
+
+import { useAi } from "@/ai/AiProvider";
+import { OnboardingNavBar } from "@/components/OnboardingNavBar";
+import { Screen } from "@/components/Screen";
+import { Text } from "@/components/Text";
+import {
+  BillingUnavailable,
+  PurchaseCancelled,
+  fetchStorePrices,
+  purchase,
+  type StorePrice,
+} from "@/features/subscription/billing";
+import {
+  SUBSCRIPTION_PLANS,
+  TRIAL_DAYS,
+  planFor,
+  type BillingPeriod,
+} from "@/features/subscription/plans";
+import { setOnboardingComplete } from "@/storage/prefs";
+import { gutter, palette, radius, spacing } from "@/theme/tokens";
+
+/**
+ * The paywall, shown after the on-device model size is chosen.
+ *
+ * Skipping is deliberately available and plainly worded. The trial is free and
+ * the app is usable on-device without Pro, so a paywall that traps the user
+ * mid-onboarding would cost more installs than it converts — and the local
+ * agent is the product's whole privacy argument.
+ */
+export default function OnboardingSubscription() {
+  const router = useRouter();
+  const queryClient = useQueryClient();
+  const { activateSelectedEngine } = useAi();
+
+  const [period, setPeriod] = useState<BillingPeriod>("annual");
+  const [storePrices, setStorePrices] = useState<
+    Partial<Record<BillingPeriod, StorePrice>>
+  >({});
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  /*
+   * Play's prices are localized and authoritative; the plan table only carries
+   * the marketing figures. Fetching is best-effort — an unreachable store
+   * leaves the fallback prices on screen rather than an empty paywall.
+   */
+  useEffect(() => {
+    let cancelled = false;
+    void fetchStorePrices().then((prices) => {
+      if (!cancelled) setStorePrices(prices);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const complete = useCallback(async () => {
+    await setOnboardingComplete();
+    await queryClient.invalidateQueries({ queryKey: ["onboarding-status"] });
+    router.replace("/(tabs)/feed");
+  }, [queryClient, router]);
+
+  const startTrial = useCallback(async () => {
+    if (busy) return;
+    setBusy(true);
+    setError(null);
+    try {
+      await purchase(period);
+      /*
+       * Deliberately no local "subscribed" flag. The purchase token proves
+       * payment to Play, not entitlement to this app — the backend has to
+       * verify it with the Play Developer API before anything unlocks. Until
+       * that endpoint exists, onboarding simply finishes.
+       */
+      await complete();
+    } catch (purchaseError) {
+      if (purchaseError instanceof PurchaseCancelled) {
+        setError(null);
+      } else if (purchaseError instanceof BillingUnavailable) {
+        setError(purchaseError.message);
+      } else {
+        setError(
+          purchaseError instanceof Error
+            ? purchaseError.message
+            : "The purchase could not be completed.",
+        );
+      }
+    } finally {
+      setBusy(false);
+    }
+  }, [busy, complete, period]);
+
+  const selected = planFor(period);
+  const price = (target: BillingPeriod): string =>
+    storePrices[target]?.formattedPrice ?? planFor(target).listPrice;
+
+  return (
+    <Screen>
+      <ScrollView
+        contentContainerStyle={styles.content}
+        showsVerticalScrollIndicator={false}
+      >
+        <View style={styles.intro}>
+          <Text variant="tag" tone="brand" uppercase>
+            Creepy Pro
+          </Text>
+          <Text variant="display" style={styles.heading}>
+            One plan. Seven days free.
+          </Text>
+          <Text variant="bodyLarge" tone="secondary" style={styles.body}>
+            Everything Creepy does is in a single plan. Try it free for{" "}
+            {TRIAL_DAYS} days — no charge today.
+          </Text>
+        </View>
+
+        <View style={styles.toggle}>
+          {SUBSCRIPTION_PLANS.map((plan) => {
+            const active = plan.period === period;
+            return (
+              <Pressable
+                key={plan.period}
+                accessibilityRole="radio"
+                accessibilityState={{ selected: active }}
+                accessibilityLabel={`${plan.label}, ${price(plan.period)}`}
+                disabled={busy}
+                onPress={() => setPeriod(plan.period)}
+                style={({ pressed }) => [
+                  styles.toggleOption,
+                  active && styles.toggleOptionActive,
+                  pressed && styles.pressed,
+                ]}
+              >
+                <Text variant="label" tone={active ? "inverse" : "primary"}>
+                  {plan.label}
+                </Text>
+                {plan.badge ? (
+                  <Text
+                    variant="bodySmall"
+                    tone={active ? "inverse" : "brand"}
+                  >
+                    {plan.badge}
+                  </Text>
+                ) : null}
+              </Pressable>
+            );
+          })}
+        </View>
+
+        <View style={styles.card}>
+          <Text variant="headline">
+            {TRIAL_DAYS}-day free trial, then one simple price
+          </Text>
+
+          <View style={styles.priceRow}>
+            <Text variant="display">{price(period)}</Text>
+            <Text variant="bodySmall" tone="secondary">
+              {selected.caption}
+            </Text>
+          </View>
+
+          {period === "annual" ? (
+            <Text variant="bodySmall" tone="brand">
+              {price("annual")} / year · {selected.perMonth} per month
+            </Text>
+          ) : null}
+
+          <Text variant="bodySmall" tone="secondary">
+            {selected.terms}
+          </Text>
+        </View>
+
+        {error ? (
+          <Text
+            accessibilityLiveRegion="polite"
+            variant="bodySmall"
+            tone="danger"
+            style={styles.message}
+          >
+            {error}
+          </Text>
+        ) : null}
+
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel="Not now, continue without Pro"
+          disabled={busy}
+          onPress={() => void complete()}
+          style={({ pressed }) => [styles.skip, pressed && styles.pressed]}
+        >
+          <Text variant="label" tone="secondary">
+            Not now — keep the on-device agent
+          </Text>
+        </Pressable>
+      </ScrollView>
+
+      <OnboardingNavBar
+        onBack={() => router.back()}
+        onAdvance={() => void startTrial()}
+        advanceLabel={busy ? "Opening Play" : `Start ${TRIAL_DAYS}-day free trial`}
+        advanceDisabled={busy}
+      />
+    </Screen>
+  );
+}
+
+const styles = StyleSheet.create({
+  content: {
+    flexGrow: 1,
+    justifyContent: "center",
+    paddingHorizontal: gutter.screen,
+    paddingVertical: spacing.xxxl,
+  },
+  intro: { alignItems: "center", marginBottom: spacing.xxl },
+  heading: {
+    marginTop: spacing.sm,
+    marginBottom: spacing.lg,
+    textAlign: "center",
+  },
+  body: { textAlign: "center" },
+  toggle: {
+    flexDirection: "row",
+    gap: spacing.sm,
+    padding: spacing.xs,
+    borderRadius: radius.lg,
+    backgroundColor: palette.neutralWash,
+    marginBottom: spacing.xl,
+  },
+  toggleOption: {
+    flex: 1,
+    minWidth: 0,
+    alignItems: "center",
+    gap: spacing.xs,
+    paddingVertical: spacing.md,
+    borderRadius: radius.md,
+  },
+  toggleOptionActive: { backgroundColor: palette.brand },
+  card: {
+    gap: spacing.md,
+    padding: spacing.lg,
+    borderWidth: 1,
+    borderColor: palette.borderSoft,
+    borderRadius: radius.lg,
+    backgroundColor: palette.surface,
+  },
+  priceRow: { gap: spacing.xs },
+  message: { marginTop: spacing.lg, textAlign: "center" },
+  skip: { alignSelf: "center", marginTop: spacing.xl, padding: spacing.md },
+  pressed: { opacity: 0.75 },
+});

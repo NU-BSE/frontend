@@ -110,6 +110,12 @@ export function ConnectorList() {
                       disconnect.mutate(connection.id);
                     } else if (entry.connectorId === 'telegram-user') {
                       router.push('/connect/telegram');
+                    } else if (entry.connectorId === 'google') {
+                      // Google's flow shows the account picker and a consent
+                      // sheet. Connecting straight from the grid would launch
+                      // both with no statement of what is being requested, so
+                      // it goes through a screen that says so first.
+                      router.push('/connect/google');
                     } else {
                       connect.mutate(entry.connectorId);
                     }

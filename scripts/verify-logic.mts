@@ -259,4 +259,31 @@ console.log('\nandroid guide library:');
   );
 }
 
+console.log('\nsettings feed rows:');
+
+{
+  // The Settings tab lists every guide under its cluster heading: six
+  // headings plus thirty-six guides. A regression that dropped the headings
+  // or a cluster would still render, so the shape is asserted rather than
+  // eyeballed.
+  const headings = ANDROID_GUIDE_CLUSTERS.length;
+  const guides = ANDROID_GUIDE_PROMPTS.length;
+  assert(headings + guides === 42, 'the settings feed is 6 headings + 36 guides');
+
+  // Keys must be unique across the whole list or FlatList silently drops rows.
+  const keys = [
+    ...ANDROID_GUIDE_CLUSTERS.map((cluster) => `heading-${cluster.n}`),
+    ...ANDROID_GUIDE_PROMPTS,
+  ];
+  assert(new Set(keys).size === keys.length, 'every feed row key is unique');
+
+  // Guides are opened by round-tripping the prompt through the URL.
+  const sample = ANDROID_GUIDE_PROMPTS.find((p) => p.includes('?')) ?? '';
+  assert(sample.length > 0, 'at least one guide title contains a question mark');
+  assert(
+    decodeURIComponent(encodeURIComponent(sample)) === sample,
+    'guide prompts survive URL encoding intact',
+  );
+}
+
 console.log('\nlogic verified.');

@@ -43,9 +43,8 @@ export default function Chat() {
 
   const { origin, status: engineStatus, degradedReason } = useAi();
 
-  const { scenario: scenarioParam } = useLocalSearchParams<{
-    scenario?: string;
-  }>();
+  const { scenario: scenarioParam, prompt: promptParam } =
+    useLocalSearchParams<{ scenario?: string; prompt?: string }>();
   const scenario = getScenario(scenarioParam);
 
   const {
@@ -102,6 +101,25 @@ export default function Chat() {
     },
     [scrollToEnd, sendMessage],
   );
+
+  /*
+   * A guide tapped in the Settings feed arrives as `?prompt=`. It is sent once,
+   * on mount, so the chat opens with the question already asked rather than
+   * making the user re-type what they just tapped.
+   *
+   * The ref guards against a re-send when the screen re-renders or the params
+   * object is re-created; `sendMessage` is deliberately not a dependency for
+   * the same reason.
+   */
+  const sentInitialPrompt = useRef(false);
+  useEffect(() => {
+    if (sentInitialPrompt.current) return;
+    const initial = promptParam?.trim();
+    if (!initial) return;
+    sentInitialPrompt.current = true;
+    handleSend(initial);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [promptParam]);
 
   const suggestions = useMemo(
     () => scenario?.suggestions ?? GENERAL_SUGGESTIONS,

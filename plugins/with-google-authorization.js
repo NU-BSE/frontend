@@ -9,8 +9,17 @@ const PACKAGE_NAME = 'com.creepyim.googleauth';
 const IMPORT_KOTLIN = `import ${PACKAGE_NAME}.GoogleAuthorizationPackage`;
 const IMPORT_JAVA = `import ${PACKAGE_NAME}.GoogleAuthorizationPackage;`;
 
+/*
+ * A floor set by the module, not a preference. This plugin pinned 21.3.0
+ * before the native half existed, and that version is missing three APIs it
+ * uses: `ClearTokenRequest` and `RevokeAccessRequest` (clearToken/revoke)
+ * arrived in 21.4.0, and `AuthorizationRequest.Prompt` (the SELECT_ACCOUNT
+ * prompt) only in 21.6.0. Downgrading breaks disconnect, sign-out, or account
+ * switching rather than failing loudly, so verify against the AAR before
+ * moving this.
+ */
 const GMS_AUTH_DEPENDENCY =
-  'com.google.android.gms:play-services-auth:21.3.0';
+  'com.google.android.gms:play-services-auth:21.6.0';
 
 const SOURCE_FILES = [
   'GoogleAuthorizationModule.kt',

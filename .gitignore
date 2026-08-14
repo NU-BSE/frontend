@@ -3,8 +3,15 @@ node_modules/
 dist/
 deploy/
 web-build/
-android/
-ios/
+# Anchored to the repository root on purpose. Unanchored, these match ANY
+# directory called android/ or ios/ — including native module sources kept
+# beside the code that uses them, such as
+# src/connections/google/native/android/ and
+# src/attestation/native/android/. Those were silently untracked, which broke
+# `expo prebuild` for anyone without them: the config plugins copy from those
+# paths and aborted the whole prebuild with ENOENT.
+/android/
+/ios/
 *.log
 .env
 .DS_Store

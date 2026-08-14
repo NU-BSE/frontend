@@ -161,6 +161,19 @@ export const SCENARIOS: Scenario[] = [
   },
 ];
 
+/**
+ * The categories offered in onboarding.
+ *
+ * Settings is excluded. It is not a service you opt into — it is the Android
+ * guide library, always present in the feed regardless of what you pick here,
+ * so asking about it implies a choice that does not exist. Dropping it also
+ * leaves four entries, which fill the two-column grid evenly instead of
+ * stranding a fifth cell alone on its own row.
+ */
+export const ONBOARDING_SCENARIOS: Scenario[] = SCENARIOS.filter(
+  (scenario) => scenario.id !== 'settings',
+);
+
 export function getScenario(id: string | undefined): Scenario | undefined {
   return SCENARIOS.find((scenario) => scenario.id === id);
 }

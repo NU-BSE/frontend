@@ -12,22 +12,52 @@ const IMPORT_JAVA = `import ${PACKAGE_NAME}.GoogleAuthorizationPackage;`;
 const GMS_AUTH_DEPENDENCY =
   'com.google.android.gms:play-services-auth:21.3.0';
 
+const SOURCE_FILES = [
+  'GoogleAuthorizationModule.kt',
+  'GoogleAuthorizationPackage.kt',
+];
+
+/**
+ * Copy the native sources, reporting honestly when they are absent.
+ *
+ * Returns false — rather than throwing — when the Kotlin is missing, so a
+ * prebuild is not made impossible by it. The sources live under a directory
+ * named `android`, and .gitignore's unanchored `android/` rule matches it, so
+ * they are not in the repository: on a fresh clone this plugin used to abort
+ * the whole prebuild with an ENOENT, leaving no native project at all.
+ *
+ * Skipping is visible, not silent: the warning below names the missing path,
+ * and at runtime `authorizeGoogle()` reports "no native authorization bridge"
+ * rather than pretending sign-in works.
+ */
 function copyNativeSources(projectRoot, platformProjectRoot) {
   const sourceRoot = path.join(
     projectRoot,
     'src/connections/google/native/android/src/main/java/com/creepyim/googleauth',
   );
+
+  const missing = SOURCE_FILES.filter(
+    (file) => !fs.existsSync(path.join(sourceRoot, file)),
+  );
+  if (missing.length > 0) {
+    console.warn(
+      `[with-google-authorization] Skipping the native Google authorization ` +
+        `module: ${missing.join(', ')} not found in ${sourceRoot}. Google ` +
+        `sign-in will report that no native bridge is available. These files ` +
+        `are excluded by .gitignore's unanchored "android/" rule — anchor it ` +
+        `to "/android/" and commit them to include the module in builds.`,
+    );
+    return false;
+  }
   const targetRoot = path.join(
     platformProjectRoot,
     'app/src/main/java/com/creepyim/googleauth',
   );
   fs.mkdirSync(targetRoot, { recursive: true });
-  for (const file of [
-    'GoogleAuthorizationModule.kt',
-    'GoogleAuthorizationPackage.kt',
-  ]) {
+  for (const file of SOURCE_FILES) {
     fs.copyFileSync(path.join(sourceRoot, file), path.join(targetRoot, file));
   }
+  return true;
 }
 
 function registerKotlin(contents) {
@@ -84,10 +114,13 @@ function addGmsAuthDependency(gradleContents) {
 
 module.exports = function withGoogleAuthorization(config) {
   config = withMainApplication(config, (modConfig) => {
-    copyNativeSources(
+    const copied = copyNativeSources(
       modConfig.modRequest.projectRoot,
       modConfig.modRequest.platformProjectRoot,
     );
+    // Registering a package whose class was not copied would fail to compile,
+    // which is a worse failure than not registering it.
+    if (!copied) return modConfig;
     modConfig.modResults.contents =
       modConfig.modResults.language === 'java'
         ? registerJava(modConfig.modResults.contents)

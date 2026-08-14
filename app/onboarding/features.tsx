@@ -14,7 +14,10 @@ import { OnboardingNavBar } from "@/components/OnboardingNavBar";
 import { Screen } from "@/components/Screen";
 import { Text } from "@/components/Text";
 import { chunkRows } from "@/features/scenarios/chunkRows";
-import { SCENARIOS, type ScenarioId } from "@/features/scenarios/registry";
+import {
+  ONBOARDING_SCENARIOS,
+  type ScenarioId,
+} from "@/features/scenarios/registry";
 import { setDeviceAssessment, setSelectedCategories } from "@/storage/prefs";
 import { gutter, palette, radius, spacing } from "@/theme/tokens";
 
@@ -25,7 +28,7 @@ export default function OnboardingFeatures() {
   const router = useRouter();
   const [selected, setSelected] = useState<ScenarioId[]>([]);
   const [checkingDevice, setCheckingDevice] = useState(false);
-  const rows = useMemo(() => chunkRows(SCENARIOS, COLUMNS), []);
+  const rows = useMemo(() => chunkRows(ONBOARDING_SCENARIOS, COLUMNS), []);
 
   const toggle = useCallback((id: ScenarioId) => {
     setSelected((current) =>

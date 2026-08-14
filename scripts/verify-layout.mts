@@ -20,6 +20,7 @@ import Yoga, {
 } from 'yoga-layout';
 
 import { chunkRows } from '../src/features/scenarios/chunkRows.js';
+import { ONBOARDING_SCENARIOS } from '../src/features/scenarios/registry.js';
 
 const GUTTER = 24;
 const GAP = 16;
@@ -112,12 +113,24 @@ const odd = chunkRows([1, 2, 3], 2);
 assert(odd.length === 2 && odd[1]![1] === null, 'a short final row is padded');
 assert(chunkRows([], 2).length === 0, 'an empty list makes no rows');
 
-console.log('\nyoga layout — six categories across real device widths:');
+/*
+ * Driven by the real category count so the test cannot drift from the screen.
+ * The odd-count case below still covers a short final row, which four
+ * categories no longer produce on their own.
+ */
+const CATEGORY_COUNT = ONBOARDING_SCENARIOS.length;
+
+console.log(
+  `\nyoga layout — ${CATEGORY_COUNT} categories across real device widths:`,
+);
 
 for (const windowWidth of [320, 360, 390, 393, 411, 412, 480, 600]) {
-  const frames = layoutGrid(windowWidth, 6);
+  const frames = layoutGrid(windowWidth, CATEGORY_COUNT);
 
-  assert(frames.length === 3, `${windowWidth}pt: three rows rendered`);
+  assert(
+    frames.length === Math.ceil(CATEGORY_COUNT / COLUMNS),
+    `${windowWidth}pt: ${frames.length} rows for ${CATEGORY_COUNT} categories`,
+  );
 
   const [first, second] = frames[0]!;
   const contentWidth = windowWidth - GUTTER * 2;

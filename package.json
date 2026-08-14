@@ -92,7 +92,7 @@
     "prebuild:android": "expo prebuild --platform android",
     "lint": "expo lint",
     "verify:logic": "esbuild scripts/verify-logic.mts --bundle --platform=node --format=cjs --outfile=node_modules/.cache/verify-logic.cjs --log-level=error && node node_modules/.cache/verify-logic.cjs",
-    "verify:layout": "esbuild scripts/verify-layout.mts --bundle --platform=node --format=esm --outfile=node_modules/.cache/verify-layout.mjs --log-level=error && node node_modules/.cache/verify-layout.mjs",
+    "verify:layout": "esbuild scripts/verify-layout.mts --bundle --platform=node --format=esm --loader:.svg=text --external:react-native-svg --outfile=node_modules/.cache/verify-layout.mjs --log-level=error && node node_modules/.cache/verify-layout.mjs",
     "verify:device": "esbuild scripts/verify-device-selection.mts --bundle --platform=node --format=cjs --outfile=node_modules/.cache/verify-device-selection.cjs --log-level=error && node node_modules/.cache/verify-device-selection.cjs",
     "verify:mcp": "esbuild scripts/verify-mcp.mts --bundle --platform=node --format=cjs --external:react-native --external:expo-modules-core --external:expo-file-system --outfile=node_modules/.cache/verify-mcp.cjs --log-level=error && node node_modules/.cache/verify-mcp.cjs",
     "verify:agent": "esbuild scripts/verify-agent.mts --bundle --platform=node --format=cjs --external:react-native --external:expo-modules-core --outfile=node_modules/.cache/verify-agent.cjs --log-level=error && node node_modules/.cache/verify-agent.cjs",

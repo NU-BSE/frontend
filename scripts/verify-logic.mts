@@ -12,6 +12,17 @@ import {
 } from '../src/features/history/sort.js';
 import type { HistoryEntry } from '../src/storage/history.js';
 import {
+  SUBSCRIPTION_PLANS,
+  TRIAL_DAYS,
+  annualSavingUsd,
+  planFor,
+} from '../src/features/subscription/plans.js';
+import {
+  ANDROID_GUIDE_CLUSTERS,
+  ANDROID_GUIDE_LEAD_PROMPTS,
+  ANDROID_GUIDE_PROMPTS,
+} from '../src/features/scenarios/androidGuides.js';
+import {
   NAME_MIN_LENGTH,
   canonicalName,
   isValidName,
@@ -39,9 +50,9 @@ const entry = (
 });
 
 const FIXTURES: HistoryEntry[] = [
-  entry('a', 3_000, 'sports', 'zombie racing teams'),
+  entry('a', 3_000, 'calendar', 'week at a glance'),
   entry('b', 1_000, 'settings', 'neural sensitivity threshold'),
-  entry('c', 2_000, 'sports', 'nearest recharge station'),
+  entry('c', 2_000, 'calendar', 'next free hour'),
 ];
 
 console.log('history view:');
@@ -66,20 +77,20 @@ assert(
   'oldest-first orders ascending by createdAt',
 );
 
-const bySport = applyHistoryView(FIXTURES, {
+const byCalendar = applyHistoryView(FIXTURES, {
   order: 'newest',
-  category: 'sports',
+  category: 'calendar',
   query: '',
 });
 assert(
-  bySport.length === 2 && bySport.every((e) => e.threadId === 'sports'),
+  byCalendar.length === 2 && byCalendar.every((e) => e.threadId === 'calendar'),
   'category narrows to one scenario',
 );
 
 const combined = applyHistoryView(FIXTURES, {
   order: 'oldest',
-  category: 'sports',
-  query: 'recharge',
+  category: 'calendar',
+  query: 'free hour',
 });
 assert(
   combined.length === 1 && combined[0]!.id === 'c',
@@ -90,7 +101,7 @@ assert(
   applyHistoryView(FIXTURES, {
     order: 'newest',
     category: null,
-    query: 'ZOMBIE',
+    query: 'WEEK AT',
   }).length === 1,
   'search is case-insensitive',
 );
@@ -201,5 +212,51 @@ assert(
 );
 
 assert(canonicalName('  Ilia  ') === 'Ilia', 'surrounding whitespace is trimmed');
+
+console.log('\nsubscription plans:');
+
+{
+  assert(TRIAL_DAYS === 7, 'the trial is seven days, as published');
+  assert(SUBSCRIPTION_PLANS.length === 2, 'exactly two billing periods');
+  assert(planFor('monthly').listPrice === '$12.90', 'monthly is $12.90');
+  assert(planFor('annual').listPrice === '$118.80', 'annual is $118.80');
+  assert(planFor('annual').perMonth === '$9.90', 'annual works out to $9.90/mo');
+
+  // The badge claims a saving; this is what proves the prices back it up.
+  assert(annualSavingUsd() === 36, 'annual saves exactly $36 against monthly');
+  assert(
+    planFor('annual').badge === `Save $${annualSavingUsd()}`,
+    'the badge matches the derived saving',
+  );
+
+  // Base plan ids are what Play matches offers on; a typo here is a paywall
+  // that cannot complete a purchase.
+  const ids = SUBSCRIPTION_PLANS.map((plan) => plan.basePlanId);
+  assert(new Set(ids).size === ids.length, 'base plan ids are distinct');
+  assert(
+    ids.every((id) => /^creepyim-pro-(monthly|annual)$/u.test(id)),
+    'base plan ids follow the Play naming convention',
+  );
+}
+
+console.log('\nandroid guide library:');
+
+{
+  assert(ANDROID_GUIDE_CLUSTERS.length === 6, 'six clusters, as on the site');
+  assert(
+    ANDROID_GUIDE_CLUSTERS.every((cluster) => cluster.prompts.length === 6),
+    'every cluster carries six guides',
+  );
+  assert(ANDROID_GUIDE_PROMPTS.length === 36, 'thirty-six guides in total');
+  assert(
+    new Set(ANDROID_GUIDE_PROMPTS).size === 36,
+    'no guide is duplicated across clusters',
+  );
+  assert(
+    ANDROID_GUIDE_LEAD_PROMPTS.length === 6 &&
+      new Set(ANDROID_GUIDE_LEAD_PROMPTS).size === 6,
+    'one distinct lead prompt per cluster',
+  );
+}
 
 console.log('\nlogic verified.');

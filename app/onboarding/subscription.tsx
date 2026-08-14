@@ -20,6 +20,7 @@ import {
   planFor,
   type BillingPeriod,
 } from "@/features/subscription/plans";
+import { verifyPlayPurchase } from "@/api/client";
 import { setOnboardingComplete } from "@/storage/prefs";
 import { gutter, palette, radius, spacing } from "@/theme/tokens";
 
@@ -69,13 +70,31 @@ export default function OnboardingSubscription() {
     setBusy(true);
     setError(null);
     try {
-      await purchase(period);
+      const result = await purchase(period);
       /*
-       * Deliberately no local "subscribed" flag. The purchase token proves
-       * payment to Play, not entitlement to this app — the backend has to
-       * verify it with the Play Developer API before anything unlocks. Until
-       * that endpoint exists, onboarding simply finishes.
+       * Still no local "subscribed" flag. The purchase token proves payment to
+       * Play, not entitlement to this app: the backend resolves it against the
+       * Play Developer API and is the only thing that can grant anything.
+       *
+       * A failure here is the one case where the user has paid and holds
+       * nothing, so it must not be silent. Onboarding still finishes — Play
+       * has the money and the subscription is real — but the message says the
+       * activation is pending rather than pretending it worked. RTDN will
+       * deliver the same purchase again, so this recovers on its own.
        */
+      try {
+        await verifyPlayPurchase({
+          purchaseToken: result.purchaseToken,
+          productId: result.productId,
+          basePlanId: result.basePlanId,
+        });
+      } catch (verifyError) {
+        setError(
+          verifyError instanceof Error
+            ? `Payment succeeded, but activation is still pending: ${verifyError.message}`
+            : "Payment succeeded, but activation is still pending.",
+        );
+      }
       await complete();
     } catch (purchaseError) {
       if (purchaseError instanceof PurchaseCancelled) {

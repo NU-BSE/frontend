@@ -184,3 +184,34 @@ export async function refreshAccessToken(refreshToken: string): Promise<{ access
 export async function getUserProfile(): Promise<UserProfile> {
   return get('/users/me');
 }
+
+export interface Entitlements {
+  agentAccess: boolean;
+  cloudAgentAllowed: boolean;
+  maxAgentMessagesPerDay: number | null;
+  planCode: string | null;
+  subscriptionStatus: string | null;
+  currentPeriodEnd: string | null;
+}
+
+export interface PlayVerifyResult {
+  subscription: { subscriptionId: string; status: string; currentPeriodEnd: string };
+  entitlements: Entitlements;
+}
+
+/**
+ * Exchange a Play purchase token for an entitlement.
+ *
+ * The token is proof of payment to Google, not entitlement to this app. Only
+ * the backend can turn one into the other: it resolves the token against the
+ * Play Developer API, so nothing the client claims here — plan, price, period
+ * — is believed. Call this immediately after Play reports success; until it
+ * returns, the user has paid and has nothing.
+ */
+export async function verifyPlayPurchase(input: {
+  purchaseToken: string;
+  productId?: string;
+  basePlanId?: string;
+}): Promise<PlayVerifyResult> {
+  return post('/subscriptions/play/verify', input as unknown as JsonObject);
+}

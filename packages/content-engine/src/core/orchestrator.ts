@@ -1,8 +1,9 @@
 import type { DocumentEngine } from '../contracts/engine';
 import type { DocumentRef } from '../contracts/document-ref';
 import type { DocumentComplexityInspector } from '../execution/document-complexity';
-import type { ExecutionRouter } from '../execution/execution-router';
+import type { LocalExecutionRouter } from '../execution/local-execution-router';
 import type { ProcessorRegistry } from '../execution/processor-registry';
+import type { DocumentIndex } from '../indexing/document-index';
 
 /**
  * Coordination boundary for the full document pipeline:
@@ -11,31 +12,32 @@ import type { ProcessorRegistry } from '../execution/processor-registry';
  *     ↓
  *   inspect / determine complexity
  *     ↓
- *   build ProcessingContext
+ *   build LocalProcessingContext
  *     ↓
- *   ExecutionRouter.plan()
+ *   LocalExecutionRouter.plan()          (js | native — never remote)
  *     ↓
- *   processor (local | native-api | remote)
+ *   processor → source adapter → format adapter
  *     ↓
- *   adapter (source + format)
+ *   chunk → local index → local model
  *     ↓
- *   validate
- *     ↓
- *   persist
+ *   DocumentPatch → format adapter → validate → persist
  *
- * The execution boundaries are optional slots here: a concrete orchestrator
- * wires them, while this interface documents where they sit. No algorithm is
- * implemented in this scaffold.
+ * The execution/indexing boundaries are optional slots here: a concrete
+ * orchestrator wires them, while this interface documents where they sit. No
+ * algorithm is implemented in this scaffold.
  */
 export interface DocumentOrchestrator extends DocumentEngine {
   resolve(document: DocumentRef): Promise<DocumentRef>;
 
-  /** Decides the execution target for each operation. */
-  executionRouter?: ExecutionRouter;
+  /** Decides the on-device execution target for each operation. */
+  executionRouter?: LocalExecutionRouter;
 
-  /** Resolves a planned target to a concrete processor. */
+  /** Resolves a planned target to a concrete on-device processor. */
   processorRegistry?: ProcessorRegistry;
 
   /** Fills in `DocumentComplexity` before routing. */
   complexityInspector?: DocumentComplexityInspector;
+
+  /** Local chunk store + FTS index for progressive/retrieval processing. */
+  documentIndex?: DocumentIndex;
 }

@@ -1,5 +1,5 @@
 import type { DocumentFormat, DocumentRef } from '../contracts/document-ref';
-import type { DocumentPatch } from '../contracts/operations';
+import type { DocumentPatch } from '../contracts/patches';
 import type { DocumentSelector } from '../contracts/selectors';
 
 export interface DocumentFindInput {

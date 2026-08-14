@@ -1,203 +1,351 @@
 # @mobile-agent/content-engine
 
-Architecture scaffold for task-oriented reading, searching, extracting, creating and editing of documents and other file-backed content.
+Local-first Document/Content Engine for Creepy.IM — reads, indexes, analyzes, edits and creates documents **on the device**, without sending document, mail, message or other private content to the Creepy.IM backend or to third-party AI APIs.
 
-This package is intentionally **contract-only** in this PR. It defines boundaries, types and adapter slots, but contains no parser, writer, network client, storage implementation or MCP registration logic yet.
+This package is currently an **architecture scaffold**: it fixes the interfaces, the privacy invariants, the routing layer and the directory structure so that real parsers, native modules and OCR can be added later without changing the agent-facing API.
 
-## Goals
-
-- Give the agent a small, format-agnostic document API instead of format-specific tools such as `read_xlsx` or `edit_docx`.
-- Separate where content lives (source adapters) from how a format is interpreted (format adapters) from where an operation executes (execution routing).
-- Preserve native document semantics during writes by applying patches through the native format adapter instead of round-tripping every document through plain text.
-- Support inspection and bounded/chunked reads before loading large documents into model context.
-- Keep stable location references for sheets/cells, pages, paragraphs, slides and other editable regions.
-- Validate mutations before persistence and leave room for revisions/versioning.
-- Keep execution location (local, native API, remote) an internal decision — the LLM never learns where a document was processed.
-
-## Intended flow
+## Non-negotiable privacy invariant
 
 ```text
-Agent / MCP tools
-      |
-      v
-DocumentEngine
-      |
-      v
-DocumentOrchestrator
-      |
-      |  resolve → inspect (complexity) → ProcessingContext
-      |
-      v
-ExecutionRouter  ──────────────> ExecutionPlan
-      |                            |
-      |        ┌───────────────────┼───────────────────┐
-      v        v                   v                   v
-   LOCAL    NATIVE_API           REMOTE          ProcessorRegistry
-      |        |                   |
-      v        v                   v
- Source/Format   Provider APIs      Backend processor
-  adapters      Sheets/Docs/…       OCR / conversion
-                                    huge documents
+CONFIDENTIAL USER DATA
+        │
+        ▼
+      DEVICE
+        │
+        ├── Local JS / TypeScript processing
+        ├── Local native processing (Kotlin / Swift / C++ as needed)
+        ├── Local indexing / search
+        └── Local LLM
 ```
 
-## High-level agent surface
+Forbidden:
 
-The future MCP layer should expose task-oriented operations only:
+```text
+Document / Gmail / Telegram / Drive content
+        ↓
+creepy.im backend
+        ↓
+OpenRouter / external AI / external OCR
+```
 
-- `document.find`
-- `document.inspect`
-- `document.read`
-- `document.search`
-- `document.extract`
-- `document.create`
-- `document.update`
-- `document.convert`
-- `document.save`
+A document may physically live in Google Drive, Telegram, OneDrive, Dropbox, etc. The app may talk **directly to the user's chosen provider** to download/save the user's own file. That is transport/storage, never processing. Connectors are sources/sinks, not a compute backend.
 
-The engine selects source adapter, format adapter **and** execution target internally. The MCP API never splits into `readLocal` / `readRemote` / `readGoogle`.
+If a task ever comes up as "the phone can't handle it — just send the document to the backend", the architecture's answer is:
 
-## Source adapters
+```text
+No remote-processing route.
+```
 
-Scaffolded slots exist for Google Drive, Google Sheets, Google Docs, Google Slides, local device files, backend files, Telegram and OneDrive.
-
-Cloud-native documents should use their native APIs where possible. For example, Google Sheets should eventually use the Sheets API rather than export to XLSX for every operation.
-
-## Format adapters
-
-Scaffolded slots exist for XLS/XLSX, CSV, DOCX, PDF, PPTX, text, Markdown, HTML, JSON and images.
-
-## Write model
-
-Writes are represented as targeted patch operations. A future XLSX adapter should update the existing workbook so formulas/styles/charts are preserved; a future DOCX adapter should modify the existing package rather than regenerate it from extracted text.
+Instead: targeted read, streaming, native processing, local indexing, lower-memory strategy, batch processing, user-selected scope, or `unsupported-on-this-device`.
 
 ---
 
-# Execution Architecture
+# Three different concepts (do not conflate)
 
-Content Engine is built around a single principle:
+### Data source — where the document lives
 
-```text
-LOCAL-FIRST
-  + REMOTE FALLBACK
-  + NATIVE CLOUD API
+```ts
+type ContentSource =
+  | "local" | "google-drive" | "google-sheets" | "google-docs" | "google-slides"
+  | "telegram" | "onedrive" | "dropbox" | "generated";
 ```
 
-The LLM does not know where a document operation physically ran. It always calls the same surface — `document.inspect()`, `document.read()`, `document.search()`, `document.extract()`, `document.create()`, `document.update()`, `document.convert()`, `document.save()` — and the execution strategy is chosen inside the engine.
+### Processing runtime — where the document is parsed
 
-```text
-                 LLM / MCP
-                     │
-                     ▼
-               DocumentEngine
-                     │
-                     ▼
-             DocumentOrchestrator
-                     │
-                     ▼
-               ExecutionRouter
-                     │
-       ┌─────────────┼──────────────┐
-       │             │              │
-       ▼             ▼              ▼
-    LOCAL        NATIVE_API       REMOTE
-       │             │              │
-       ▼             ▼              ▼
- Format adapters Provider APIs   Backend processor
- XLSX/DOCX/PDF   Sheets/Docs     OCR / conversion
- CSV/PPTX/etc.   Slides/etc.     huge documents
+```ts
+type LocalExecutionTarget = "js" | "native";
 ```
 
-## Three execution targets
+Local only. There is no remote target.
 
-### `local`
+### Model runtime — where the LLM gets context
 
-Processing on the device. Future coverage: TXT, Markdown, JSON, CSV, small-to-medium XLSX/DOCX/PPTX, PDFs with a normal text layer, simple editing and document creation.
-
-### `native-api`
-
-The document is not downloaded and parsed as a binary file; it is addressed through its provider API. Examples: Google Sheets → Sheets API, Google Docs → Docs API, Google Slides → Slides API. May later include Microsoft Excel/Word Online, Notion and other cloud-native document APIs.
-
-The critical rule for `native-api`: a Google Sheet must **not** be forced through `export XLSX → download → XlsxAdapter` for every operation. The preferred flow is `Google Sheet → NativeApiDocumentProcessor → Google Sheets Adapter/API`.
-
-### `remote`
-
-Processing through a separate backend/document-processing service. Future coverage: OCR, scanned PDF, very large XLSX/PDF, legacy DOC/PPT, Office → PDF, PDF → editable, complex PDF editing, heavy computation and long-running document jobs.
-
-## Local-first
-
-When `execution` is `"auto"`, routing follows this order:
-
-```text
-1. Native cloud document?           → native-api
-2. Operation reasonably local?      → local
-3. Needs OCR / conversion / heavy?  → remote
-4. Local failed on resource limit?  → remote fallback,
-                                      only if policy.allowRemote === true
+```ts
+type ModelRuntime = "local" | "cloud";
 ```
 
-## Privacy / local-only
+Private content (`user-private` / `sensitive`) is **always** `local`, no fallback. `credential` never becomes prompt context at all.
 
-A user policy of `execution: "local-only"` forbids any hidden backend fallback. If an operation cannot be performed locally, Content Engine returns a structured error:
+---
 
-```text
-cannot_process_locally
-```
-
-It never uploads the document to a server on its own.
-
-## Remote fallback
-
-Remote fallback is opt-in through policy. `allowRemote: false` (or `execution: "local-only"`) disables it entirely. A remote fallback is only considered after a local processor fails for a resource constraint — never preemptively just because a file is large.
-
-## Cloud-native document APIs
-
-Documents whose `format` is a cloud-native type (`google_sheet`, `google_doc`, `google_slides`, …) route to `native-api` so they stay in their provider's object model instead of degrading into an XLSX/DOCX/PPTX round-trip.
-
-## Per-operation routing
-
-Routing runs **per operation**, not per document. The same `DocumentRef` may be inspected locally, then OCR'd remotely, then saved through its native API. `DocumentRef` therefore never carries an execution decision — target belongs to the operation.
-
-## Document complexity
-
-`DocumentComplexity` is an optional evidence bundle the router reads: file size, expanded size, pages/sheets/rows/columns/slides, image count, scanned/encrypted flags, text-layer presence, formula count, format. **File size is only one factor** — a 180 MB workbook read of a single "Summary" sheet can stay local, while an `extract` over all 850 000 rows goes remote.
-
-## Device capabilities
-
-`DeviceCapabilities` lets routing account for the concrete phone: platform, available/total memory, CPU cores, low-memory flag, background execution, network availability, metered network, charging state. The app's existing device-capability infrastructure will supply these values; nothing is benchmarked in this scaffold.
-
-## Long-running jobs
-
-Remote processing is modelled as jobs (`RemoteDocumentJob`) so a 200-page OCR, large-workbook analysis, or DOCX/PPTX → PDF conversion can outlive a single request/response:
+# Architecture
 
 ```text
-upload/reference document → create job → jobId → poll/websocket/push → result
+                     USER
+                       │
+                       ▼
+                  LLM / AGENT
+                   local model
+                       │
+                       ▼
+                 MCP DOCUMENT API
+                       │
+                       ▼
+                  DocumentEngine
+                       │
+                       ▼
+              DocumentOrchestrator
+                       │
+         ┌─────────────┴─────────────┐
+         │                           │
+         ▼                           ▼
+     Source Layer               Format Layer
+         │                           │
+  Drive / Local / etc.       XLSX / DOCX / PDF
+         │                           │
+         └─────────────┬─────────────┘
+                       │
+                       ▼
+             LocalExecutionRouter
+                  /             \
+                 ▼               ▼
+           JS Processor     Native Processor
+                 │               │
+                 └───────┬───────┘
+                         ▼
+                Canonical Chunks
+                         │
+                         ▼
+              Local Index / Retrieval
+                         │
+                         ▼
+                     Local LLM
+                         │
+                         ▼
+                  DocumentPatch
+                         │
+                         ▼
+                   Format Adapter
+                         │
+                         ▼
+                   Source Adapter
 ```
 
-No endpoints or polling are implemented yet — the contract only reserves the shape.
+The LLM never learns which library opens XLSX, which XML lives inside DOCX, or which Kotlin class extracts PDF text. It only sees a small set of task-oriented tools.
 
-## Routing cases
+---
 
-| Document | Operation | Target |
-| --- | --- | --- |
-| `questions.xlsx` (850 KB) | read sheet "вопросы" | `local` |
-| `financial-model.xlsx` (180 MB) | analyze entire workbook | `remote` |
-| `financial-model.xlsx` (180 MB) | read sheet "Summary" | `local` (targeted read stays local) |
-| format `google_sheet` | any operation | `native-api` |
-| PDF, `hasTextLayer: false`, `requiresOcr` | read/search | `remote` |
-| PDF (2 MB), `hasTextLayer: true` | search text | `local` |
-| `.doc` | convert → docx | `remote` |
-| `policy.execution = "local-only"`, large PDF | full analysis | `cannot_process_locally` |
+# Agent-facing API
 
-## Binary contract
+```text
+document.find
+document.inspect
+document.read
+document.search
+document.extract
+document.create
+document.update
+document.convert
+document.save
+```
 
-The base binary representation is `BinaryDocument { bytes: Uint8Array }` — identical across React Native/Hermes, browsers, Node backends and Web Workers. Node-specific `Buffer` may only appear inside a concrete adapter/processor, never in these contracts.
+No `read_xlsx`, `parse_pdf_native`, `edit_excel_with_sheetjs`, and no `readLocal` / `readRemote` / `readGoogle` — execution location is an implementation detail.
 
-## Non-goals of this PR
+```ts
+await document.read({
+  document,
+  selector: { kind: "spreadsheet", sheet: "вопросы", range: "A1:G200" },
+});
+```
 
-- No file parsing.
-- No Google API calls.
-- No Android file access.
-- No MCP tool registration.
-- No document-processing library dependencies (SheetJS, PDF/DOCX/PPTX libs, etc.).
-- No backend endpoints or HTTP clients.
-- No changes to existing connectors (e.g. `connector-google` is integrated later via adapters, not imported here).
+---
+
+# Execution layer (local only)
+
+The execution layer decides **which on-device engine** does the work:
+
+```ts
+export type LocalExecutionTarget = "js" | "native";
+
+export interface LocalExecutionPlan {
+  target: LocalExecutionTarget;
+  reason:
+    | "lightweight-structured-format"
+    | "native-format-support"
+    | "memory-risk"
+    | "requires-ocr"
+    | "requires-native-pdf"
+    | "large-archive"
+    | "unsupported-in-js";
+  strategy?: "full" | "targeted" | "streaming" | "indexed";
+}
+
+export interface LocalExecutionRouter {
+  plan(context: LocalProcessingContext): Promise<LocalExecutionPlan>;
+}
+```
+
+If neither the JS nor the native processor can handle a task, the engine returns `LOCAL_PROCESSING_UNSUPPORTED`. There is no cloud fallback.
+
+Routing is **per operation**, never per document, and never based on file size alone. It weighs `DocumentComplexity`, `DeviceCapabilities`, the requested operation and its selector.
+
+## JS first
+
+TXT, JSON, Markdown, small/medium CSV, small/medium XLS/XLSX, simple DOCX semantic read, simple PDF modification (pdf-lib), basic OOXML inspection.
+
+## Native first / native fallback
+
+Large OOXML archives, large spreadsheets, PDF text extraction and rendering, scanned PDF, OCR, large image-heavy DOCX, high-memory operations, streaming OOXML. This is not a security fallback — both paths stay on device.
+
+---
+
+# Progressive processing (mandatory)
+
+Never `open file → parse everything → huge CanonicalDocument → send everything to the model`. Always:
+
+```text
+inspect → identify relevant section → targeted read → local retrieval → LLM
+```
+
+- **Spreadsheet** — read workbook metadata → sheet names → read only the needed sheet/rows.
+- **DOCX** — inspect headings/tables → find target heading → read selected paragraphs/table.
+- **PDF** — page metadata/local index → search → read pages 37–41.
+- **PPTX** — slide titles → find relevant slides → read selected slide XML.
+
+If the device cannot run a full request, the engine proposes targeted processing rather than uploading: selected sheets, a page range, matching sections, text without embedded images.
+
+## Chunk model
+
+The primary unit is `DocumentChunk`, not one giant document object:
+
+```ts
+export interface DocumentChunk {
+  documentId: string;
+  chunkId: string;
+  kind: "text" | "paragraph" | "table" | "sheet-range" | "slide" | "page" | "image-text";
+  text?: string;
+  structured?: unknown;
+  location: DocumentLocation;       // required
+  classification: DataClassification;
+  nextCursor?: string;
+}
+```
+
+Every chunk carries a stable `location` (sheet/range, paragraphId/headingPath, page, slide/shapeId) so the model can refer back to it for a targeted edit.
+
+---
+
+# Local index
+
+Large documents must not be re-parsed on every operation. A future implementation uses `expo-sqlite` (app-private) with FTS5 so "cetane number" / "вопросы" / "срок поставки" can be found locally, without the LLM and without any cloud service. Semantic/vector retrieval (local embeddings + `sqlite-vec`) is out of scope until lexical retrieval works.
+
+Indexed document bytes, OCR output, chunks and generated summaries are private data and must not be logged.
+
+---
+
+# Privacy layer
+
+```text
+privacy/
+├── data-classification.ts      DataClassification, classifySource/Document
+├── data-boundary-policy.ts     DataBoundaryPolicy (invariants)
+├── context-provenance.ts       ContentProvenance
+├── privacy-errors.ts           PrivacyError
+└── model-context.ts            ModelContextEnvelope, routeModel
+```
+
+```ts
+type DataClassification = "public" | "user-private" | "sensitive" | "credential";
+
+interface DataBoundaryPolicy {
+  localProcessingOnly: true;               // invariant
+  allowProviderTransport: boolean;
+  allowFirstPartyProcessingUpload: false;  // invariant
+  allowThirdPartyAi: false;                // invariant
+}
+```
+
+Everything from local filesystem, Drive, Gmail, Calendar, Contacts, Telegram, WhatsApp, OneDrive, Dropbox or a private connector defaults to `user-private`.
+
+The model-routing seam prevents private text from accidentally reaching a cloud LLM:
+
+```ts
+interface ModelContextEnvelope {
+  text: string;
+  classification: DataClassification;
+  provenance: readonly ContentProvenance[];
+}
+
+routeModel("user-private") === "local";
+routeModel("sensitive")   === "local";
+routeModel("public")      === "cloud";
+isPromptAllowed("credential") === false;
+```
+
+---
+
+# Binary + write contracts
+
+Binary boundary is `Uint8Array`, never Node `Buffer` in core contracts:
+
+```ts
+interface BinaryDocument { bytes: Uint8Array; fileName?: string; mimeType?: string; }
+```
+
+Writes are **patches**, never full regeneration, so formatting/styles/formulas/charts survive. The safe workflow is:
+
+```text
+original → working copy → apply patch → validate → re-open → verify mutation → persist
+```
+
+`PersistOptions.mode` is `"new-revision"` (default) or `"replace"`; the original is never overwritten before validation.
+
+## Adapters
+
+- **Source adapter** (`DocumentSourceAdapter`) — where the document lives, how to `readBinary`/`writeBinary`. Knows nothing about XLSX/DOCX.
+- **Format adapter** (`DocumentFormatAdapter`) — how the document is structured: `detect`, `capabilities`, `inspect`, `read`, `search?`, `applyPatch?`, `validate?`.
+- **Execution router** — a third, separate layer.
+
+Format detection never trusts extension alone: extension + MIME + magic bytes + container inspection. Conflicts yield `FORMAT_MISMATCH`.
+
+Encrypted/password documents surface `DOCUMENT_PASSWORD_REQUIRED` / `ENCRYPTED_DOCUMENT_UNSUPPORTED`; the password never reaches the LLM or logs.
+
+---
+
+# Tool stack (phased — do not install everything now)
+
+Install a dependency together with the adapter that actually uses it.
+
+- **Phase A (core):** `expo-file-system`, `expo-document-picker`, `expo-sqlite`, `expo-secure-store`, `jszip`, `fast-xml-parser`.
+- **Phase B (spreadsheet):** SheetJS CE (vendored tarball), `papaparse`.
+- **Phase C (word):** `mammoth` (read), `docx` (create/template patch), JSZip + OOXML for arbitrary edit.
+- **Phase D (PDF):** `pdf-lib` + `@pdf-lib/fontkit` (create/modify); native PDF text extraction (PDFBox-Android behind an abstraction); Android `PdfRenderer` for OCR rendering.
+- **Phase E (presentation):** `pptxgenjs` after a Hermes/Metro spike; JSZip + OOXML for read/edit.
+- **Phase F (structured text):** `unified`/`remark` only if AST editing is really needed.
+
+OCR is on-device only (ML Kit Text Recognition v2, bundled model) — never Google Cloud Vision / Azure / AWS Textract.
+
+---
+
+# Adapter conformance tests
+
+Every format adapter must pass the same suite: detect, inspect, targeted read, search, roundtrip (where supported), patch (where supported), validation, bad input, encrypted input, large-input guard. Synthetic fixtures only (simple.xlsx, formulas.xlsx, …, utf8.csv, quoted.csv); never real user documents.
+
+Architecture tests also guard the invariants: `routeModel` never returns a cloud path for private content, and the package has no cloud-AI / backend-processing dependency.
+
+---
+
+# Milestones
+
+1. **TXT/Markdown** — picker → local source → text adapter → inspect/read/search → local model.
+2. **XLSX** — sheet list → targeted range read → search → set_cell patch → validate → save.
+3. **DOCX** — semantic inspect/read → targeted paragraph/table retrieval → simple OOXML patch.
+4. **PDF** — metadata → native text extraction → page search/index → on-device OCR fallback.
+5. **PPTX** — slide inspect → targeted read → simple text patch.
+
+---
+
+# Definition of Done (architecture)
+
+- Documents can be read without backend processing.
+- Private content never leaves the device for AI processing.
+- Connectors are sources/sinks, not compute backends.
+- There are JS and native local processing tiers.
+- Large documents are read targeted/chunked.
+- `Uint8Array` is the binary boundary; every chunk has a location.
+- Local FTS search needs no LLM; the local model receives only relevant chunks.
+- Cloud model fallback is blocked for private content.
+- Writes go through patches; output is validated before persistence.
+- Heavy operations do not block the UI thread; OCR is on-device.
+- Production logs never contain user document content.
+- The MCP API stays format-agnostic; a new adapter can be added without changing the LLM tool surface.

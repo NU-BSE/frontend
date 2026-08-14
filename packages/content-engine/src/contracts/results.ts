@@ -1,29 +1,19 @@
 import type { DocumentCapabilities } from './capabilities';
-import type { DocumentNode } from './nodes';
+import type { DocumentChunk } from './chunks';
 import type { DocumentRef } from './document-ref';
-
-export interface DocumentLocation {
-  sheet?: string;
-  range?: string;
-  cell?: string;
-  page?: number;
-  paragraphId?: string;
-  heading?: string;
-  slide?: number;
-  shapeId?: string;
-  bbox?: readonly number[];
-}
+import type { DocumentLocation } from './locations';
 
 export interface DocumentInspection {
   document: DocumentRef;
   capabilities: DocumentCapabilities;
+  /** Format-specific structural summary (sheet names, headings, slide titles). */
   structure: Readonly<Record<string, unknown>>;
 }
 
-export interface DocumentContentChunk {
+/** A bounded read result; `truncated`/`cursor` drive chunked processing. */
+export interface DocumentReadResult {
   document: DocumentRef;
-  nodes: readonly DocumentNode[];
-  location?: DocumentLocation;
+  chunks: readonly DocumentChunk[];
   truncated: boolean;
   cursor?: string;
   remaining?: number;
@@ -52,4 +42,15 @@ export interface DocumentMutationResult {
   previousRevision?: string;
   revision?: string;
   validated: boolean;
+}
+
+export interface DocumentValidationIssue {
+  code: string;
+  message: string;
+  location?: DocumentLocation;
+}
+
+export interface DocumentValidationResult {
+  valid: boolean;
+  issues: readonly DocumentValidationIssue[];
 }

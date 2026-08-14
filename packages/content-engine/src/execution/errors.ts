@@ -1,31 +1,22 @@
 /**
- * Structured processing errors.
+ * Execution-layer errors. Local-only semantics are enforced here: when neither
+ * the JS nor the native processor can handle an operation, the engine surfaces
+ * `LOCAL_PROCESSING_UNSUPPORTED` — it never invents a cloud fallback.
  *
- * The routing/processing layer reports failures through codes, never through
- * string-matching on exception messages. `cannot_process_locally` is the
- * contract a `local-only` policy surfaces instead of silently uploading a
- * document to a backend.
+ * `DocumentError` itself lives in `contracts/errors` and is re-exported through
+ * the package index; this module only provides typed factories.
  */
+import { DocumentError } from '../contracts/errors';
 
-export type ProcessingErrorCode =
-  | 'cannot_process_locally'
-  | 'remote_processing_disabled'
-  | 'unsupported_operation'
-  | 'unsupported_format'
-  | 'processor_unavailable'
-  | 'native_api_unavailable'
-  | 'resource_limit'
-  | 'requires_ocr'
-  | 'requires_conversion';
+/** Signals that no on-device processor can handle the operation. */
+export function localProcessingUnsupported(
+  detail: string,
+  cause?: unknown,
+): DocumentError {
+  return new DocumentError('LOCAL_PROCESSING_UNSUPPORTED', detail, cause);
+}
 
-export class ProcessingError extends Error {
-  constructor(
-    readonly code: ProcessingErrorCode,
-    message: string,
-    readonly cause?: unknown,
-    readonly details?: Readonly<Record<string, unknown>>,
-  ) {
-    super(message);
-    this.name = 'ProcessingError';
-  }
+/** Signals that a requested operation exceeds the device's memory budget. */
+export function memoryLimit(detail: string, cause?: unknown): DocumentError {
+  return new DocumentError('MEMORY_LIMIT', detail, cause);
 }

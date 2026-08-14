@@ -1,11 +1,11 @@
 import type { DocumentRef, DocumentFormat } from './document-ref';
-import type { DocumentPatch } from './operations';
+import type { DocumentPatch } from './patches';
 import type { DocumentSelector } from './selectors';
 import type {
-  DocumentContentChunk,
   DocumentExtractionResult,
   DocumentInspection,
   DocumentMutationResult,
+  DocumentReadResult,
   DocumentSearchResult,
 } from './results';
 
@@ -21,7 +21,7 @@ export interface DocumentEngine {
   read(
     document: DocumentRef,
     selector?: DocumentSelector,
-  ): Promise<DocumentContentChunk>;
+  ): Promise<DocumentReadResult>;
   search(document: DocumentRef, query: string): Promise<DocumentSearchResult>;
   extract<T = unknown>(
     document: DocumentRef,

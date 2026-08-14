@@ -1,18 +1,16 @@
-import type { DocumentPatch } from '../contracts/operations';
+import type { DocumentPatch } from '../contracts/patches';
 import type { DocumentRef } from '../contracts/document-ref';
+import type { DocumentValidationResult } from '../contracts/results';
 
-export interface ValidationIssue {
-  code: string;
-  message: string;
-  location?: Readonly<Record<string, unknown>>;
-}
-
-export interface ValidationResult {
-  valid: boolean;
-  issues: readonly ValidationIssue[];
-}
-
+/**
+ * Every adapter must be able to validate its own output: re-open the produced
+ * binary, verify the expected mutation is present, and confirm the original
+ * critical parts remain. An edit is never persisted before validation passes.
+ */
 export interface DocumentValidator {
-  validatePatch(document: DocumentRef, patch: DocumentPatch): Promise<ValidationResult>;
-  validatePersisted(document: DocumentRef): Promise<ValidationResult>;
+  validatePatch(
+    document: DocumentRef,
+    patch: DocumentPatch,
+  ): Promise<DocumentValidationResult>;
+  validatePersisted(document: DocumentRef): Promise<DocumentValidationResult>;
 }

@@ -118,7 +118,8 @@
     "verify:google": "esbuild scripts/verify-google.mts --bundle --platform=node --format=cjs --external:react-native --external:expo-modules-core --outfile=node_modules/.cache/verify-google.cjs --log-level=error && node node_modules/.cache/verify-google.cjs",
     "verify:gmail": "esbuild scripts/verify-gmail.mts --bundle --platform=node --format=cjs --external:react-native --external:expo-modules-core --outfile=node_modules/.cache/verify-gmail.cjs --log-level=error && node node_modules/.cache/verify-gmail.cjs",
     "verify:attachments": "esbuild scripts/verify-attachments.mts --bundle --platform=node --format=cjs --outfile=node_modules/.cache/verify-attachments.cjs --log-level=error && node node_modules/.cache/verify-attachments.cjs",
-    "verify": "npm run typecheck && npm run lint && npm run verify:ai && npm run verify:logic && npm run verify:layout && npm run verify:device && npm run verify:mcp && npm run verify:agent && npm run verify:connections && npm run verify:routing && npm run verify:remote-agent && npm run verify:telegram && npm run verify:google && npm run verify:gmail && npm run verify:attachments",
+    "verify:content-engine": "esbuild scripts/verify-content-engine.mts --bundle --platform=node --format=cjs --outfile=node_modules/.cache/verify-content-engine.cjs --log-level=error && node node_modules/.cache/verify-content-engine.cjs",
+    "verify": "npm run typecheck && npm run lint && npm run verify:ai && npm run verify:logic && npm run verify:layout && npm run verify:device && npm run verify:mcp && npm run verify:agent && npm run verify:connections && npm run verify:routing && npm run verify:remote-agent && npm run verify:telegram && npm run verify:google && npm run verify:gmail && npm run verify:attachments && npm run verify:content-engine",
     "deploy": "node deploy.js",
     "preview": "npx expo export --platform web && wrangler dev"
   },

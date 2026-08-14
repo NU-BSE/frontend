@@ -1,12 +1,12 @@
 /**
  * Document complexity — one of several inputs to execution routing.
  *
- * This is an architectural contract, not a required calculation: adapters can
- * fill in the characteristics they can determine, and the router treats every
- * field as optional evidence. File size alone is never sufficient to decide a
- * target (see the README's routing rules).
+ * This is an architectural contract, not a required calculation: adapters fill
+ * in the characteristics they can determine, and the router treats every field
+ * as optional evidence. File size alone is never sufficient to decide a
+ * target; the operation and the device matter equally (see README).
  */
-import type { DocumentRef, DocumentFormat } from '../contracts/document-ref';
+import type { DocumentRef } from '../contracts/document-ref';
 
 export interface DocumentComplexity {
   /** On-disk / on-wire size in bytes. */
@@ -21,19 +21,17 @@ export interface DocumentComplexity {
   columns?: number;
   slides?: number;
 
+  /** Number of entries in a ZIP-based container (OOXML). */
+  archiveEntries?: number;
   images?: number;
 
+  encrypted?: boolean;
   /** Scanned content (image-only pages) that likely needs OCR. */
   scanned?: boolean;
-
-  encrypted?: boolean;
-
-  /** A PDF/text layer is present and searchable. */
+  /** A text layer is present and searchable. */
   hasTextLayer?: boolean;
 
   formulaCount?: number;
-
-  format?: DocumentFormat;
 
   metadata?: Readonly<Record<string, unknown>>;
 }

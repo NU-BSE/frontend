@@ -1,28 +1,37 @@
+/**
+ * What a document adapter can actually do, and what a device can support.
+ *
+ * A capability is a promise: an adapter must never advertise `update: true`
+ * when it can only regenerate a whole new file. The router and the engine rely
+ * on these declarations to decide how (and whether) an operation can run
+ * locally.
+ */
 export interface DocumentCapabilities {
   inspect: boolean;
-  readText: boolean;
-  readStructured: boolean;
+  read: boolean;
   search: boolean;
   extract: boolean;
   create: boolean;
-  edit: boolean;
-  convert: boolean;
-  preserveFormatting: boolean;
-  comments: boolean;
+  update: boolean;
+
+  /** Updates preserve the original formatting/structure (patch, not regenerate). */
+  preservesFormattingOnUpdate: boolean;
+
   tables: boolean;
   images: boolean;
   formulas: boolean;
   sheets: boolean;
   slides: boolean;
-  incrementalRead: boolean;
-  incrementalWrite: boolean;
+
+  targetedRead: boolean;
+  streamingRead: boolean;
+  localIndexing: boolean;
 }
 
 /**
- * Characteristics of the *device* a document operation may run on. This is a
- * pure contract — no Android attestation or benchmark is implemented here;
- * the app's existing device-capability infrastructure will populate these
- * fields later.
+ * Characteristics of the *device* an operation may run on. Pure contract — no
+ * Android attestation or benchmark is implemented here; the app's existing
+ * device-capability infrastructure will populate these fields later.
  */
 export interface DeviceCapabilities {
   platform: 'android' | 'ios' | 'web' | 'unknown';

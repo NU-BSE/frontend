@@ -99,7 +99,8 @@
     "verify:remote-agent": "esbuild scripts/verify-remote-agent.mts --bundle --platform=node --format=cjs --external:llama.rn --outfile=node_modules/.cache/verify-remote-agent.cjs --log-level=error && node node_modules/.cache/verify-remote-agent.cjs",
     "verify:telegram": "esbuild scripts/verify-telegram-tdlib.mts --bundle --platform=node --format=cjs --external:react-native --external:react-native-tdlib --outfile=node_modules/.cache/verify-telegram.cjs --log-level=error && node node_modules/.cache/verify-telegram.cjs",
     "verify:google": "esbuild scripts/verify-google.mts --bundle --platform=node --format=cjs --external:react-native --external:expo-modules-core --outfile=node_modules/.cache/verify-google.cjs --log-level=error && node node_modules/.cache/verify-google.cjs",
-    "verify": "npm run typecheck && npm run lint && npm run verify:ai && npm run verify:logic && npm run verify:layout && npm run verify:device && npm run verify:mcp && npm run verify:agent && npm run verify:connections && npm run verify:routing && npm run verify:remote-agent && npm run verify:telegram && npm run verify:google",
+    "verify:gmail": "esbuild scripts/verify-gmail.mts --bundle --platform=node --format=cjs --external:react-native --external:expo-modules-core --outfile=node_modules/.cache/verify-gmail.cjs --log-level=error && node node_modules/.cache/verify-gmail.cjs",
+    "verify": "npm run typecheck && npm run lint && npm run verify:ai && npm run verify:logic && npm run verify:layout && npm run verify:device && npm run verify:mcp && npm run verify:agent && npm run verify:connections && npm run verify:routing && npm run verify:remote-agent && npm run verify:telegram && npm run verify:google && npm run verify:gmail",
     "deploy": "node deploy.js",
     "preview": "npx expo export --platform web && wrangler dev"
   },

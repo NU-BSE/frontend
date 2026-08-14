@@ -18,6 +18,8 @@ import {
   type GoogleAccessTokenProvider,
 } from './google-access-token-provider';
 import type { GoogleFileSink } from './google-file-sink';
+import { GmailClient } from './gmail/gmail-client';
+import { createGmailTools } from './gmail/gmail-tools';
 import {
   GOOGLE_CALENDAR_READONLY,
   GOOGLE_DRIVE_READONLY,
@@ -147,6 +149,7 @@ export class GoogleConnector extends StoreBackedConnector {
   private readonly bridge?: GoogleAuthorizationBridge;
   private readonly fileSink?: GoogleFileSink;
   private readonly apiClient: GoogleApiClient;
+  private readonly gmailClient: GmailClient;
 
   constructor(options: GoogleConnectorOptions) {
     super(options);
@@ -158,7 +161,7 @@ export class GoogleConnector extends StoreBackedConnector {
     const tokenProvider: GoogleAccessTokenProvider = this.bridge
       ? createGoogleAccessTokenProvider({
           connectionStore: options.store,
-          vault: options.vault,
+          ...(options.vault ? { vault: options.vault } : {}),
           bridge: this.bridge,
         })
       : {
@@ -174,12 +177,23 @@ export class GoogleConnector extends StoreBackedConnector {
       getAccessToken: (connectionId) =>
         tokenProvider.getValidAccessToken(connectionId),
       clearToken: (token) => this.bridge?.clearToken(token) ?? Promise.resolve(),
-      fetchFn: options.fetchFn,
+      ...(options.fetchFn ? { fetchFn: options.fetchFn } : {}),
     });
+
+    this.gmailClient = new GmailClient({ apiClient: this.apiClient });
   }
 
   async getTools(_connection: ConnectionRecord): Promise<ConnectorTool<any, any>[]> {
+    const gmailTools = createGmailTools({
+      client: this.gmailClient,
+      ...(this.fileSink ? { fileSink: this.fileSink } : {}),
+      onReauth: async (connectionId, code) => {
+        await this.markConnectionStatus(connectionId, code);
+      },
+    });
+
     return [
+      ...gmailTools,
       // --- Calendar (read-only) ---
       {
         name: 'google.calendar.list_events',
@@ -523,7 +537,13 @@ export class GoogleConnector extends StoreBackedConnector {
       displayName: grant.email ?? grant.name ?? 'Google',
       status: 'connected',
       scopes: grant.grantedScopes,
-      capabilities: ['google.calendar.read', 'google.drive.read'],
+      capabilities: [
+        'google.calendar.read',
+        'google.drive.read',
+        'google.gmail.read',
+        'google.gmail.compose',
+        'google.gmail.modify',
+      ],
       credentialReference,
       createdAt: existing?.createdAt ?? now,
       updatedAt: now,
@@ -552,7 +572,10 @@ export class GoogleConnector extends StoreBackedConnector {
 
       if (this.bridge) {
         try {
-          await this.bridge.revoke({ accountName, scopes });
+          await this.bridge.revoke({
+            ...(accountName ? { accountName } : {}),
+            scopes,
+          });
         } catch {
           // Best-effort: the local credential/record is deleted regardless.
         }
@@ -561,5 +584,73 @@ export class GoogleConnector extends StoreBackedConnector {
     }
 
     await super.disconnect(connectionId);
+  }
+
+  /**
+   * Incremental authorization: request additional Google scopes (e.g. the
+   * restricted Gmail scopes) for an already-connected account, then persist
+   * the merged grant. Called from the app layer in the foreground — never from
+   * a background MCP execution, which must not pop a consent Activity.
+   */
+  async authorizeAdditionalScopes(
+    connectionId: string,
+    additionalScopes: string[],
+  ): Promise<ConnectionRecord> {
+    const record = await this.store.get(connectionId);
+    if (!record) {
+      throw new ConnectorError(
+        `Connection "${connectionId}" was not found.`,
+        'NOT_CONNECTED',
+      );
+    }
+    if (!this.bridge) {
+      throw new ConnectorError(
+        'Google sign-in is unavailable in this runtime.',
+        'UNSUPPORTED',
+      );
+    }
+
+    let accountName: string | undefined;
+    if (this.vault && record.credentialReference) {
+      const credential = await this.vault.get(record.credentialReference);
+      accountName =
+        credential?.kind === 'oauth' ? credential.accountName : undefined;
+    }
+
+    const requested = Array.from(
+      new Set([...(record.scopes ?? []), ...additionalScopes]),
+    );
+    const result = await this.bridge.authorize({
+      scopes: requested,
+      ...(accountName ? { accountName } : {}),
+      selectAccount: false,
+    });
+
+    const scopes = Array.from(
+      new Set([...(record.scopes ?? []), ...result.grantedScopes]),
+    );
+    const updated: ConnectionRecord = {
+      ...record,
+      scopes,
+      status: 'connected',
+      updatedAt: Date.now(),
+    };
+    await this.store.save(updated);
+    return updated;
+  }
+
+  /**
+   * Marks a connection as needing re-authorization when a Gmail failure shows
+   * the grant is gone or consent is required. No Google UI is opened here.
+   */
+  private async markConnectionStatus(
+    connectionId: string,
+    code: 'AUTH_REQUIRED' | 'PERMISSION_REQUIRED',
+  ): Promise<void> {
+    const record = await this.store.get(connectionId);
+    if (!record) return;
+    const status =
+      code === 'AUTH_REQUIRED' ? 'reconnect_required' : 'permission_required';
+    await this.store.save({ ...record, status, updatedAt: Date.now() });
   }
 }

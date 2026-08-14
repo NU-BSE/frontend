@@ -18,6 +18,21 @@ export const GOOGLE_CALENDAR_READONLY =
 export const GOOGLE_DRIVE_READONLY =
   'https://www.googleapis.com/auth/drive.readonly';
 
+export const GOOGLE_GMAIL_READONLY =
+  'https://www.googleapis.com/auth/gmail.readonly';
+
+export const GOOGLE_GMAIL_COMPOSE =
+  'https://www.googleapis.com/auth/gmail.compose';
+
+export const GOOGLE_GMAIL_MODIFY =
+  'https://www.googleapis.com/auth/gmail.modify';
+
+/**
+ * Scopes requested when the user first connects Google. Gmail scopes are
+ * intentionally absent: they are restricted/sensitive, so they are requested
+ * incrementally (via `GoogleConnector.authorizeAdditionalScopes`) the first
+ * time a Gmail tool is actually needed, keeping initial consent minimal.
+ */
 export const GOOGLE_MCP_SCOPES = [
   'openid',
   'email',

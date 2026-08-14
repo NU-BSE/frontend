@@ -20,6 +20,7 @@ import com.google.android.gms.common.api.Scope
 import java.util.concurrent.atomic.AtomicInteger
 import android.util.Log
 import com.google.android.gms.common.api.ApiException
+import com.google.android.gms.common.api.CommonStatusCodes
 
 /**
  * Google Identity authorization bridge backed by Google Play Services
@@ -425,6 +426,27 @@ class GoogleAuthorizationModule(
                 promise,
             )
         } catch (error: ApiException) {
+
+            /*
+            * A cancel arrives here, not in the data == null branch above.
+            * Closing Google's sheet returns RESULT_CANCELED *with* an Intent,
+            * so parsing proceeds and throws CommonStatusCodes.CANCELED.
+            * Without this, backing out of sign-in is reported as a failure and
+            * AUTHORIZE_CANCELLED is unreachable in the ordinary path.
+            */
+            if (error.statusCode == CommonStatusCodes.CANCELED) {
+                Log.d(
+                    "GoogleAuthorization",
+                    "Authorization cancelled by user. resultCode=$resultCode",
+                )
+
+                promise.reject(
+                    "AUTHORIZE_CANCELLED",
+                    "Google authorization was closed or cancelled.",
+                )
+
+                return
+            }
 
             val message =
                 "Google authorization failed: " +

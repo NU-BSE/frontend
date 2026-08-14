@@ -36,3 +36,19 @@ export interface DocumentRef {
   revision?: string;
   metadata?: Readonly<Record<string, unknown>>;
 }
+
+/**
+ * The canonical binary payload of a document, shared by source and format
+ * adapters. Based on `Uint8Array` so it is identical across React Native /
+ * Hermes, browsers, Node backends and Web Workers. A `Buffer` (Node-only) may
+ * exist only inside a concrete adapter/processor, never in these contracts.
+ *
+ * Native cloud documents (e.g. Google Sheets) are typically *not* represented
+ * as a `BinaryDocument`: they are processed through the native API path
+ * (`native-api` execution target) instead of being downloaded and parsed.
+ */
+export interface BinaryDocument {
+  bytes: Uint8Array;
+  mimeType?: string;
+  fileName?: string;
+}

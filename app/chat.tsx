@@ -15,7 +15,8 @@ import { Screen } from '@/components/Screen';
 import { Text } from '@/components/Text';
 import { useAi } from '@/ai/AiProvider';
 import { useAgentChat } from '@/agent/useAgentChat';
-import type { AgentMessage } from '@/agent/types';
+import type { AgentMessage, ChatAttachment, ChatSendInput } from '@/agent/types';
+import { uploadFile } from '@/api/files';
 import { AgentMessageItem } from '@/features/chat/AgentMessageItem';
 import { Composer } from '@/features/chat/Composer';
 import { DeepLinkBar } from '@/features/chat/DeepLinkBar';
@@ -95,11 +96,40 @@ export default function Chat() {
   }, []);
 
   const handleSend = useCallback(
-    (text: string) => {
-      sendMessage(text);
+    (input: ChatSendInput) => {
+      sendMessage(input);
       requestAnimationFrame(scrollToEnd);
     },
     [scrollToEnd, sendMessage],
+  );
+
+  /** Text-only convenience wrapper for suggestion chips and deep links. */
+  const handleSendText = useCallback(
+    (text: string) => {
+      handleSend({ text, attachments: [] });
+    },
+    [handleSend],
+  );
+
+  // Attachments are uploaded to the backend only when inference is remote;
+  // local/text-only models never send file bytes off the device.
+  const uploadFileForChat = useMemo(
+    () =>
+      origin === 'remote'
+        ? (attachment: ChatAttachment): Promise<{ id: string }> => {
+            if (!attachment.uri) {
+              return Promise.reject(
+                new Error('This attachment has no local file to upload.'),
+              );
+            }
+            return uploadFile({
+              uri: attachment.uri,
+              name: attachment.name,
+              mimeType: attachment.mimeType,
+            });
+          }
+        : undefined,
+    [origin],
   );
 
   /*
@@ -117,7 +147,7 @@ export default function Chat() {
     const initial = promptParam?.trim();
     if (!initial) return;
     sentInitialPrompt.current = true;
-    handleSend(initial);
+    handleSendText(initial);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [promptParam]);
 
@@ -266,7 +296,7 @@ export default function Chat() {
             <>
               <SuggestionChips
                 suggestions={suggestions}
-                onSelect={handleSend}
+                onSelect={handleSendText}
                 disabled={isRunning || engineStatus === 'preparing'}
               />
               {scenario ? <DeepLinkBar links={scenario.deepLinks} /> : null}
@@ -280,6 +310,7 @@ export default function Chat() {
             onStop={cancel}
             busy={isRunning}
             disabled={engineStatus === 'preparing' || awaitingApproval}
+            uploadFile={uploadFileForChat}
           />
         </View>
       </KeyboardAvoidingView>

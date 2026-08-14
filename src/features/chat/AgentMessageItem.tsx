@@ -5,6 +5,7 @@ import { Text } from '@/components/Text';
 import type { AgentMessage } from '@/agent/types';
 import { palette, radius, shadow, spacing } from '@/theme/tokens';
 
+import { AttachmentCard } from './AttachmentCard';
 import { toolActivityLabel } from './toolLabels';
 
 /**
@@ -20,11 +21,21 @@ export function AgentMessageItem({
   streaming?: boolean;
 }) {
   if (message.role === 'user') {
+    const attachments = message.attachments ?? [];
     return (
       <View style={[styles.bubble, styles.user]}>
-        <Text variant="body" tone="inverse">
-          {message.content}
-        </Text>
+        {attachments.length > 0 ? (
+          <View style={styles.attachments}>
+            {attachments.map((attachment) => (
+              <AttachmentCard key={attachment.id} attachment={attachment} />
+            ))}
+          </View>
+        ) : null}
+        {message.content ? (
+          <Text variant="body" tone="inverse">
+            {message.content}
+          </Text>
+        ) : null}
       </View>
     );
   }
@@ -90,6 +101,10 @@ const styles = StyleSheet.create({
     alignSelf: 'flex-end',
     backgroundColor: palette.brand,
     borderBottomRightRadius: radius.sm,
+    gap: spacing.sm,
+  },
+  attachments: {
+    gap: spacing.sm,
   },
   assistant: {
     alignSelf: 'flex-start',

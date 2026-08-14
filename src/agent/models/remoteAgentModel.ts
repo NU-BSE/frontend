@@ -5,6 +5,7 @@ import type {
   AgentModelExecution,
   AgentModelInput,
   AgentModelResult,
+  AgentMessage,
 } from '../types';
 import { AgentError } from '../types';
 
@@ -66,6 +67,75 @@ const agentStepResponseSchema = z.object({
   usage: usageSchema.nullish(),
 });
 
+/**
+ * Server-readable attachment reference. Local `file://`/`content://` URIs and
+ * raw binary are never serialized: only the stable backend id plus metadata.
+ */
+const remoteAttachmentSchema = z.object({
+  id: z.string().min(1),
+  name: z.string(),
+  mimeType: z.string(),
+  size: z.number(),
+  kind: z.enum(['image', 'document', 'audio', 'video', 'other']),
+});
+
+type RemoteAttachment = z.infer<typeof remoteAttachmentSchema>;
+
+/**
+ * Serializes the transcript for `POST /agent/step`. User messages are reduced
+ * to server-readable data: attachment `uri`/`remoteUrl` are dropped and only
+ * the backend reference (`remoteId`) plus safe metadata survive. An
+ * attachment without a backend id is excluded defensively — the upload gate
+ * upstream makes this unreachable in practice.
+ */
+function serializeMessages(messages: AgentMessage[]): unknown[] {
+  return messages.map((message) => {
+    if (message.role === 'user') {
+      const attachments: RemoteAttachment[] = (message.attachments ?? [])
+        .filter(
+          (a) =>
+            typeof a.remoteId === 'string' && a.remoteId.length > 0,
+        )
+        .map((a) => {
+          const parsed = remoteAttachmentSchema.parse({
+            id: a.remoteId,
+            name: a.name,
+            mimeType: a.mimeType,
+            size: a.size,
+            kind: a.kind,
+          });
+          return parsed;
+        });
+
+      return {
+        id: message.id,
+        role: 'user' as const,
+        content: message.content,
+        ...(attachments.length > 0 ? { attachments } : {}),
+      };
+    }
+
+    if (message.role === 'assistant') {
+      return {
+        id: message.id,
+        role: 'assistant' as const,
+        content: message.content,
+        ...(message.toolCalls && message.toolCalls.length > 0
+          ? { toolCalls: message.toolCalls }
+          : {}),
+      };
+    }
+
+    return {
+      id: message.id,
+      role: 'tool' as const,
+      toolCallId: message.toolCallId,
+      toolName: message.toolName,
+      result: message.result,
+    };
+  });
+}
+
 interface RemoteAgentModelOptions {
   baseUrl: string;
   getAccessToken?: () => Promise<string | null>;
@@ -83,6 +153,7 @@ export function createRemoteAgentModel(
       textGeneration: true,
       toolCalling: true,
       structuredOutput: true,
+      fileInput: true,
     },
 
     async run(input: AgentModelInput): Promise<AgentModelResult> {
@@ -133,7 +204,7 @@ export function createRemoteAgentModel(
               requestId,
               runId: input.runId,
               routing: input.routing,
-              messages: input.messages,
+              messages: serializeMessages(input.messages),
               tools: input.tools,
               connections: input.connections,
             }),

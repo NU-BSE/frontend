@@ -1,4 +1,9 @@
-import type { ContentSource, DocumentFormat, DocumentRef } from './document-ref';
+import type {
+  BinaryDocument,
+  ContentSource,
+  DocumentFormat,
+  DocumentRef,
+} from './document-ref';
 import type { DocumentCapabilities } from './capabilities';
 import type { DocumentPatch } from './operations';
 import type { DocumentSelector } from './selectors';
@@ -14,8 +19,8 @@ export interface DocumentSourceAdapter {
   readonly sources: readonly ContentSource[];
 
   resolve(ref: DocumentRef): Promise<DocumentRef>;
-  fetch(ref: DocumentRef): Promise<unknown>;
-  persist?(ref: DocumentRef, payload: unknown): Promise<DocumentRef>;
+  fetch(ref: DocumentRef): Promise<BinaryDocument>;
+  persist?(ref: DocumentRef, payload: BinaryDocument): Promise<DocumentRef>;
 }
 
 export interface DocumentFormatAdapter {
@@ -23,20 +28,20 @@ export interface DocumentFormatAdapter {
   readonly formats: readonly DocumentFormat[];
 
   capabilities(ref: DocumentRef): Promise<DocumentCapabilities>;
-  inspect(ref: DocumentRef, payload: unknown): Promise<DocumentInspection>;
+  inspect(ref: DocumentRef, payload: BinaryDocument): Promise<DocumentInspection>;
   read(
     ref: DocumentRef,
-    payload: unknown,
+    payload: BinaryDocument,
     selector?: DocumentSelector,
   ): Promise<DocumentContentChunk>;
   search?(
     ref: DocumentRef,
-    payload: unknown,
+    payload: BinaryDocument,
     query: string,
   ): Promise<DocumentSearchResult>;
   applyPatch?(
     ref: DocumentRef,
-    payload: unknown,
+    payload: BinaryDocument,
     patch: DocumentPatch,
   ): Promise<DocumentMutationResult>;
 }

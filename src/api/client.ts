@@ -192,6 +192,19 @@ export interface Entitlements {
   planCode: string | null;
   subscriptionStatus: string | null;
   currentPeriodEnd: string | null;
+  /**
+   * Whether this account has to buy anything.
+   *
+   * The server decides; the app only reads. Which accounts are exempt, and
+   * why, is deliberately not knowable from here — no address, plan code or
+   * flag naming a particular user appears in the bundle, so shipping the app
+   * does not ship the list.
+   *
+   * Optional because an older server omits it. Treat a missing value as
+   * `true`: payment required is the safe reading, and a bypass must never be
+   * what happens when the server said nothing.
+   */
+  subscriptionRequired?: boolean;
 }
 
 export interface PlayVerifyResult {
@@ -214,4 +227,12 @@ export async function verifyPlayPurchase(input: {
   basePlanId?: string;
 }): Promise<PlayVerifyResult> {
   return post('/subscriptions/play/verify', input as unknown as JsonObject);
+}
+
+/** The caller's own subscription and entitlements. Backed by `GET /subscriptions/me`. */
+export async function getMySubscription(): Promise<{
+  subscription: unknown | null;
+  entitlements: Entitlements;
+}> {
+  return get('/subscriptions/me');
 }

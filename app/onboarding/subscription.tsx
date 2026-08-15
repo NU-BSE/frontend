@@ -1,7 +1,7 @@
-import React, { useCallback, useEffect, useState } from "react";
-import { useQueryClient } from "@tanstack/react-query";
+import React, { useCallback, useEffect, useRef, useState } from "react";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useRouter } from "expo-router";
-import { Pressable, ScrollView, StyleSheet, View } from "react-native";
+import { ActivityIndicator, Pressable, ScrollView, StyleSheet, View } from "react-native";
 
 import { useAi } from "@/ai/AiProvider";
 import { OnboardingNavBar } from "@/components/OnboardingNavBar";
@@ -20,7 +20,7 @@ import {
   planFor,
   type BillingPeriod,
 } from "@/features/subscription/plans";
-import { verifyPlayPurchase } from "@/api/client";
+import { getMySubscription, verifyPlayPurchase } from "@/api/client";
 import { setOnboardingComplete } from "@/storage/prefs";
 import { gutter, palette, radius, spacing } from "@/theme/tokens";
 
@@ -43,6 +43,25 @@ export default function OnboardingSubscription() {
   >({});
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  /*
+   * Some accounts are not billed at all — today that means the credentials
+   * handed to store reviewers, but the app has no idea which accounts those
+   * are and no way to find out. It asks the server whether *this* caller needs
+   * to pay and believes the answer. Nothing identifying an exempt account is
+   * in the bundle, so shipping the app does not ship the list.
+   */
+  const { data: exempt, isPending: checkingExemption } = useQuery({
+    queryKey: ["subscription-required"],
+    queryFn: async () => {
+      const { entitlements } = await getMySubscription();
+      return entitlements.subscriptionRequired === false;
+    },
+    // The paywall is the safe outcome, so a failure to ask is not retried into
+    // a long spinner — one attempt, then show the offer.
+    retry: false,
+    staleTime: Infinity,
+  });
 
   /*
    * Play's prices are localized and authoritative; the plan table only carries
@@ -112,6 +131,29 @@ export default function OnboardingSubscription() {
       setBusy(false);
     }
   }, [busy, complete, period]);
+
+  /*
+   * Skip once, and only forwards. `complete()` navigates, so without the guard
+   * a re-render between the decision and the transition would fire it twice.
+   */
+  const skipped = useRef(false);
+  useEffect(() => {
+    if (exempt && !skipped.current) {
+      skipped.current = true;
+      void complete();
+    }
+  }, [complete, exempt]);
+
+  if (checkingExemption || exempt) {
+    // Held rather than showing the paywall for a beat and snatching it away.
+    return (
+      <Screen>
+        <View style={styles.checking}>
+          <ActivityIndicator color={palette.brand} />
+        </View>
+      </Screen>
+    );
+  }
 
   const selected = planFor(period);
   const price = (target: BillingPeriod): string =>
@@ -269,4 +311,5 @@ const styles = StyleSheet.create({
   message: { marginTop: spacing.lg, textAlign: "center" },
   skip: { alignSelf: "center", marginTop: spacing.xl, padding: spacing.md },
   pressed: { opacity: 0.75 },
+  checking: { flex: 1, alignItems: "center", justifyContent: "center" },
 });

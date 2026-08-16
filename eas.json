@@ -6,13 +6,21 @@
   "build": {
     "development": {
       "developmentClient": true,
-      "distribution": "internal"
+      "distribution": "internal",
+      "env": {
+        "EXPO_PUBLIC_API_URL": "https://api.creepy.im",
+        "EXPO_PUBLIC_OAUTH": "113810819709-javkhtvie8tjsuph29flcoesr0h4sio6.apps.googleusercontent.com"
+      }
     },
     "preview": {
       "distribution": "internal"
     },
     "production": {
-      "autoIncrement": true
+      "autoIncrement": true,
+      "env": {
+        "EXPO_PUBLIC_API_URL": "https://api.creepy.im",
+	"EXPO_PUBLIC_OAUTH": "113810819709-javkhtvie8tjsuph29flcoesr0h4sio6.apps.googleusercontent.com"
+      }
     }
   },
   "submit": {

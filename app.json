@@ -29,6 +29,12 @@
       "./plugins/with-google-authorization",
       "expo-web-browser"
     ],
-    "scheme": "creepyim"
+    "scheme": "creepyim",
+    "extra": {
+      "router": {},
+      "eas": {
+        "projectId": "db6494a6-6019-4749-89e0-ef9ca0402a3b"
+      }
+    }
   }
 }

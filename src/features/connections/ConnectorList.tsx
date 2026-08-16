@@ -133,6 +133,10 @@ export function ConnectorList() {
                       })();
 
                       return;
+                    } else if (entry.connectorId === 'telegram-user') {
+                      router.push('/connect/telegram');
+                    } else if (entry.connectorId === 'google') {
+                      router.push('/connect/google');
                     } else {
                       connect.mutate(entry.connectorId);
                     }

@@ -563,27 +563,50 @@ export class GoogleConnector extends StoreBackedConnector {
         ? LEGACY_GOOGLE_CREDENTIAL_KEY
         : null);
 
-    if (this.vault && credentialReference) {
-      const stored = await this.vault.get(credentialReference);
-      const scopes =
-        record?.scopes ?? (stored?.kind === 'oauth' ? stored.scopes : []);
-      const accountName =
-        stored?.kind === 'oauth' ? stored.accountName : undefined;
+    try {
+      if (this.vault && credentialReference) {
+        const stored = await this.vault.get(credentialReference);
 
-      if (this.bridge) {
-        try {
-          await this.bridge.revoke({
-            ...(accountName ? { accountName } : {}),
-            scopes,
-          });
-        } catch {
-          // Best-effort: the local credential/record is deleted regardless.
+        const scopes =
+          record?.scopes ??
+          (stored?.kind === 'oauth' ? stored.scopes : []);
+
+        const accountName =
+          stored?.kind === 'oauth'
+            ? stored.accountName
+            : undefined;
+
+        if (this.bridge) {
+          try {
+            await Promise.race([
+              this.bridge.revoke({
+                ...(accountName ? { accountName } : {}),
+                scopes,
+              }),
+              new Promise<void>((_, reject) =>
+                setTimeout(
+                  () => reject(new Error('Google revoke timed out')),
+                  5000,
+                ),
+              ),
+            ]);
+          } catch (error) {
+            console.warn(
+              '[google] revoke failed or timed out',
+              error,
+            );
+          }
         }
-      }
-      await this.vault.remove(credentialReference);
-    }
 
-    await super.disconnect(connectionId);
+        try {
+          await this.vault.remove(credentialReference);
+        } catch {}
+      }
+    } finally {
+      // КРИТИЧНО:
+      // provider-side revoke не имеет права блокировать local disconnect.
+      await super.disconnect(connectionId);
+    }
   }
 
   /**

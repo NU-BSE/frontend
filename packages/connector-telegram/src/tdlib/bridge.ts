@@ -29,6 +29,35 @@ interface TelegramConfig {
 }
 
 function loadTdLib(): ReactNativeTdLib {
+  /*
+   * Check for the native module BEFORE requiring the package.
+   *
+   * Its JavaScript is in node_modules on every install, while the native half
+   * is only present if the build linked it — and it is not:
+   * expo-modules-autolinking omits react-native-tdlib, so `TdLibModule` never
+   * reaches the PackageList that Gradle generates.
+   *
+   * Order matters. Requiring first means the package throws its own "not
+   * linked" error during module evaluation, which lands as an uncaught red
+   * screen and a console.error in the dev overlay before anything here can
+   * translate it. Asking React Native whether the module exists costs nothing
+   * and turns a crash into the error the caller already handles.
+   */
+  let hasNativeModule = false;
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const { NativeModules } = require('react-native') as typeof import('react-native');
+    hasNativeModule = Boolean(NativeModules?.TdLibModule);
+  } catch {
+    // No react-native at all: a Node verification script. Same conclusion.
+    hasNativeModule = false;
+  }
+  if (!hasNativeModule) {
+    throw new TdlibUnavailableError(
+      'Telegram is unavailable: this build does not include the TDLib native module.',
+    );
+  }
+
   try {
     // eslint-disable-next-line @typescript-eslint/no-require-imports
     const module = require('react-native-tdlib');

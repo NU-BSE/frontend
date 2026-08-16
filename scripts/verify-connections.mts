@@ -165,9 +165,13 @@ async function main(): Promise<void> {
       'the Telegram failure explains what is missing',
     );
 
+    // The device connection is always present — it is not an account and
+    // needs no auth. What must not appear is a record for anything a failed
+    // attempt touched.
+    const afterFailures = await getConnectionStore().list();
     assert(
-      (await getConnectionStore().list()).length === 0,
-      'no connection record was created by failed attempts',
+      afterFailures.every((record) => record.connectorId === 'android'),
+      'no account connection was created by failed attempts',
     );
   }
 
@@ -209,10 +213,28 @@ async function main(): Promise<void> {
     const store = getConnectionStore();
     const vault = getCredentialVault();
 
-    const seeded = await store.get('telegram-user-default');
-    assert(Boolean(seeded), 'dev runtime seeds a labeled mock connection');
+    /*
+     * Create the connection this section disconnects. The runtime used to seed
+     * one; it no longer seeds any account, so the test makes its own — which
+     * is what it should always have done rather than depending on fixture data
+     * it did not control.
+     */
+    const now = Date.now();
+    await store.save({
+      id: 'telegram-user-default',
+      connectorId: 'telegram-user',
+      displayName: 'Telegram User (verification)',
+      status: 'connected',
+      scopes: [],
+      capabilities: [],
+      credentialReference: 'tdlib-session:dev',
+      createdAt: now,
+      updatedAt: now,
+    });
 
-    // Stand in for a credential saved during connect.
+    // Saved before anything reloads the runtime: credential reconciliation now
+    // runs in every mode, and a connection whose credential is missing is
+    // demoted on sight — which is the behaviour under test elsewhere, not here.
     await vault.save('tdlib-session:dev', {
       kind: 'tdlib',
       databaseKeyReference: 'dev-key',

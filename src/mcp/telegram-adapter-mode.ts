@@ -5,18 +5,21 @@ export type TelegramAdapterMode = 'native' | 'mock';
 /**
  * Resolves which Telegram TDLib adapter to use.
  *
- * By default follows the runtime mode (mock in development, native in
- * production), but can be overridden via `EXPO_PUBLIC_TELEGRAM_ADAPTER`
- * so developers can test real TDLib in a dev build without forcing
- * the entire MCP runtime into production mode.
+ * Native unless `EXPO_PUBLIC_TELEGRAM_ADAPTER=mock` asks for the mock.
+ *
+ * This used to follow the runtime mode, so every development build silently
+ * ran the mock. That is the wrong default for a screen that shows real chats:
+ * a debug build reported "TDLib: mock" and answered with invented data, and
+ * the only way to see the real thing was to remember an environment variable.
+ * eas.json sets `native` on every profile, which is the same conclusion
+ * reached one build profile at a time — so it is the default here, and a mock
+ * has to be asked for by name.
+ *
+ * `runtimeMode` is still taken so the signature can express a mode-dependent
+ * policy again without touching every call site.
  */
 export function resolveTelegramAdapterMode(
-  runtimeMode: McpRuntimeMode,
+  _runtimeMode: McpRuntimeMode,
 ): TelegramAdapterMode {
-  const explicit = process.env.EXPO_PUBLIC_TELEGRAM_ADAPTER;
-
-  if (explicit === 'native') return 'native';
-  if (explicit === 'mock') return 'mock';
-
-  return runtimeMode === 'development' ? 'mock' : 'native';
+  return process.env.EXPO_PUBLIC_TELEGRAM_ADAPTER === 'mock' ? 'mock' : 'native';
 }

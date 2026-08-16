@@ -166,7 +166,24 @@ function post<T>(path: string, body?: JsonObject) { return request<T>('POST', pa
 export type EmailPurpose = 'registration' | 'login';
 
 export interface RequestCodeInput { email: string; name?: string; purpose: EmailPurpose; }
-export interface CodeChallenge { challengeId: string; expiresInSeconds: number; retryAfterSeconds: number; }
+export interface CodeChallenge {
+  challengeId: string;
+  expiresInSeconds: number;
+  retryAfterSeconds: number;
+  /**
+   * Set when the server signed this account in without a code, so there is no
+   * challenge to answer and the tokens below are already valid.
+   *
+   * Which accounts these are is a server-side decision the app cannot see: no
+   * address or rule identifying one is in the bundle. Optional, and absence
+   * means "a code was sent" — an older server or a partial response must never
+   * be read as an authenticated session.
+   */
+  autoVerified?: boolean;
+  accessToken?: string | null;
+  refreshToken?: string | null;
+  onboardingCompleted?: boolean | null;
+}
 export interface VerifyCodeInput { challengeId: string; code: string; email: string; }
 export interface AuthTokens { accessToken: string; refreshToken: string; onboardingCompleted?: boolean; }
 export interface UserProfile { userId: string; email: string | null; name: string | null; createdAt: string; }

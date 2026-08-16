@@ -41,12 +41,44 @@ export class EmailAuthError extends Error {
   }
 }
 
+/**
+ * Ask for a verification code.
+ *
+ * The server may answer that this account is already signed in — some accounts
+ * do not receive codes at all — in which case the session it returned is
+ * persisted here and the caller skips the code screen. Which accounts those
+ * are is a server-side decision this app cannot see or reproduce.
+ *
+ * The session is only taken when `autoVerified` is true AND an access token is
+ * actually present. Either alone is not a session, and treating a partial
+ * response as one would sign the user in against nothing.
+ */
 export async function requestEmailCode(input: RequestCodeInput): Promise<CodeChallenge> {
-  try { return await apiRequestCode(input); }
+  try {
+    const challenge = await apiRequestCode(input);
+    if (challenge.autoVerified && challenge.accessToken) {
+      await persistSession({
+        accessToken: challenge.accessToken,
+        refreshToken: challenge.refreshToken ?? undefined,
+        email: input.email,
+      });
+    }
+    return challenge;
+  }
   catch (e) {
     if (e instanceof ApiError) throw new EmailAuthError(e.message, e.status);
     throw new EmailAuthError('Could not send the verification code.');
   }
+}
+
+async function persistSession(input: {
+  accessToken: string;
+  refreshToken?: string;
+  email: string;
+}): Promise<void> {
+  await writeValue(ACCESS_TOKEN_KEY, input.accessToken);
+  await writeValue(EMAIL_KEY, input.email);
+  if (input.refreshToken) await writeValue(REFRESH_TOKEN_KEY, input.refreshToken);
 }
 
 export interface VerifiedEmailSession { email: string; onboardingCompleted?: boolean; }
@@ -54,9 +86,11 @@ export interface VerifiedEmailSession { email: string; onboardingCompleted?: boo
 export async function verifyEmailCode(input: VerifyCodeInput): Promise<VerifiedEmailSession> {
   try {
     const tokens: AuthTokens = await apiVerifyCode(input);
-    await writeValue(ACCESS_TOKEN_KEY, tokens.accessToken);
-    await writeValue(EMAIL_KEY, input.email);
-    if (tokens.refreshToken) await writeValue(REFRESH_TOKEN_KEY, tokens.refreshToken);
+    await persistSession({
+      accessToken: tokens.accessToken,
+      refreshToken: tokens.refreshToken,
+      email: input.email,
+    });
     return { email: input.email, onboardingCompleted: tokens.onboardingCompleted };
   } catch (e) {
     if (e instanceof ApiError) throw new EmailAuthError(e.message, e.status);

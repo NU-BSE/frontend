@@ -21,7 +21,8 @@ export type DocumentErrorCode =
   | 'VALIDATION_FAILED'
   | 'SOURCE_READ_FAILED'
   | 'SOURCE_WRITE_FAILED'
-  | 'NATIVE_PROCESSOR_UNAVAILABLE';
+  | 'NATIVE_PROCESSOR_UNAVAILABLE'
+  | 'UNSUPPORTED_OPERATION';
 
 export class DocumentError extends Error {
   constructor(

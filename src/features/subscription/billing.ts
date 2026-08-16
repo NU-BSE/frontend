@@ -130,21 +130,52 @@ export async function fetchStorePrices(): Promise<
   if (!iap) return {};
 
   try {
-    await iap.initConnection();
-    const subscriptions =
-      (await iap.fetchProducts({ skus: [PLAY_SUBSCRIPTION_ID], type: 'subs' })) ?? [];
+    const connected = await iap.initConnection();
+
+    if (!connected) {
+      console.warn('[RN-IAP] initConnection returned false');
+      return {};
+    }
+
+    let subscriptions;
+
+    try {
+      subscriptions =
+        (await iap.fetchProducts({
+          skus: [PLAY_SUBSCRIPTION_ID],
+          type: 'subs',
+        })) ?? [];
+    } catch (error) {
+      console.warn(
+        '[RN-IAP] fetchProducts failed, reconnecting once:',
+        error,
+      );
+
+      // Re-establish connection after SERVICE_DISCONNECTED
+      await iap.initConnection();
+
+      subscriptions =
+        (await iap.fetchProducts({
+          skus: [PLAY_SUBSCRIPTION_ID],
+          type: 'subs',
+        })) ?? [];
+    }
 
     const prices: Partial<Record<BillingPeriod, StorePrice>> = {};
+
     for (const period of ['monthly', 'annual'] as BillingPeriod[]) {
       const basePlanId = planFor(period).basePlanId;
+
       const offer = subscriptions
-        .flatMap((product) => product.subscriptionOfferDetailsAndroid ?? [])
+        .flatMap(
+          (product) => product.subscriptionOfferDetailsAndroid ?? [],
+        )
         .find((detail) => detail?.basePlanId === basePlanId);
+
       const phase = offer?.pricingPhases?.pricingPhaseList?.find(
-        // Skip the free-trial phase, whose price is zero, and show what the
-        // user will actually be charged when the trial ends.
         (item) => Number(item?.priceAmountMicros ?? 0) > 0,
       );
+
       if (phase?.formattedPrice) {
         prices[period] = {
           formattedPrice: String(phase.formattedPrice),
@@ -152,8 +183,10 @@ export async function fetchStorePrices(): Promise<
         };
       }
     }
+
     return prices;
-  } catch {
+  } catch (error) {
+    console.warn('[RN-IAP] Unable to fetch store prices:', error);
     return {};
   }
 }

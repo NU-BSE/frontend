@@ -178,9 +178,11 @@ async function main(): Promise<void> {
   console.log('only a successful auth flow creates a connection:');
   {
     const store = new InMemoryConnectionStore();
+    const vault = new InMemoryCredentialVault();
     const adapter = new MockTdlibAdapter();
     const connector = new TelegramUserConnector({
       store,
+      vault,
       adapterFactory: () => adapter,
     });
 
@@ -202,6 +204,22 @@ async function main(): Promise<void> {
     assert(
       (await store.list()).length === 1,
       'the connection is persisted in the store',
+    );
+
+    /*
+     * The reference must resolve. A record pointing at a credential nobody
+     * wrote is not a connection: reconciliation demotes it to
+     * reconnect_required on the next launch, reconnecting writes the same
+     * dangling record, and Telegram asks to reconnect forever. That shipped,
+     * and nothing here noticed, because no check ever followed the reference.
+     */
+    assert(
+      Boolean(created.credentialReference),
+      'the connection declares a credential reference',
+    );
+    assert(
+      (await vault.get(created.credentialReference as string)) !== null,
+      'the declared credential actually exists in the vault',
     );
   }
 

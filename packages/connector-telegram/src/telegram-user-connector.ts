@@ -8,6 +8,7 @@ import {
   type ToolExecutionContext,
 } from '@mobile-agent/connector-core';
 
+import type { CredentialVault } from '@mobile-agent/credential-vault';
 import { MockTdlibAdapter } from './tdlib/mock-adapter';
 import { NativeTdlibAdapter } from './tdlib/bridge';
 import type { TdlibAdapter } from './tdlib/types';
@@ -26,6 +27,14 @@ export interface TelegramUserConnectorOptions {
    * Phase D native module ships.
    */
   adapterFactory?: () => TdlibAdapter;
+  /**
+   * Where the session marker is written on connect.
+   *
+   * Optional so the connector still constructs in contexts without a vault,
+   * but a connection made without one will be demoted to `reconnect_required`
+   * on the next launch — see `connect()`.
+   */
+  vault?: CredentialVault;
 }
 
 const connectionIdField = z
@@ -59,10 +68,12 @@ export class TelegramUserConnector extends StoreBackedConnector {
   readonly displayName = 'Telegram (personal account)';
 
   private readonly adapter: TdlibAdapter;
+  private readonly vault: CredentialVault | undefined;
 
   constructor(options: TelegramUserConnectorOptions) {
     super({ store: options.store });
     this.adapter = (options.adapterFactory ?? (() => new NativeTdlibAdapter()))();
+    this.vault = options.vault;
   }
 
   /**
@@ -161,6 +172,28 @@ export class TelegramUserConnector extends StoreBackedConnector {
       createdAt: now,
       updatedAt: now,
     };
+
+    /*
+     * Write the credential this record points at.
+     *
+     * The record has always carried `credentialReference`, and nothing ever
+     * created the credential — so on the next launch, reconciliation found the
+     * reference dangling and demoted the connection to `reconnect_required`.
+     * Reconnecting wrote the same dangling record again, which is why Telegram
+     * asked to reconnect forever.
+     *
+     * The secret itself is not ours to hold: TDLib keeps the session in its own
+     * encrypted database on disk, and the app never sees a token. What belongs
+     * in the vault is the marker saying that session exists, which is what
+     * makes the lifecycle whole — connect creates it, disconnect revokes it,
+     * and a wiped vault correctly forces a fresh sign-in.
+     */
+    if (this.vault) {
+      await this.vault.save(record.credentialReference as string, {
+        kind: 'tdlib',
+        databaseKeyReference: `tdlib-database:${user.id}`,
+      });
+    }
 
     await this.store.save(record);
     return record;

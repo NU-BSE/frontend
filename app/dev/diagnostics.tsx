@@ -1,10 +1,16 @@
-import React from "react";
+import React, { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useRouter } from "expo-router";
 import { ScrollView, StyleSheet, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useAgentContext } from "@/agent/AgentProvider";
 import { Button } from "@/components/Button";
+import {
+  hasPermission as hasNotificationPermission,
+  requestPermission as requestNotificationPermission,
+  showCard,
+  dismiss as dismissCard,
+} from "@/notifications/smartCards";
 import { Screen } from "@/components/Screen";
 import { Text } from "@/components/Text";
 import { useConnections } from "@/connections/useConnections";
@@ -17,7 +23,52 @@ import { gutter, palette, radius, shadow, spacing } from "@/theme/tokens";
  * the chat screen — the MCP debug button no longer ships in the normal UI.
  * No tokens or secrets are displayed.
  */
+/**
+ * The chain from the notification spec, end to end.
+ *
+ * A prompt whose action reveals a detail, whose action confirms and clears.
+ * Every state is posted under one notification id, so Android replaces the
+ * card in place rather than stacking three of them — and none of the
+ * transitions come back through JS.
+ */
+async function postDemoCard(
+  setStatus: (value: string) => void,
+): Promise<void> {
+  try {
+    const granted =
+      (await hasNotificationPermission()) ||
+      (await requestNotificationPermission());
+    if (!granted) {
+      setStatus("denied — enable notifications in system settings");
+      return;
+    }
+
+    await showCard({
+      title: "Have you read recent messages?",
+      text: "Three unread since this morning.",
+      actions: [
+        {
+          id: "check-telegram",
+          label: "Check Telegram",
+          next: {
+            title: "Anya · 7PM",
+            text: "photos from work",
+            detail: "Telegram · 3 messages",
+            actions: [
+              { id: "send-confirmation", label: "Send confirmation" },
+            ],
+          },
+        },
+      ],
+    });
+    setStatus("posted");
+  } catch (error) {
+    setStatus(error instanceof Error ? error.message : "failed");
+  }
+}
+
 export default function Diagnostics() {
+  const [cardStatus, setCardStatus] = useState("idle");
   const insets = useSafeAreaInsets();
   const router = useRouter();
   const { modelId, capabilities } = useAgentContext();
@@ -54,6 +105,16 @@ export default function Diagnostics() {
           <Text variant="headline">Agent diagnostics</Text>
           <Button label="Back" variant="ghost" onPress={() => router.back()} />
         </View>
+
+        <Section title="Notification cards">
+          <Row label="Permission" value={cardStatus} />
+          <Button
+            label="Post a smart card"
+            variant="secondary"
+            onPress={() => void postDemoCard(setCardStatus)}
+          />
+          <Button label="Dismiss card" variant="ghost" onPress={() => dismissCard()} />
+        </Section>
 
         <Section title="MCP runtime">
           <Row label="Mode" value={getRuntimeMode() ?? "not initialized"} />

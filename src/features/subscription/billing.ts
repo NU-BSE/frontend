@@ -36,6 +36,15 @@ export interface StorePrice {
   /** Play's localized price for the period, e.g. "£10.99". */
   formattedPrice: string;
   currencyCode: string;
+  /**
+   * The same amount in micros (1,000,000 = one unit).
+   *
+   * Carried so derived figures — a per-month equivalent, the annual saving —
+   * can be computed in the currency the user is actually charged. Without it
+   * the screen could only ever restate the USD list prices beside a localized
+   * one, which is how "HK$99.00" ended up above "Billed $12.90 today".
+   */
+  amountMicros: number;
 }
 
 export interface PurchaseResult {
@@ -168,6 +177,7 @@ export async function fetchStorePrices(): Promise<
         prices[period] = {
           formattedPrice: String(phase.formattedPrice),
           currencyCode: String(phase.priceCurrencyCode ?? ''),
+          amountMicros: Number(phase.priceAmountMicros ?? 0),
         };
       }
     }

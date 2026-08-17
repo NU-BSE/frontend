@@ -1,4 +1,10 @@
 import { Platform } from 'react-native';
+import type {
+  ProductRequest,
+  ProductSubscription,
+  ProductSubscriptionAndroid,
+  SubscriptionOffer,
+} from 'react-native-iap';
 
 import {
   PLAY_SUBSCRIPTION_ID,
@@ -53,24 +59,29 @@ export class PurchaseCancelled extends Error {
   }
 }
 
-/**
- * Only the surface this seam uses, declared locally rather than imported from
- * the package.
+/*
+ * Types come from the library, not from a local restatement of them.
  *
- * `typeof import('react-native-iap')` drags the library's own TypeScript
- * *source* into the program — it ships `src/` alongside its declarations — and
- * that source does not compile under this tsconfig (`Cannot find name
- * 'global'`), breaking `npm run typecheck` for the whole repo. A narrow local
- * interface is also the honest shape of a seam: it states exactly what we
- * depend on, so a breaking change upstream surfaces here rather than
- * everywhere.
+ * This seam used to declare its own `PlayProduct`/`PlayOffer` interfaces to
+ * avoid pulling react-native-iap's shipped TypeScript source into the program.
+ * That worked, and it hid a bug for the entire life of the paywall: the local
+ * names — `subscriptionOfferDetailsAndroid`, `basePlanId`, `offerToken` — do
+ * not exist in v16, which calls them `subscriptionOffers`, `basePlanIdAndroid`
+ * and `offerTokenAndroid`. Every lookup silently found nothing, so the app
+ * reported "Play has no active offer" for base plans that were published and
+ * active, and the compiler was satisfied throughout, because a hand-written
+ * interface agrees with whatever you wrote in it.
+ *
+ * `import type` from the package's declarations costs nothing at runtime and
+ * makes the next upstream rename a compile error instead of a paywall that
+ * cannot complete a purchase.
  */
 interface IapModule {
   initConnection(): Promise<boolean>;
-  fetchProducts(params: {
-    skus: string[];
-    type: 'subs' | 'in-app';
-  }): Promise<PlayProduct[] | null>;
+  // Declared as the library declares it, including the null and the iOS half
+  // of the union. Narrowing it here to "Android subscriptions" would be
+  // another convenient fiction, and the last one cost a working paywall.
+  fetchProducts(params: ProductRequest): Promise<ProductSubscription[] | null>;
   requestPurchase(params: {
     request: {
       google: {
@@ -82,20 +93,30 @@ interface IapModule {
   }): Promise<unknown>;
 }
 
-interface PlayPricingPhase {
-  formattedPrice?: string;
-  priceCurrencyCode?: string;
-  priceAmountMicros?: string | number;
+/** Narrow the store's answer to the Android subscriptions this seam handles. */
+function androidSubscriptions(
+  products: ProductSubscription[] | null,
+): ProductSubscriptionAndroid[] {
+  return (products ?? []).filter(
+    (product): product is ProductSubscriptionAndroid =>
+      product.platform === 'android',
+  );
 }
 
-interface PlayOffer {
-  basePlanId?: string;
-  offerToken?: string;
-  pricingPhases?: { pricingPhaseList?: PlayPricingPhase[] };
-}
-
-interface PlayProduct {
-  subscriptionOfferDetailsAndroid?: PlayOffer[] | null;
+/**
+ * The offers for a base plan.
+ *
+ * Play returns one offer for the base plan itself plus one per attached offer
+ * — the free trial is a separate entry against the same base plan — so this
+ * legitimately returns several.
+ */
+function offersForBasePlan(
+  products: ProductSubscriptionAndroid[],
+  basePlanId: string,
+): SubscriptionOffer[] {
+  return products
+    .flatMap((product) => product.subscriptionOffers ?? [])
+    .filter((offer) => offer?.basePlanIdAndroid === basePlanId);
 }
 
 let modulePromise: Promise<IapModule | null> | null = null;
@@ -131,20 +152,18 @@ export async function fetchStorePrices(): Promise<
 
   try {
     await iap.initConnection();
-    const subscriptions =
-      (await iap.fetchProducts({ skus: [PLAY_SUBSCRIPTION_ID], type: 'subs' })) ?? [];
+    const subscriptions = androidSubscriptions(
+      await iap.fetchProducts({ skus: [PLAY_SUBSCRIPTION_ID], type: 'subs' }),
+    );
 
     const prices: Partial<Record<BillingPeriod, StorePrice>> = {};
     for (const period of ['monthly', 'annual'] as BillingPeriod[]) {
       const basePlanId = planFor(period).basePlanId;
-      const offer = subscriptions
-        .flatMap((product) => product.subscriptionOfferDetailsAndroid ?? [])
-        .find((detail) => detail?.basePlanId === basePlanId);
-      const phase = offer?.pricingPhases?.pricingPhaseList?.find(
+      const phase = offersForBasePlan(subscriptions, basePlanId)
+        .flatMap((offer) => offer.pricingPhasesAndroid?.pricingPhaseList ?? [])
         // Skip the free-trial phase, whose price is zero, and show what the
         // user will actually be charged when the trial ends.
-        (item) => Number(item?.priceAmountMicros ?? 0) > 0,
-      );
+        .find((item) => Number(item?.priceAmountMicros ?? 0) > 0);
       if (phase?.formattedPrice) {
         prices[period] = {
           formattedPrice: String(phase.formattedPrice),
@@ -179,16 +198,41 @@ export async function purchase(period: BillingPeriod): Promise<PurchaseResult> {
 
   try {
     await iap.initConnection();
-    const products =
-      (await iap.fetchProducts({ skus: [PLAY_SUBSCRIPTION_ID], type: 'subs' })) ?? [];
-    const offer = products
-      .flatMap((product) => product.subscriptionOfferDetailsAndroid ?? [])
-      .find((detail) => detail?.basePlanId === basePlanId);
+    const products = androidSubscriptions(
+      await iap.fetchProducts({ skus: [PLAY_SUBSCRIPTION_ID], type: 'subs' }),
+    );
+    const offers = offersForBasePlan(products, basePlanId);
 
-    if (!offer?.offerToken) {
+    /*
+     * Prefer the cheapest first phase, which is the free trial when Play has
+     * attached one to this base plan and the user is eligible for it. Play
+     * decides eligibility — someone who already used the trial simply will not
+     * be offered it, and buying the base plan directly is then correct.
+     */
+    const offer =
+      offers.find(
+        (candidate) =>
+          Number(
+            candidate.pricingPhasesAndroid?.pricingPhaseList?.[0]
+              ?.priceAmountMicros ?? -1,
+          ) === 0,
+      ) ?? offers[0];
+
+    if (!offer?.offerTokenAndroid) {
+      // Name what Play actually returned. "No active offer" was reported for
+      // years against correctly published plans because the lookup was wrong,
+      // and the message gave nothing to distinguish that from a real problem.
+      const seen = products
+        .flatMap((product) => product.subscriptionOffers ?? [])
+        .map((entry) => entry.basePlanIdAndroid ?? '?')
+        .join(', ');
       throw new BillingUnavailable(
-        `Play has no active offer for "${basePlanId}". Check the base plan is ` +
-          'published in the Play Console.',
+        `Play returned no offer for base plan "${basePlanId}". ` +
+          (products.length === 0
+            ? `Play returned no products for "${PLAY_SUBSCRIPTION_ID}" at all — ` +
+              'this build is usually not installed from Play, or the account is ' +
+              'not a licensed tester.'
+            : `Play offered: ${seen || 'nothing'}.`),
       );
     }
 
@@ -197,7 +241,7 @@ export async function purchase(period: BillingPeriod): Promise<PurchaseResult> {
         google: {
           skus: [PLAY_SUBSCRIPTION_ID],
           subscriptionOffers: [
-            { sku: PLAY_SUBSCRIPTION_ID, offerToken: offer.offerToken },
+            { sku: PLAY_SUBSCRIPTION_ID, offerToken: offer.offerTokenAndroid },
           ],
         },
       },

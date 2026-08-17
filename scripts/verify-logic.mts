@@ -229,13 +229,36 @@ console.log('\nsubscription plans:');
     'the badge matches the derived saving',
   );
 
-  // Base plan ids are what Play matches offers on; a typo here is a paywall
-  // that cannot complete a purchase.
+  /*
+   * Base plan ids are what Play matches offers on; a wrong one is a paywall
+   * that cannot complete a purchase.
+   *
+   * This check used to assert /^creepyim-pro-(monthly|annual)$/ — a convention
+   * invented here, matching nothing in the Play Console, which generated
+   * plan-1 and plan-2. It passed for as long as the ids were wrong, because it
+   * validated our guess rather than reality. Pinned to the console's ids now,
+   * so changing one is a deliberate act.
+   */
   const ids = SUBSCRIPTION_PLANS.map((plan) => plan.basePlanId);
   assert(new Set(ids).size === ids.length, 'base plan ids are distinct');
+  assert(planFor('monthly').basePlanId === 'plan-1', 'monthly is plan-1');
+  assert(planFor('annual').basePlanId === 'plan-2', 'annual is plan-2');
+
+  // The trial offer (trial-2) exists on the annual base plan only, so only
+  // annual may advertise one — and its button is the only "free" one.
   assert(
-    ids.every((id) => /^creepyim-pro-(monthly|annual)$/u.test(id)),
-    'base plan ids follow the Play naming convention',
+    planFor('monthly').hasFreeTrial === false,
+    'monthly carries no free trial',
+  );
+  assert(planFor('annual').hasFreeTrial === true, 'annual carries the trial');
+  assert(planFor('monthly').cta === 'Start', 'monthly button reads Start');
+  assert(
+    planFor('annual').cta === 'Start free',
+    'annual button reads Start free',
+  );
+  assert(
+    !/free|trial/iu.test(planFor('monthly').terms.split('The free trial')[0]),
+    'monthly terms do not promise a trial',
   );
 }
 

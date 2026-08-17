@@ -170,11 +170,11 @@ export default function OnboardingSubscription() {
             Creepy Pro
           </Text>
           <Text variant="display" style={styles.heading}>
-            One plan. Seven days free.
+            One plan. Two ways to pay.
           </Text>
           <Text variant="bodyLarge" tone="secondary" style={styles.body}>
-            Everything Creepy does is in a single plan. Try it free for{" "}
-            {TRIAL_DAYS} days — no charge today.
+            Everything Creepy does is in a single plan. Annual comes with{" "}
+            {TRIAL_DAYS} days free.
           </Text>
         </View>
 
@@ -212,8 +212,16 @@ export default function OnboardingSubscription() {
         </View>
 
         <View style={styles.card}>
+          {/*
+            * The trial is an offer on the annual base plan only, so only the
+            * annual card may mention one. Promising a trial the store will not
+            * honour is the kind of thing a user discovers at the moment they
+            * are charged.
+            */}
           <Text variant="headline">
-            {TRIAL_DAYS}-day free trial, then one simple price
+            {selected.hasFreeTrial
+              ? `${TRIAL_DAYS} days free, then one simple price`
+              : 'One simple price'}
           </Text>
 
           <View style={styles.priceRow}>
@@ -261,7 +269,7 @@ export default function OnboardingSubscription() {
       <OnboardingNavBar
         onBack={() => router.back()}
         onAdvance={() => void startTrial()}
-        advanceLabel={busy ? "Opening Play" : `Start ${TRIAL_DAYS}-day free trial`}
+        advanceLabel={busy ? "Opening Play" : selected.cta}
         advanceDisabled={busy}
       />
     </Screen>

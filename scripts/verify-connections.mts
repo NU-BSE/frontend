@@ -42,6 +42,7 @@ import {
 } from '../src/mcp/runtime-singleton.js';
 import {
   connectConnector,
+  disconnectEverything,
   disconnectConnection,
 } from '../src/connections/connectionService.js';
 
@@ -274,6 +275,69 @@ async function main(): Promise<void> {
     assert(
       !names.some((name) => name.startsWith('telegram.user.')),
       'Telegram tools disappear after disconnect',
+    );
+  }
+
+  console.log('sign-out leaves nothing behind:');
+  {
+    await closeLocalMcpRuntime();
+    await getLocalMcpRuntime({ mode: 'development' });
+
+    const store = getConnectionStore();
+    const vault = getCredentialVault();
+
+    // Two accounts with secrets, plus the device connection that is always
+    // present and has none.
+    const now = Date.now();
+    for (const [id, connectorId] of [
+      ['telegram-user:signout', 'telegram-user'],
+      ['google-signout', 'google'],
+    ] as const) {
+      await store.save({
+        id,
+        connectorId,
+        displayName: id,
+        status: 'connected',
+        scopes: [],
+        capabilities: [],
+        credentialReference: `secret:${id}`,
+        createdAt: now,
+        updatedAt: now,
+      });
+      await vault.save(`secret:${id}`, { kind: 'static_token', token: 'x' });
+    }
+
+    assert((await store.list()).length >= 3, 'connections exist before sign-out');
+
+    await disconnectEverything();
+
+    /*
+     * No account may survive. Signing out on a shared or demo device and
+     * leaving somebody else's linked accounts — or their tokens — for the next
+     * person through onboarding is the failure this guards.
+     *
+     * The device connection is the exception and stays: it is not an account,
+     * it has no credential, and the runtime re-ensures it on every start. A
+     * signed-out phone is still the same phone.
+     */
+    const remaining = await store.list();
+    assert(
+      remaining.every((record) => record.connectorId === 'android'),
+      'every account connection is gone after sign-out',
+    );
+    assert(
+      (await vault.get('secret:telegram-user:signout')) === null &&
+        (await vault.get('secret:google-signout')) === null,
+      'every stored secret is revoked after sign-out',
+    );
+
+    const runtime = await getLocalMcpRuntime();
+    const names = (await runtime.mcp.listTools()).map((tool) => tool.name);
+    assert(
+      !names.some(
+        (name) => name.startsWith('telegram.') || name.startsWith('google.'),
+      ),
+      'no account tools remain after sign-out',
     );
   }
 

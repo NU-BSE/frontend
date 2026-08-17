@@ -8,6 +8,8 @@
 import * as SecureStore from 'expo-secure-store';
 import { Platform } from 'react-native';
 
+import { describeHttpFailure } from './httpErrors';
+
 const ACCESS_TOKEN_KEY = 'creepyim.auth.access-token.v1';
 
 export async function getToken(): Promise<string | null> {
@@ -151,8 +153,15 @@ async function request<T>(method: string, path: string, body?: JsonObject): Prom
   try { json = await response.json() as JsonObject; } catch { /* no body */ }
 
   if (!response.ok) {
-    const msg = typeof json.message === 'string' ? json.message : response.statusText;
-    throw new ApiError(msg, response.status, typeof json.code === 'string' ? json.code : undefined);
+    const message =
+      typeof json.message === 'string' && json.message
+        ? json.message
+        : describeHttpFailure(response.status, response.statusText, baseUrl());
+    throw new ApiError(
+      message,
+      response.status,
+      typeof json.code === 'string' ? json.code : undefined,
+    );
   }
 
   return json as T;

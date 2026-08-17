@@ -11,10 +11,67 @@ import { Platform } from 'react-native';
 import { describeHttpFailure } from './httpErrors';
 
 const ACCESS_TOKEN_KEY = 'creepyim.auth.access-token.v1';
+const REFRESH_TOKEN_KEY = 'creepyim.auth.refresh-token.v1';
 
 export async function getToken(): Promise<string | null> {
   if (Platform.OS === 'web') return sessionStorage.getItem(ACCESS_TOKEN_KEY);
   return SecureStore.getItemAsync(ACCESS_TOKEN_KEY);
+}
+
+async function readRefreshToken(): Promise<string | null> {
+  if (Platform.OS === 'web') return sessionStorage.getItem(REFRESH_TOKEN_KEY);
+  return SecureStore.getItemAsync(REFRESH_TOKEN_KEY);
+}
+
+async function writeAccessToken(token: string): Promise<void> {
+  if (Platform.OS === 'web') {
+    sessionStorage.setItem(ACCESS_TOKEN_KEY, token);
+    return;
+  }
+  await SecureStore.setItemAsync(ACCESS_TOKEN_KEY, token);
+}
+
+/*
+ * Access tokens last fifteen minutes. Nothing renewed them.
+ *
+ * `tryRefreshToken` existed in the auth module and was called by nothing, and
+ * `request` had no 401 handling, so every authenticated call failed
+ * permanently a quarter of an hour after sign-in while a perfectly good
+ * refresh token sat in SecureStore. The paywall's exemption check was one of
+ * the casualties: it 401ed, the query gave up, and a demo account that the
+ * server said owed nothing was shown the paywall anyway.
+ *
+ * Single-flight, because a screen that fires three requests at once would
+ * otherwise start three refreshes and race to store the results.
+ */
+let refreshInFlight: Promise<string | null> | null = null;
+
+async function refreshAccessTokenOnce(): Promise<string | null> {
+  if (!refreshInFlight) {
+    refreshInFlight = (async () => {
+      try {
+        const refreshToken = await readRefreshToken();
+        if (!refreshToken) return null;
+        const result = await request<{ accessToken: string }>(
+          'POST',
+          '/auth/refresh',
+          { refreshToken },
+          // Never let a failing refresh trigger another refresh.
+          { allowRefresh: false },
+        );
+        if (!result?.accessToken) return null;
+        await writeAccessToken(result.accessToken);
+        return result.accessToken;
+      } catch {
+        // An expired or revoked refresh token is a real sign-out, not an
+        // error to surface here: the caller still gets its 401.
+        return null;
+      } finally {
+        refreshInFlight = null;
+      }
+    })();
+  }
+  return refreshInFlight;
 }
 
 /**
@@ -112,7 +169,13 @@ export const NETWORK_ERROR_STATUS = 0;
 
 type JsonObject = Record<string, unknown>;
 
-async function request<T>(method: string, path: string, body?: JsonObject): Promise<T> {
+async function request<T>(
+  method: string,
+  path: string,
+  body?: JsonObject,
+  options: { allowRefresh?: boolean } = {},
+): Promise<T> {
+  const allowRefresh = options.allowRefresh !== false;
   const token = await getToken();
   const headers: Record<string, string> = { 'Content-Type': 'application/json' };
   if (token) headers['Authorization'] = `Bearer ${token}`;
@@ -151,6 +214,18 @@ async function request<T>(method: string, path: string, body?: JsonObject): Prom
 
   let json: JsonObject = {};
   try { json = await response.json() as JsonObject; } catch { /* no body */ }
+
+  /*
+   * One retry, and only when a refresh actually produced a new token. A 401
+   * that survives the retry is a real authentication failure and must reach
+   * the caller rather than looping.
+   */
+  if (response.status === 401 && allowRefresh && token) {
+    const refreshed = await refreshAccessTokenOnce();
+    if (refreshed) {
+      return request<T>(method, path, body, { allowRefresh: false });
+    }
+  }
 
   if (!response.ok) {
     const message =

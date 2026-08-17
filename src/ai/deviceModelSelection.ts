@@ -77,7 +77,15 @@ export function getModelOptionSupport(
       : !integrity.nativeProbeAvailable
         ? 'Native attestation probe is unavailable in this build.'
         : !has64BitArm
-          ? 'A 64-bit ARM Android device is required.'
+          ? // Name what the device actually reported. Android's
+            // Build.SUPPORTED_ABIS is the only thing that decides whether the
+            // arm64 llama.cpp libraries can load, and plenty of phones with
+            // 64-bit silicon ship a 32-bit ROM — telling someone their 64-bit
+            // phone "is not 64-bit" reads as a bug unless the evidence is
+            // attached.
+            `This device reports ${
+              hardware.supportedAbis.join(', ') || 'no ABIs'
+            }; on-device models need a 64-bit ARM build (arm64-v8a).`
           : hardware.lowRamDevice
             ? 'Android reports this as a low-RAM device.'
             : null;

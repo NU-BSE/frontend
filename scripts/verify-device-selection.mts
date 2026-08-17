@@ -125,4 +125,55 @@ assertEqual(
   'a core-count failure is reported as a processor limit',
 );
 
+/*
+ * A 32-bit ROM on 64-bit silicon.
+ *
+ * Common on budget phones — the CPU is ARMv8 but the shipped Android build is
+ * armeabi-v7a, so the arm64 llama.cpp libraries cannot load. Build.SUPPORTED_ABIS
+ * is what decides this, and the message has to quote it: telling someone their
+ * 64-bit phone "is not 64-bit" reads as a bug when the evidence is missing.
+ */
+{
+  const thirtyTwoBit = assessment(4, 32);
+  thirtyTwoBit.hardware.supportedAbis = ['armeabi-v7a', 'armeabi'];
+
+  const options = getModelOptionSupport(thirtyTwoBit);
+  const local = options.filter((option) => option.profile !== 'cloud');
+
+  assertEqual(
+    local.every((option) => !option.supported),
+    true,
+    'a 32-bit ROM disables every local profile',
+  );
+  assertEqual(
+    local[0]?.reason.includes('armeabi-v7a'),
+    true,
+    'the reason quotes the ABIs the device actually reported',
+  );
+  assertEqual(
+    local[0]?.reason.includes('arm64-v8a'),
+    true,
+    'the reason names the ABI that would be required',
+  );
+  assertEqual(
+    options.find((option) => option.profile === 'cloud')?.supported,
+    true,
+    'cloud stays available on a 32-bit device',
+  );
+}
+
+// The same hardware with a 64-bit ROM must not be blocked on this dimension.
+{
+  const sixtyFourBit = assessment(4, 32);
+  sixtyFourBit.hardware.supportedAbis = ['arm64-v8a', 'armeabi-v7a'];
+  const efficient = getModelOptionSupport(sixtyFourBit).find(
+    (option) => option.profile === 'efficient',
+  );
+  assertEqual(
+    efficient?.reason.includes('64-bit'),
+    false,
+    'an arm64 device is never told it needs a 64-bit build',
+  );
+}
+
 console.log('device model selection: ok');

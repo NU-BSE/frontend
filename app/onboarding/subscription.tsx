@@ -20,6 +20,7 @@ import {
   planFor,
   type BillingPeriod,
 } from "@/features/subscription/plans";
+import { resolvePricing } from "@/features/subscription/pricing";
 import { getMySubscription, verifyPlayPurchase } from "@/api/client";
 import { setOnboardingComplete } from "@/storage/prefs";
 import { gutter, palette, radius, spacing } from "@/theme/tokens";
@@ -156,8 +157,13 @@ export default function OnboardingSubscription() {
   }
 
   const selected = planFor(period);
-  const price = (target: BillingPeriod): string =>
-    storePrices[target]?.formattedPrice ?? planFor(target).listPrice;
+  /*
+   * Every figure on this screen comes from one source. Mixing Play's localized
+   * price with the USD list prices put "HK$99.00" above "Billed $12.90 today"
+   * and advertised a saving in a currency the user is never charged in.
+   */
+  const pricing = resolvePricing(storePrices);
+  const price = pricing.price;
 
   return (
     <Screen>
@@ -198,12 +204,12 @@ export default function OnboardingSubscription() {
                 <Text variant="label" tone={active ? "inverse" : "primary"}>
                   {plan.label}
                 </Text>
-                {plan.badge ? (
+                {pricing.badge(plan.period) ? (
                   <Text
                     variant="bodySmall"
                     tone={active ? "inverse" : "brand"}
                   >
-                    {plan.badge}
+                    {pricing.badge(plan.period)}
                   </Text>
                 ) : null}
               </Pressable>
@@ -233,12 +239,12 @@ export default function OnboardingSubscription() {
 
           {period === "annual" ? (
             <Text variant="bodySmall" tone="brand">
-              {price("annual")} / year · {selected.perMonth} per month
+              {price("annual")} / year · {pricing.perMonth} per month
             </Text>
           ) : null}
 
           <Text variant="bodySmall" tone="secondary">
-            {selected.terms}
+            {pricing.terms(period)}
           </Text>
         </View>
 

@@ -18,6 +18,7 @@ import {
   planFor,
 } from '../src/features/subscription/plans.js';
 import { resolvePricing } from '../src/features/subscription/pricing.js';
+import { describeHttpFailure } from '../src/api/httpErrors.js';
 import {
   ANDROID_GUIDE_CLUSTERS,
   ANDROID_GUIDE_LEAD_PROMPTS,
@@ -244,6 +245,38 @@ console.log('\nsubscription plans:');
   assert(new Set(ids).size === ids.length, 'base plan ids are distinct');
   assert(planFor('monthly').basePlanId === 'plan-1', 'monthly is plan-1');
   assert(planFor('annual').basePlanId === 'plan-2', 'annual is plan-2');
+
+  console.log('\nAPI failures always say something:');
+  {
+    /*
+     * A proxy refusing on the backend's behalf answers in plain text, so
+     * response.json() throws and there is no `message` to show. The old
+     * fallback was response.statusText, which React Native leaves empty — the
+     * sign-up screen set its error to "" and rendered nothing, so Continue
+     * looked like it did nothing while api.creepy.im was returning 502.
+     */
+    const origin = 'https://api.creepy.im';
+    for (const status of [500, 502, 503, 504, 400, 404, 429]) {
+      const message = describeHttpFailure(status, '', origin);
+      assert(
+        message.trim().length > 0,
+        `HTTP ${status} with no body produces a message`,
+      );
+      assert(
+        message.includes(String(status)),
+        `HTTP ${status} names the status code`,
+      );
+    }
+
+    assert(
+      /not responding/u.test(describeHttpFailure(502, '', origin)),
+      'a 502 reads as the server being unreachable, not a client mistake',
+    );
+    assert(
+      describeHttpFailure(404, 'Not Found', origin).includes('Not Found'),
+      'a statusText is used when the runtime provides one',
+    );
+  }
 
   /*
    * Localized pricing must be all-or-nothing.

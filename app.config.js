@@ -1,5 +1,3 @@
-import type { ConfigContext, ExpoConfig } from 'expo/config';
-
 /**
  * Dynamic Expo configuration.
  *
@@ -8,7 +6,7 @@ import type { ConfigContext, ExpoConfig } from 'expo/config';
  * registered in the manifest. The base static config lives in `app.json`; this
  * file only pins the app's own scheme.
  */
-export default ({ config }: ConfigContext): ExpoConfig => {
+module.exports = ({ config }) => {
   return {
     ...config,
     scheme: ['creepyim'],

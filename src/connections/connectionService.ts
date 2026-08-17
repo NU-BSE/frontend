@@ -146,6 +146,38 @@ export async function reconnectConnection(
   }
 }
 
+/**
+ * Remove every connection and every secret behind them.
+ *
+ * Used by sign-out. Each connection goes through `disconnectConnection` rather
+ * than being deleted from the store, so provider-side teardown still runs — a
+ * Telegram sign-out has to reach TDLib, or the session stays alive on the
+ * device after the account it belonged to is gone.
+ *
+ * Failures are absorbed per connection. A provider that will not answer must
+ * not leave the other accounts connected: signing out has to finish.
+ */
+export async function disconnectEverything(): Promise<void> {
+  const records = await getConnectionStore().list();
+
+  for (const record of records) {
+    try {
+      await disconnectConnection(record.id);
+    } catch {
+      // Fall back to removing the record and its secret directly, so a
+      // connector that throws cannot keep either behind.
+      try {
+        await getConnectionStore().remove(record.id);
+        if (record.credentialReference) {
+          await getCredentialVault().remove(record.credentialReference);
+        }
+      } catch {
+        // Nothing further to try for this one.
+      }
+    }
+  }
+}
+
 export const connectionService: ConnectionService = {
   list: listConnections,
   connect: connectConnector,

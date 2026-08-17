@@ -27,6 +27,7 @@
       "expo-secure-store",
       "./plugins/with-attestation-native-probes",
       "./plugins/with-google-authorization",
+      "./plugins/with-tdlib",
       "expo-web-browser"
     ],
     "scheme": "creepyim"

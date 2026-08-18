@@ -1,0 +1,108 @@
+{
+  "category_models": {
+    "COMMUNICATION": {
+      "category": "COMMUNICATION",
+      "clip_gap_seconds": {
+        "max": 62524.139999999985,
+        "min": 241
+      },
+      "coefficients": {
+        "gap_cv": 0.4150384457929161,
+        "log_elapsed_per_event": 0.17891835498369246,
+        "log_ewma_gap": 0.95246660893587753,
+        "log_history_count": 0.34583641607299026,
+        "log_iqr_gap": -0.085447877649729165,
+        "log_last_gap": -0.15073072457566844,
+        "log_last_to_median_ratio": -0.11432018201065454,
+        "log_mean_gap": 0.1789183549836931,
+        "log_median_gap": -0.30269409999268565,
+        "log_recent3_median_gap": 0.083201320926091851
+      },
+      "dataset_users": 120,
+      "intercept": -0.013711549670249124,
+      "model": "ridge_on_log1p_next_gap",
+      "ridge_lambda": 100,
+      "training_samples": 2970,
+      "validation_mae_seconds": 6184.2179673898127,
+      "validation_median_ae_seconds": 3573.2122185648223,
+      "validation_median_log_ae": 0.42747488759383412,
+      "validation_samples": 630
+    },
+    "PRODUCTIVITY": {
+      "category": "PRODUCTIVITY",
+      "clip_gap_seconds": {
+        "max": 124629.25,
+        "min": 1020.9300000000001
+      },
+      "coefficients": {
+        "gap_cv": 0.17393725362043413,
+        "log_elapsed_per_event": -0.10971647692522729,
+        "log_ewma_gap": 1.16034597447115,
+        "log_history_count": 0.33133470415247174,
+        "log_iqr_gap": -0.18414322522107798,
+        "log_last_gap": -15.045710654250575,
+        "log_last_to_median_ratio": 14.570999959419083,
+        "log_mean_gap": -0.10971647689963053,
+        "log_median_gap": 14.22914221758478,
+        "log_recent3_median_gap": -0.031347052261631467
+      },
+      "dataset_users": 120,
+      "intercept": 10.386204715950514,
+      "model": "ridge_on_log1p_next_gap",
+      "ridge_lambda": 0.01,
+      "training_samples": 2992,
+      "validation_mae_seconds": 23978.847406791967,
+      "validation_median_ae_seconds": 20470.783264725687,
+      "validation_median_log_ae": 0.49782407918168659,
+      "validation_samples": 632
+    }
+  },
+  "created_at_utc": "2026-08-18T05:37:32Z",
+  "feature_names": [
+    "log_last_gap",
+    "log_median_gap",
+    "log_mean_gap",
+    "log_ewma_gap",
+    "log_recent3_median_gap",
+    "log_iqr_gap",
+    "gap_cv",
+    "log_history_count",
+    "log_elapsed_per_event",
+    "log_last_to_median_ratio"
+  ],
+  "global_model": {
+    "category": "__GLOBAL__",
+    "clip_gap_seconds": {
+      "max": 121186.29000000004,
+      "min": 443.81
+    },
+    "coefficients": {
+      "gap_cv": 0.28606329041512718,
+      "log_elapsed_per_event": 0.26415855130364346,
+      "log_ewma_gap": 1.3735417543070516,
+      "log_history_count": 0.31670590263646325,
+      "log_iqr_gap": -0.12230609906977674,
+      "log_last_gap": -14.956270209811533,
+      "log_last_to_median_ratio": 14.520028283209388,
+      "log_mean_gap": 0.26415855130134697,
+      "log_median_gap": 14.183368991566908,
+      "log_recent3_median_gap": -0.085962617706169739
+    },
+    "dataset_users": 120,
+    "intercept": -0.50877423383380949,
+    "model": "ridge_on_log1p_next_gap",
+    "ridge_lambda": 0.01,
+    "training_samples": 5962,
+    "validation_mae_seconds": 15051.609559699944,
+    "validation_median_ae_seconds": 8829.0474793727408,
+    "validation_median_log_ae": 0.47450660168768088,
+    "validation_samples": 1262
+  },
+  "important_semantics": "Coefficients are trained only from offline dataset users. Runtime timestamps are used only to calculate features; no fitting occurs during prediction.",
+  "maximum_history_events_used": 50,
+  "minimum_runtime_timestamps": 3,
+  "model_family": "cold_user_category_gap_regression",
+  "prediction_target": "seconds_from_latest_category_event_to_next_category_event",
+  "schema_version": 1,
+  "validation_split": "deterministic_user_holdout_fnv1a64_mod_5"
+}

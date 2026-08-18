@@ -103,7 +103,8 @@
     "verify:google": "esbuild scripts/verify-google.mts --bundle --platform=node --format=cjs --external:react-native --external:expo-modules-core --outfile=node_modules/.cache/verify-google.cjs --log-level=error && node node_modules/.cache/verify-google.cjs",
     "verify": "npm run typecheck && npm run lint && npm run verify:ai && npm run verify:logic && npm run verify:layout && npm run verify:device && npm run verify:mcp && npm run verify:agent && npm run verify:connections && npm run verify:routing && npm run verify:remote-agent && npm run verify:telegram && npm run verify:google",
     "deploy": "node deploy.js",
-    "preview": "npx expo export --platform web && wrangler dev"
+    "preview": "npx expo export --platform web && wrangler dev",
+    "verify:prediction": "esbuild scripts/verify-prediction.mts --bundle --platform=node --format=cjs --external:react-native --outfile=node_modules/.cache/verify-prediction.cjs --log-level=error && node node_modules/.cache/verify-prediction.cjs"
   },
   "private": true
 }

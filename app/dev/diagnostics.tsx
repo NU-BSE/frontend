@@ -11,6 +11,11 @@ import {
   showCard,
   dismiss as dismissCard,
 } from "@/notifications/smartCards";
+import { cardForNextCategory } from "@/prediction/schedule";
+import type { ModelBundle } from "@/prediction/inference";
+import MODEL_JSON from "@/prediction/fixtures/category_models.sample.json";
+
+const MODEL_BUNDLE = MODEL_JSON as unknown as ModelBundle;
 import { Screen } from "@/components/Screen";
 import { Text } from "@/components/Text";
 import { useConnections } from "@/connections/useConnections";
@@ -24,14 +29,17 @@ import { gutter, palette, radius, shadow, spacing } from "@/theme/tokens";
  * No tokens or secrets are displayed.
  */
 /**
- * The chain from the notification spec, end to end.
+ * Post whatever the predictor says is due.
  *
- * A prompt whose action reveals a detail, whose action confirms and clears.
- * Every state is posted under one notification id, so Android replaces the
- * card in place rather than stacking three of them — and none of the
- * transitions come back through JS.
+ * Nothing about the card is written here: the category, the apps named and the
+ * buttons all come from the user's own usage run through the frozen model. If
+ * no category is due, nothing is posted — a card with no prediction behind it
+ * would be an advertisement wearing a prediction's clothes.
+ *
+ * The history used here is the demo one; in the app it comes from the agent's
+ * tool logs.
  */
-async function postDemoCard(
+async function postPredictedCard(
   setStatus: (value: string) => void,
 ): Promise<void> {
   try {
@@ -43,25 +51,23 @@ async function postDemoCard(
       return;
     }
 
-    await showCard({
-      title: "Have you read recent messages?",
-      text: "Three unread since this morning.",
-      actions: [
-        {
-          id: "check-telegram",
-          label: "Check Telegram",
-          next: {
-            title: "Anya · 7PM",
-            text: "photos from work",
-            detail: "Telegram · 3 messages",
-            actions: [
-              { id: "send-confirmation", label: "Send confirmation" },
-            ],
-          },
-        },
-      ],
-    });
-    setStatus("posted");
+    const now = Math.floor(Date.now() / 1000);
+    const hour = 3600;
+    const events = [
+      { packageName: "org.telegram.messenger", at: now - 11 * hour },
+      { packageName: "com.google.android.gm", at: now - 8 * hour },
+      { packageName: "org.telegram.messenger", at: now - 4 * hour },
+      { packageName: "org.telegram.messenger", at: now - 1 * hour },
+    ];
+
+    const card = cardForNextCategory(MODEL_BUNDLE, events, now);
+    if (!card) {
+      setStatus("nothing predicted as due — no card posted");
+      return;
+    }
+
+    await showCard(card);
+    setStatus("posted from prediction");
   } catch (error) {
     setStatus(error instanceof Error ? error.message : "failed");
   }
@@ -109,9 +115,9 @@ export default function Diagnostics() {
         <Section title="Notification cards">
           <Row label="Permission" value={cardStatus} />
           <Button
-            label="Post a smart card"
+            label="Post predicted card"
             variant="secondary"
-            onPress={() => void postDemoCard(setCardStatus)}
+            onPress={() => void postPredictedCard(setCardStatus)}
           />
           <Button label="Dismiss card" variant="ghost" onPress={() => dismissCard()} />
         </Section>

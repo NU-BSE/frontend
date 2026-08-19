@@ -55,6 +55,54 @@ function withApprovalId(schema: unknown): unknown {
   );
 }
 
+/**
+ * The protocol envelope every connector tool result is wrapped in:
+ *
+ *   { status: "success", data: <domain output> }
+ *   { status: "approval_required", approvalId, preview }
+ *   { status: "outcome_unknown", error }
+ *
+ * The MCP SDK validates `structuredContent` against the *advertised*
+ * `outputSchema`, so publishing the connector's domain `outputSchema` directly
+ * makes the SDK reject the envelope with "Output validation error". This
+ * builder wraps the domain schema into the envelope union so the advertised
+ * schema and the actual `structuredContent` agree — without changing the
+ * connector-level `outputSchema`, which stays the domain contract.
+ */
+function createMcpOutputSchema(
+  tool: ConnectorTool,
+  gated: boolean,
+): z.ZodType | undefined {
+  const domain = tool.outputSchema;
+  if (!domain) return undefined;
+
+  const success = z.object({
+    status: z.literal('success'),
+    data: domain as z.ZodType,
+  });
+
+  const outcomeUnknown = z.object({
+    status: z.literal('outcome_unknown'),
+    error: z.string(),
+  });
+
+  if (!gated) {
+    return z.discriminatedUnion('status', [success, outcomeUnknown]);
+  }
+
+  const approvalRequired = z.object({
+    status: z.literal('approval_required'),
+    approvalId: z.string().min(1),
+    preview: z.unknown().optional(),
+  });
+
+  return z.discriminatedUnion('status', [
+    success,
+    approvalRequired,
+    outcomeUnknown,
+  ]);
+}
+
 function errorResult(message: string) {
   return {
     isError: true,
@@ -158,7 +206,7 @@ export async function registerConnectorTools(
         title: primary.title,
         description: primary.description,
         inputSchema: (gated ? withApprovalId(primary.inputSchema) : primary.inputSchema) as any,
-        outputSchema: primary.outputSchema as any,
+        outputSchema: createMcpOutputSchema(primary, gated) as any,
         annotations: {
           readOnlyHint: primary.risk === 'read',
           destructiveHint: primary.risk === 'destructive',

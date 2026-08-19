@@ -21,6 +21,8 @@ import {
   type AgentToolCall,
   type AgentToolDefinition,
   type AgentToolResult,
+  type ChatAttachment,
+  type ChatSendInput,
   type ConnectionSummary,
   type PendingApproval,
 } from './types';
@@ -177,13 +179,50 @@ export class AgentRuntime {
    * Runs the loop until the model produces a final answer, fails, or is
    * stopped. Resolves when the run is over regardless of outcome; errors are
    * surfaced through the run state and the persisted run record.
+   *
+   * Accepts a plain string for backward compatibility (tests and text-only
+   * call sites) or a `ChatSendInput` carrying attachments.
    */
-  async sendMessage(text: string, threadId = 'general'): Promise<void> {
+  async sendMessage(
+    input: string | ChatSendInput,
+    threadId = 'general',
+  ): Promise<void> {
+    const sendInput: ChatSendInput =
+      typeof input === 'string' ? { text: input, attachments: [] } : input;
+    const text = sendInput.text;
+    const attachments = sendInput.attachments;
+    const hasAttachments = attachments.length > 0;
+
     if (this.abortController) {
       throw new AgentError(
         'TOOL_EXECUTION_ERROR',
         'An agent run is already in progress',
       );
+    }
+
+    // A model that cannot consume files must never be called with only the
+    // text while the attachments silently vanish. Keep the user message (with
+    // its attachments) visible and fail loudly instead.
+    if (hasAttachments && this.options.model.capabilities.fileInput !== true) {
+      const message =
+        'This model cannot open attachments. Connect a remote (cloud) model ' +
+        'to analyze files — on-device text models only read text.';
+      this.pushMessage({
+        id: this.nextId('msg'),
+        role: 'user',
+        content: text,
+        attachments,
+      });
+      this.pushMessage({
+        id: this.nextId('msg'),
+        role: 'assistant',
+        content: message,
+      });
+      this.setState({
+        type: 'failed',
+        error: new AgentError('MODEL_ERROR', message),
+      });
+      return;
     }
 
     const controller = new AbortController();
@@ -199,7 +238,10 @@ export class AgentRuntime {
       id: runId,
       threadId,
       createdAt: Date.now(),
-      userMessage: text,
+      userMessage: text.trim() || buildAttachmentSummary(attachments),
+      ...(hasAttachments
+        ? { attachmentNames: attachments.map((a) => a.name) }
+        : {}),
       steps,
       engine: this.options.model.id,
     };
@@ -209,8 +251,9 @@ export class AgentRuntime {
     this.routingMonitor.reset();
     this.toolLedger.reset();
 
-    const initialEstimate =
-      estimateInitialTier(text);
+    const initialEstimate = estimateInitialTier(
+      text.trim() || buildAttachmentSummary(attachments),
+    );
 
     this.currentTier = initialEstimate.suggestedTier;
 
@@ -227,6 +270,7 @@ export class AgentRuntime {
         id: this.nextId('msg'),
         role: 'user',
         content: text,
+        ...(hasAttachments ? { attachments } : {}),
       });
 
       // Tool discovery happens per run, so freshly connected accounts are
@@ -734,6 +778,19 @@ function tierRank(tier: ModelTier): number {
     case 'expert':
       return 2;
   }
+}
+
+/**
+ * Routing-only summary of a file-only message. This string feeds the tier
+ * estimator and the run record when the user attached files without text; it
+ * never replaces the real attachments carried on the message itself.
+ */
+function buildAttachmentSummary(attachments: ChatAttachment[]): string {
+  if (attachments.length === 0) return '';
+  const names = attachments.map((a) => a.name).join(', ');
+  return attachments.length === 1
+    ? `User attached 1 file: ${names}`
+    : `User attached ${attachments.length} files: ${names}`;
 }
 
 /**

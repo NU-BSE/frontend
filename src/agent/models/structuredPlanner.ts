@@ -138,9 +138,16 @@ function serializeTranscript(messages: readonly AgentMessage[]): string {
 
   for (const message of messages) {
     switch (message.role) {
-      case 'user':
-        lines.push(`User: ${message.content}`);
+      case 'user': {
+        const attachmentNote =
+          message.attachments && message.attachments.length > 0
+            ? ` [Attachments: ${message.attachments
+                .map((a) => a.name)
+                .join(', ')}]`
+            : '';
+        lines.push(`User: ${message.content}${attachmentNote}`);
         break;
+      }
       case 'assistant': {
         if (message.content) lines.push(`Assistant: ${message.content}`);
         for (const call of message.toolCalls ?? []) {

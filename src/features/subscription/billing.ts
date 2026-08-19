@@ -160,25 +160,17 @@ export async function fetchStorePrices(): Promise<
   if (!iap) return {};
 
   try {
-    await iap.initConnection();
-    const subscriptions = androidSubscriptions(
-      await iap.fetchProducts({ skus: [PLAY_SUBSCRIPTION_ID], type: 'subs' }),
-    );
     const connected = await iap.initConnection();
-
     if (!connected) {
       console.warn('[RN-IAP] initConnection returned false');
       return {};
     }
 
-    let subscriptions;
-
+    let subscriptions: ProductSubscriptionAndroid[];
     try {
-      subscriptions =
-        (await iap.fetchProducts({
-          skus: [PLAY_SUBSCRIPTION_ID],
-          type: 'subs',
-        })) ?? [];
+      subscriptions = androidSubscriptions(
+        await iap.fetchProducts({ skus: [PLAY_SUBSCRIPTION_ID], type: 'subs' }),
+      );
     } catch (error) {
       console.warn(
         '[RN-IAP] fetchProducts failed, reconnecting once:',
@@ -188,11 +180,9 @@ export async function fetchStorePrices(): Promise<
       // Re-establish connection after SERVICE_DISCONNECTED
       await iap.initConnection();
 
-      subscriptions =
-        (await iap.fetchProducts({
-          skus: [PLAY_SUBSCRIPTION_ID],
-          type: 'subs',
-        })) ?? [];
+      subscriptions = androidSubscriptions(
+        await iap.fetchProducts({ skus: [PLAY_SUBSCRIPTION_ID], type: 'subs' }),
+      );
     }
 
     const prices: Partial<Record<BillingPeriod, StorePrice>> = {};
@@ -204,16 +194,6 @@ export async function fetchStorePrices(): Promise<
         // Skip the free-trial phase, whose price is zero, and show what the
         // user will actually be charged when the trial ends.
         .find((item) => Number(item?.priceAmountMicros ?? 0) > 0);
-
-      const offer = subscriptions
-        .flatMap(
-          (product) => product.subscriptionOfferDetailsAndroid ?? [],
-        )
-        .find((detail) => detail?.basePlanId === basePlanId);
-
-      const phase = offer?.pricingPhases?.pricingPhaseList?.find(
-        (item) => Number(item?.priceAmountMicros ?? 0) > 0,
-      );
 
       if (phase?.formattedPrice) {
         prices[period] = {

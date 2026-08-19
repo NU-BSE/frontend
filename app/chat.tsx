@@ -14,7 +14,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Screen } from '@/components/Screen';
 import { Text } from '@/components/Text';
 import { useAi } from '@/ai/AiProvider';
-import { useAgentChat } from '@/agent/useAgentChat';
+import { useAgentChatSession } from '@/agent/AgentChatProvider';
 import type { AgentMessage, ChatAttachment, ChatSendInput } from '@/agent/types';
 import { uploadFile } from '@/api/files';
 import { AgentMessageItem } from '@/features/chat/AgentMessageItem';

@@ -1,19 +1,19 @@
 import type { ConnectionRecord, ConnectionStore } from '@mobile-agent/connector-core';
+import { TELEGRAM_USER_SCOPES } from '@mobile-agent/connector-telegram';
 
 /**
- * The one connection that exists without anyone signing in, plus cleanup of
- * the ones that used to.
+ * Development-mode seeding.
  *
- * Development mode previously pre-connected thirteen labelled mock accounts so
- * the agent loop was demoable without credentials. The cost was that every
- * service read "Connected" on a fresh install while none of them were, which
- * is a claim the app should never make about someone's accounts — and a user
- * could "disconnect" an account they had never connected.
+ * In `development` mode the runtime pre-connects clearly labeled mock
+ * accounts so the agent loop is demoable end-to-end without real provider
+ * credentials (the same affordance the app had before the connection model
+ * became real). In `production` this function is never called: connections
+ * only appear through real auth flows.
  *
- * Now only the device itself is connected, in every mode. It is not a mock and
- * not an account: the Android connector reads local data through OS
- * permissions, so there is no credential to obtain and nothing to sign into.
- * Everything else appears only through a real auth flow.
+ * The Android device is deliberately not seeded: the real `AndroidConnector`
+ * uses the stable `android-device` id and only registers when the native
+ * settings bridge is present, so seeding a mock copy here would either shadow
+ * the real connection or be removed as a "legacy" row on the next startup.
  */
 function devConnection(
   id: string,
@@ -25,7 +25,7 @@ function devConnection(
   return {
     id,
     connectorId,
-    displayName,
+    displayName: `${displayName} (development mock)`,
     status: 'connected',
     scopes: [],
     capabilities: [`${connectorId}.read`, `${connectorId}.write`],
@@ -36,18 +36,6 @@ function devConnection(
 }
 
 const DEV_CONNECTIONS: ConnectionRecord[] = [
-  devConnection('android-device', 'android', 'This device', {
-    capabilities: [
-      'android.contacts.read',
-      'android.calendar.read',
-      'android.files.read',
-      'android.notifications.read',
-      'android.location.read',
-      'android.clipboard.read',
-      'android.apps.read',
-      'android.media.control',
-    ],
-  }),
   devConnection('google-default', 'google', 'Google Account'),
   devConnection('telegram-bot-default', 'telegram-bot', 'Telegram Bot'),
   devConnection('telegram-user-default', 'telegram-user', 'Telegram User', {
@@ -86,16 +74,14 @@ export async function seedDevelopmentConnections(
 const CLEANUP_IDS = new Set(DEV_CONNECTIONS.map((c) => c.id));
 
 /**
- * Removes the connections the old development seed created.
- *
- * Runs in every mode, unlike the seeding it undoes: a user who ran a
- * development build once has these rows on disk, and they are just as wrong in
- * a production build.
+ * Removes known development-seed connections from the store.
+ * Safe to call in production — only removes the well-known fixed IDs,
+ * never touches real user connections.
  */
 export async function removeDevelopmentConnections(
   store: ConnectionStore,
 ): Promise<void> {
-  for (const id of LEGACY_SEED_IDS) {
+  for (const id of CLEANUP_IDS) {
     await store.remove(id);
   }
 }

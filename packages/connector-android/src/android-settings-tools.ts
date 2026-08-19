@@ -140,7 +140,13 @@ export function createAndroidSettingsTools(
       execute: async (input: { connectionId: string; percent: number }) => {
         requireWriteSettings();
         try {
-          bridge.setScreenBrightnessPercent(input.percent);
+          const applied = bridge.setScreenBrightnessPercent(input.percent);
+          if (!applied) {
+            throw new ConnectorError(
+              'Android did not apply the requested brightness.',
+              'PROVIDER_ERROR',
+            );
+          }
           return { percent: input.percent };
         } catch (error) {
           throw mapAndroidSettingsError(error, 'setting screen brightness');
@@ -183,7 +189,13 @@ export function createAndroidSettingsTools(
       execute: async (input: { connectionId: string; milliseconds: number }) => {
         requireWriteSettings();
         try {
-          bridge.setScreenTimeout(input.milliseconds);
+          const applied = bridge.setScreenTimeout(input.milliseconds);
+          if (!applied) {
+            throw new ConnectorError(
+              'Android did not apply the requested screen timeout.',
+              'PROVIDER_ERROR',
+            );
+          }
           return { milliseconds: input.milliseconds };
         } catch (error) {
           throw mapAndroidSettingsError(error, 'setting screen timeout');
@@ -226,7 +238,13 @@ export function createAndroidSettingsTools(
       execute: async (input: { connectionId: string; enabled: boolean }) => {
         requireWriteSettings();
         try {
-          bridge.setAutoRotate(input.enabled);
+          const applied = bridge.setAutoRotate(input.enabled);
+          if (!applied) {
+            throw new ConnectorError(
+              'Android did not apply the requested auto-rotate setting.',
+              'PROVIDER_ERROR',
+            );
+          }
           return { enabled: input.enabled };
         } catch (error) {
           throw mapAndroidSettingsError(error, 'setting auto-rotate');
@@ -256,7 +274,13 @@ export function createAndroidSettingsTools(
               'UNSUPPORTED',
             );
           }
-          await bridge.openSettings(input.screen);
+          const opened = await bridge.openSettings(input.screen);
+          if (!opened) {
+            throw new ConnectorError(
+              `Android did not open the "${input.screen}" settings screen.`,
+              'PROVIDER_ERROR',
+            );
+          }
           return { opened: true as const, screen: input.screen };
         } catch (error) {
           throw mapAndroidSettingsError(error, `opening "${input.screen}" settings`);
@@ -285,7 +309,13 @@ export function createAndroidSettingsTools(
               'UNSUPPORTED',
             );
           }
-          await bridge.openPanel(input.panel);
+          const opened = await bridge.openPanel(input.panel);
+          if (!opened) {
+            throw new ConnectorError(
+              `Android did not open the "${input.panel}" settings panel.`,
+              'PROVIDER_ERROR',
+            );
+          }
           return { opened: true as const, panel: input.panel };
         } catch (error) {
           throw mapAndroidSettingsError(error, `opening "${input.panel}" panel`);

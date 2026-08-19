@@ -329,10 +329,12 @@ async function main(): Promise<void> {
 
   for (const tool of gated) {
     const args: Record<string, unknown> = {
-      // Ids created by this script above, not seeded by the runtime.
+      // Development-seeded mock connections (the runtime still seeds these in
+      // development mode; the `-verify` rows above exercise the namespace
+      // assertion without re-seeding Telegram's adapter).
       connectionId: tool.name.startsWith('telegram.bot')
-        ? 'telegram-bot-verify'
-        : 'telegram-user-verify',
+        ? 'telegram-bot-default'
+        : 'telegram-user-default',
       chatId: '1',
       text: 'x',
       messageId: 1,

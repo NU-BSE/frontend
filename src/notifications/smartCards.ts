@@ -1,4 +1,4 @@
-import { Platform } from 'react-native';
+import { NativeEventEmitter, NativeModules, Platform } from 'react-native';
 
 import NativeSmartCards from '@/specs/NativeSmartCards';
 
@@ -61,6 +61,40 @@ export const SMART_CARD_NOTIFICATION_ID = 4242;
 
 /** Android shows three action buttons and silently drops the rest. */
 const MAX_ACTIONS = 3;
+
+/**
+ * Action ids the app assigns meaning to.
+ *
+ * Shared constants rather than strings written at both ends: the press event
+ * carries only this id, so a typo on either side would silently produce a
+ * button that does nothing.
+ */
+export const APPROVE_ACTION_ID = 'approval:confirm';
+export const REJECT_ACTION_ID = 'approval:reject';
+
+/** Emitted by the native module when a card button is pressed. */
+const PRESS_EVENT = 'SmartCards.press';
+
+/**
+ * Listen for card presses.
+ *
+ * Only delivered while the JS runtime is alive. That is not a gap for
+ * approvals — an approval belongs to an agent run held in memory, so if the
+ * process is gone there is nothing left to approve.
+ *
+ * Returns an unsubscribe function.
+ */
+export function onCardPress(listener: (actionId: string) => void): () => void {
+  if (!isAndroid()) return () => {};
+
+  const emitter = new NativeEventEmitter(
+    NativeModules.SmartCards as ConstructorParameters<typeof NativeEventEmitter>[0],
+  );
+  const subscription = emitter.addListener(PRESS_EVENT, (actionId: string) => {
+    listener(actionId);
+  });
+  return () => subscription.remove();
+}
 
 export class SmartCardError extends Error {
   constructor(message: string) {

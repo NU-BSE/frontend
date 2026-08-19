@@ -401,7 +401,7 @@ async function main(): Promise<void> {
     );
     assert(
       !ids.includes('android'),
-      'mock connectors are still not registered in production',
+      'android is not registered when its native settings bridge is absent (Node)',
     );
 
     const active = await registry.listActiveTools();

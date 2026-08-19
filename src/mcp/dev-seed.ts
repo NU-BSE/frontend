@@ -31,18 +31,6 @@ function devConnection(
 }
 
 const DEV_CONNECTIONS: ConnectionRecord[] = [
-  devConnection('android-device', 'android', 'This device', {
-    capabilities: [
-      'android.contacts.read',
-      'android.calendar.read',
-      'android.files.read',
-      'android.notifications.read',
-      'android.location.read',
-      'android.clipboard.read',
-      'android.apps.read',
-      'android.media.control',
-    ],
-  }),
   devConnection('google-default', 'google', 'Google Account'),
   devConnection('telegram-bot-default', 'telegram-bot', 'Telegram Bot'),
   devConnection('telegram-user-default', 'telegram-user', 'Telegram User', {

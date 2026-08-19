@@ -1,0 +1,9 @@
+{
+  "platforms": ["apple", "android", "web"],
+  "apple": {
+    "modules": ["CreepyAndroidSettingsModule"]
+  },
+  "android": {
+    "modules": ["expo.modules.creepyandroidsettings.CreepyAndroidSettingsModule"]
+  }
+}

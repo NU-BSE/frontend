@@ -119,12 +119,29 @@ export function ConnectorList() {
                   }}
                   accessibilityLabel={
                     connectable
-                      ? `${entry.label}. ${connected ? 'Connected. Tap to disconnect' : reconnectRequired ? 'Reconnect required. Tap to reconnect' : entry.summary}`
+                      ? `${entry.label}. ${
+                          entry.connectorId === 'android'
+                            ? connected
+                              ? 'Connected. Tap to manage'
+                              : entry.summary
+                            : connected
+                              ? 'Connected. Tap to disconnect'
+                              : reconnectRequired
+                                ? 'Reconnect required. Tap to reconnect'
+                                : entry.summary
+                        }`
                       : `${entry.label}. ${entry.note ?? 'Coming soon'}`
                   }
                   disabled={!canPress || busy || isPending}
                   onPress={() => {
                     if (!entry.connectorId) return;
+                    // Android is a special connector: tapping it always opens
+                    // its dedicated screen (connect, permissions, disconnect),
+                    // never an inline disconnect.
+                    if (entry.connectorId === 'android') {
+                      router.push('/connect/android');
+                      return;
+                    }
                     if (connectorConnections.length > 0) {
                       void (async () => {
                         for (const record of connectorConnections) {

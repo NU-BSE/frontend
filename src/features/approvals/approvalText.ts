@@ -96,22 +96,38 @@ const DESCRIBERS: Record<
     ],
   }),
 
-  'android.share.text': (args) => ({
-    title: 'Share text?',
-    confirmLabel: 'Share',
-    fields: [{ label: 'Text', value: asText(args.text) }],
+  'android.settings.set_brightness': (args) => ({
+    title: 'Change screen brightness?',
+    confirmLabel: 'Change',
+    fields: [{ label: 'Brightness', value: `${asText(args.percent)}%` }],
   }),
 
-  'android.share.file': (args) => ({
-    title: 'Share file?',
-    confirmLabel: 'Share',
-    fields: [{ label: 'File', value: asText(args.uri) }],
+  'android.settings.set_screen_timeout': (args) => ({
+    title: 'Change screen timeout?',
+    confirmLabel: 'Change',
+    fields: [
+      { label: 'Timeout', value: `${asText(args.milliseconds)} ms` },
+    ],
   }),
 
-  'android.clipboard.write': (args) => ({
-    title: 'Write to clipboard?',
-    confirmLabel: 'Write',
-    fields: [{ label: 'Text', value: asText(args.text) }],
+  'android.settings.set_auto_rotate': (args) => ({
+    title: 'Toggle auto-rotate?',
+    confirmLabel: 'Change',
+    fields: [
+      { label: 'Enabled', value: asText(args.enabled) },
+    ],
+  }),
+
+  'android.settings.open': (args) => ({
+    title: 'Open Android settings?',
+    confirmLabel: 'Open',
+    fields: [{ label: 'Screen', value: asText(args.screen) }],
+  }),
+
+  'android.settings.open_panel': (args) => ({
+    title: 'Open Android settings panel?',
+    confirmLabel: 'Open',
+    fields: [{ label: 'Panel', value: asText(args.panel) }],
   }),
 
   'calendar.create_event': (args) => ({

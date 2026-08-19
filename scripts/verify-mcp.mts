@@ -11,8 +11,11 @@ import { ToolExecutionError } from '@mobile-agent/mcp-client';
 import {
   approveConnectorTool,
   closeLocalMcpRuntime,
+  getConnectionStore,
   getLocalMcpRuntime,
+  restartLocalMcpRuntime,
 } from '../src/mcp/runtime-singleton.js';
+import { TELEGRAM_USER_SCOPES } from '@mobile-agent/connector-telegram';
 import { runMcpSpike } from '../src/mcp/run-mcp-spike.js';
 
 /*
@@ -70,6 +73,14 @@ function assertQuiet(condition: unknown, message: string): asserts condition {
 }
 
 /** Every connector namespace that must reach the agent. */
+/*
+ * Node has no native TDLib, and the adapter now defaults to native everywhere
+ * — a mock has to be asked for by name. This script asks. It exercises the
+ * whole tool surface, including Telegram's, which needs an adapter that runs
+ * off-device.
+ */
+process.env.EXPO_PUBLIC_TELEGRAM_ADAPTER = 'mock';
+
 const CONNECTOR_NAMESPACES = [
   'android',
   'google',
@@ -137,6 +148,37 @@ async function main(): Promise<void> {
   );
 
   console.log('connector tools:');
+
+  /*
+   * Connect the accounts this section asserts on, instead of relying on the
+   * runtime to have pre-connected them. It no longer does: only the device is
+   * connected out of the box, because claiming a dozen linked accounts on a
+   * fresh install was a lie the app told about the user's data. Tools follow
+   * connections, so a test about tools has to make the connections.
+   */
+  const connectionStore = getConnectionStore();
+  for (const namespace of CONNECTOR_NAMESPACES) {
+    const connectorId = namespace === 'telegram' ? 'telegram-user' : namespace;
+    if (connectorId === 'android') continue;
+    const now = Date.now();
+    // Telegram gates its send tool on a declared scope, so grant the ones the
+    // connector publishes rather than a generic read/write pair.
+    const scopes =
+      connectorId === 'telegram-user'
+        ? [...TELEGRAM_USER_SCOPES]
+        : [`${connectorId}.read`, `${connectorId}.write`];
+    await connectionStore.save({
+      id: `${connectorId}-verify`,
+      connectorId: connectorId as never,
+      displayName: `${connectorId} (verification)`,
+      status: 'connected',
+      scopes,
+      capabilities: scopes,
+      createdAt: now,
+      updatedAt: now,
+    });
+  }
+  await restartLocalMcpRuntime();
 
   const runtimeWithConnectors = await getLocalMcpRuntime();
   const allTools = await runtimeWithConnectors.mcp.listTools();
@@ -287,9 +329,10 @@ async function main(): Promise<void> {
 
   for (const tool of gated) {
     const args: Record<string, unknown> = {
+      // Ids created by this script above, not seeded by the runtime.
       connectionId: tool.name.startsWith('telegram.bot')
-        ? 'telegram-bot-default'
-        : 'telegram-user-default',
+        ? 'telegram-bot-verify'
+        : 'telegram-user-verify',
       chatId: '1',
       text: 'x',
       messageId: 1,

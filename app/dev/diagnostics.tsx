@@ -1,15 +1,28 @@
-import React from "react";
+import React, { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useRouter } from "expo-router";
 import { ScrollView, StyleSheet, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useAgentContext } from "@/agent/AgentProvider";
 import { Button } from "@/components/Button";
+import {
+  hasPermission as hasNotificationPermission,
+  requestPermission as requestNotificationPermission,
+  showCard,
+  dismiss as dismissCard,
+  onCardPress,
+} from "@/notifications/smartCards";
 import { Screen } from "@/components/Screen";
 import { Text } from "@/components/Text";
 import { useConnections } from "@/connections/useConnections";
 import { getLocalMcpRuntime, getRuntimeMode } from "@/mcp/runtime-singleton";
+import MODEL_JSON from "@/prediction/fixtures/category_models.sample.json";
+import type { ModelBundle } from "@/prediction/inference";
+import { cardForNextCategory } from "@/prediction/schedule";
+import { approvalCard } from "@/agent/approvalCard";
 import { gutter, palette, radius, shadow, spacing } from "@/theme/tokens";
+
+const MODEL_BUNDLE = MODEL_JSON as unknown as ModelBundle;
 
 /**
  * Developer diagnostics for the agent stack (MCP health, registered tools,
@@ -17,7 +30,61 @@ import { gutter, palette, radius, shadow, spacing } from "@/theme/tokens";
  * the chat screen — the MCP debug button no longer ships in the normal UI.
  * No tokens or secrets are displayed.
  */
+/**
+ * Post whatever the predictor says is due.
+ *
+ * Nothing about the card is written here: the category, the apps named and the
+ * buttons all come from the user's own usage run through the frozen model. If
+ * no category is due, nothing is posted — a card with no prediction behind it
+ * would be an advertisement wearing a prediction's clothes.
+ *
+ * The history used here is the demo one; in the app it comes from the agent's
+ * tool logs.
+ */
+async function postPredictedCard(
+  setStatus: (value: string) => void,
+): Promise<void> {
+  try {
+    const granted =
+      (await hasNotificationPermission()) ||
+      (await requestNotificationPermission());
+    if (!granted) {
+      setStatus("denied — enable notifications in system settings");
+      return;
+    }
+
+    const now = Math.floor(Date.now() / 1000);
+    const hour = 3600;
+    const events = [
+      { packageName: "org.telegram.messenger", at: now - 11 * hour },
+      { packageName: "com.google.android.gm", at: now - 8 * hour },
+      { packageName: "org.telegram.messenger", at: now - 4 * hour },
+      { packageName: "org.telegram.messenger", at: now - 1 * hour },
+    ];
+
+    const card = cardForNextCategory(MODEL_BUNDLE, events, now);
+    if (!card) {
+      setStatus("nothing predicted as due — no card posted");
+      return;
+    }
+
+    await showCard(card);
+    setStatus("posted from prediction");
+  } catch (error) {
+    setStatus(error instanceof Error ? error.message : "failed");
+  }
+}
+
 export default function Diagnostics() {
+  const [cardStatus, setCardStatus] = useState("idle");
+  const [pressStatus, setPressStatus] = useState("no press yet");
+
+  /*
+   * Proves the half of the approval bridge that crosses the native boundary:
+   * a button pressed on a notification has to reach JavaScript for the
+   * approval to be resolved without opening the app.
+   */
+  React.useEffect(() => onCardPress((actionId) => setPressStatus(actionId)), []);
   const insets = useSafeAreaInsets();
   const router = useRouter();
   const { modelId, capabilities } = useAgentContext();
@@ -54,6 +121,32 @@ export default function Diagnostics() {
           <Text variant="headline">Agent diagnostics</Text>
           <Button label="Back" variant="ghost" onPress={() => router.back()} />
         </View>
+
+        <Section title="Notification cards">
+          <Row label="Permission" value={cardStatus} />
+          <Button
+            label="Post predicted card"
+            variant="secondary"
+            onPress={() => void postPredictedCard(setCardStatus)}
+          />
+          <Button
+            label="Post approval card"
+            variant="secondary"
+            onPress={() => {
+              void showCard(
+                approvalCard({
+                  approvalId: "diag-1",
+                  toolCallId: "call-1",
+                  toolName: "telegram.user.send_message",
+                  args: { chatId: "123456789", text: "on my way" },
+                  preview: null,
+                }),
+              );
+            }}
+          />
+          <Row label="Last press" value={pressStatus} />
+          <Button label="Dismiss card" variant="ghost" onPress={() => dismissCard()} />
+        </Section>
 
         <Section title="MCP runtime">
           <Row label="Mode" value={getRuntimeMode() ?? "not initialized"} />

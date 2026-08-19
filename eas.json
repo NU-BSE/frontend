@@ -1,0 +1,37 @@
+{
+  "cli": {
+    "version": ">= 21.8.0",
+    "appVersionSource": "remote"
+  },
+  "build": {
+    "development": {
+      "developmentClient": true,
+      "distribution": "internal",
+      "env": {
+        "EXPO_PUBLIC_API_URL": "https://api.creepy.im",
+        "EXPO_PUBLIC_OAUTH": "113810819709-javkhtvie8tjsuph29flcoesr0h4sio6.apps.googleusercontent.com",
+        "EXPO_PUBLIC_TELEGRAM_API_ID": "19448980",
+        "EXPO_PUBLIC_TELEGRAM_API_HASH": "1f059e508b725eb1ea4481f300b1b44c",
+        "EXPO_PUBLIC_TELEGRAM_ADAPTER": "native",
+        "EXPO_PUBLIC_MCP_RUNTIME_MODE": "development"
+      }
+    },
+    "preview": {
+      "distribution": "internal"
+    },
+    "production": {
+      "autoIncrement": true,
+      "env": {
+        "EXPO_PUBLIC_API_URL": "https://api.creepy.im",
+	      "EXPO_PUBLIC_OAUTH": "113810819709-javkhtvie8tjsuph29flcoesr0h4sio6.apps.googleusercontent.com",
+        "EXPO_PUBLIC_TELEGRAM_API_ID": "19448980",
+        "EXPO_PUBLIC_TELEGRAM_API_HASH": "1f059e508b725eb1ea4481f300b1b44c",
+        "EXPO_PUBLIC_TELEGRAM_ADAPTER": "native",
+        "EXPO_PUBLIC_MCP_RUNTIME_MODE": "production"
+      }
+    }
+  },
+  "submit": {
+    "production": {}
+  }
+}

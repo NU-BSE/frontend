@@ -6,20 +6,56 @@ const PACKAGE_NAME = 'com.attestation.nativeprobes';
 const IMPORT_KOTLIN = `import ${PACKAGE_NAME}.AttestationNativeProbesPackage`;
 const IMPORT_JAVA = `import ${PACKAGE_NAME}.AttestationNativeProbesPackage;`;
 
+const SOURCE_FILES = [
+  'AttestationNativeProbesModule.kt',
+  'AttestationNativeProbesPackage.kt',
+];
+
+/**
+ * Copy the native sources into the generated project.
+ *
+ * The source path deliberately contains no directory segment named `android`.
+ * .gitignore excludes `android/` unanchored — correctly, since every directory
+ * with that name is generated output — but EAS Build filters its upload with
+ * those same rules, and it does so by path, not by whether git tracks the
+ * file. These two files were committed and present locally, and still never
+ * reached the build worker: prebuild there died on an ENOENT for a file that
+ * exists in the repository, which is about as misleading as a build error
+ * gets. Keeping hand-written Kotlin out from under `android/` is what makes it
+ * survive the trip.
+ *
+ * Unlike the Google authorization module, a missing source here is fatal
+ * rather than skippable. Google sign-in degrades to a visible "no native
+ * bridge" message, but attestation degrades to silence: the device assessment
+ * reports "unavailable" and a release ships with its hardware integrity checks
+ * quietly absent. A security control must not disappear because a file did.
+ */
 function copyNativeSources(projectRoot, platformProjectRoot) {
   const sourceRoot = path.join(
     projectRoot,
-    'src/attestation/native/android/src/main/java/com/attestation/nativeprobes',
+    'src/attestation/native/kotlin/com/attestation/nativeprobes',
   );
+
+  const missing = SOURCE_FILES.filter(
+    (file) => !fs.existsSync(path.join(sourceRoot, file)),
+  );
+  if (missing.length > 0) {
+    throw new Error(
+      `[with-attestation-native-probes] Cannot build: ${missing.join(', ')} ` +
+        `not found in ${sourceRoot}.\n` +
+        'These files are committed, so on a build worker this means they were ' +
+        'excluded from the upload — check that no .gitignore or .easignore ' +
+        'rule matches the path above. Attestation is a security control and ' +
+        'is not built without it.',
+    );
+  }
+
   const targetRoot = path.join(
     platformProjectRoot,
     'app/src/main/java/com/attestation/nativeprobes',
   );
   fs.mkdirSync(targetRoot, { recursive: true });
-  for (const file of [
-    'AttestationNativeProbesModule.kt',
-    'AttestationNativeProbesPackage.kt',
-  ]) {
+  for (const file of SOURCE_FILES) {
     fs.copyFileSync(path.join(sourceRoot, file), path.join(targetRoot, file));
   }
 }

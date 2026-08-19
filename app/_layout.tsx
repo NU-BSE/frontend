@@ -12,6 +12,7 @@ import { SafeAreaProvider } from "react-native-safe-area-context";
 
 import { AiProvider } from "@/ai/AiProvider";
 import { AgentProvider } from "@/agent/AgentProvider";
+import { AgentChatProvider } from "@/agent/AgentChatProvider";
 import { AuthRouteGuard } from "@/auth/AuthRouteGuard";
 import { registerAppMcpDependencies } from "@/mcp/app-dependencies";
 import { palette } from "@/theme/tokens";
@@ -60,6 +61,7 @@ export default function RootLayout() {
           <AuthRouteGuard>
             <AiProvider>
               <AgentProvider>
+                <AgentChatProvider>
                 <StatusBar style="dark" />
                 <Stack
                   screenOptions={{
@@ -79,6 +81,7 @@ export default function RootLayout() {
                     }}
                   />
                 </Stack>
+                </AgentChatProvider>
               </AgentProvider>
             </AiProvider>
           </AuthRouteGuard>

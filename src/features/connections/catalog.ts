@@ -4,18 +4,26 @@ import type { ConnectorId } from '@mobile-agent/connector-core';
  * The connector catalogue shown on "Connect your services" and Account →
  * Connectors.
  *
- * Mirrors section 1 of IMPLEMENT_ALL_CONNECTORS.md, so the screen is a
- * complete picture of what the agent can reach. It replaces AUTH_PROVIDERS,
- * which listed four sign-in providers while thirteen connectors were actually
- * registered — most of the surface was invisible.
+ * RELEASE BUILD: three connectors, one row.
+ *
+ * On main this lists all fourteen entries from section 1 of
+ * IMPLEMENT_ALL_CONNECTORS.md, which is right for development — the full
+ * surface stays visible while it is built. It is wrong for a release. Of those
+ * fourteen, only these three reach a real service today: the rest are mock
+ * implementations or have no connector registered at all, so they render as
+ * "Coming soon" tiles that a shipping app is simply advertising and cannot
+ * honour.
+ *
+ * Cutting to three is also what makes the grid a single row of three at
+ * COLUMNS = 3, with no short trailing row.
  *
  * `connectorId` is the id the connector registers under, so a tile maps
- * straight onto a ConnectionRecord. Planned entries have none: nothing is
- * registered for them yet, and a tile that cannot resolve to a connector must
- * not offer to connect.
+ * straight onto a ConnectionRecord. Availability is still resolved against the
+ * live registry by ConnectorList, so shortening this list narrows what is
+ * offered without ever widening it.
  *
- * Deliberately excluded: the spec's "VLM/UI automation fallback", which it
- * marks research/internal-only.
+ * To restore an entry, copy it back from main — the removed lines are intact
+ * there, and this file is the only place they lived.
  */
 export interface ConnectorCatalogEntry {
   key: string;
@@ -28,18 +36,7 @@ export interface ConnectorCatalogEntry {
 }
 
 export const CONNECTOR_CATALOG: ConnectorCatalogEntry[] = [
-  { key: 'android', label: 'This device', summary: 'Contacts, calendar, files', connectorId: 'android' },
-  { key: 'google', label: 'Google', summary: 'Calendar, Gmail, Drive', connectorId: 'google' },
+  { key: 'android', label: 'Settings', summary: 'This device', connectorId: 'android' },
   { key: 'telegram-user', label: 'Telegram', summary: 'Personal account', connectorId: 'telegram-user' },
-  { key: 'telegram-bot', label: 'Telegram Bot', summary: 'Bot API messaging', connectorId: 'telegram-bot' },
-  { key: 'microsoft', label: 'Microsoft', summary: 'Outlook, OneDrive, To Do', connectorId: 'microsoft' },
-  { key: 'slack', label: 'Slack', summary: 'Channels and messages', connectorId: 'slack' },
-  { key: 'notion', label: 'Notion', summary: 'Pages and databases', connectorId: 'notion' },
-  { key: 'todoist', label: 'Todoist', summary: 'Projects and tasks', connectorId: 'todoist' },
-  { key: 'github', label: 'GitHub', summary: 'Repos, issues, actions', connectorId: 'github' },
-  { key: 'dropbox', label: 'Dropbox', summary: 'Files and sharing', connectorId: 'dropbox' },
-  { key: 'discord', label: 'Discord', summary: 'Guilds and channels', connectorId: 'discord' },
-  { key: 'spotify', label: 'Spotify', summary: 'Search and playback', connectorId: 'spotify' },
-  { key: 'intent', label: 'App intents', summary: 'Open apps and links', connectorId: 'intent' },
-  { key: 'whatsapp', label: 'WhatsApp', summary: 'Share and deep links', note: 'Coming soon' },
+  { key: 'google', label: 'Google', summary: 'Calendar and Drive', connectorId: 'google' },
 ];

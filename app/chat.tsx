@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useRef } from 'react';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
-import { useLocalSearchParams, useRouter } from 'expo-router';
+import { useFocusEffect, useLocalSearchParams, useRouter } from 'expo-router';
 import {
   FlatList,
   KeyboardAvoidingView,
@@ -60,10 +60,20 @@ export default function Chat() {
     rejectPendingApproval,
     cancel,
     retryInitialization,
-  } = useAgentChat({
-    threadId: scenario?.id,
-    category: scenario?.title,
-  });
+    setChatVisible,
+  } = useAgentChatSession();
+
+  /*
+   * The screen reports its own visibility so an approval only becomes a
+   * notification when the user genuinely cannot see it. Tied to focus rather
+   * than mount: this screen is a modal, and the one underneath stays mounted.
+   */
+  useFocusEffect(
+    useCallback(() => {
+      setChatVisible(true);
+      return () => setChatVisible(false);
+    }, [setChatVisible]),
+  );
 
   // Text-only fallback persists here; agent runs persist through the
   // runtime's run records (which also capture tool/approval steps).

@@ -82,6 +82,18 @@ export function ConnectorList() {
                   )
                 : undefined;
 
+              const connected =
+                Boolean(connection) && connection?.status === 'connected';
+
+              /*
+               * The device is not an account. The Android connector reads
+               * local data through OS permissions, so there is nothing to
+               * sign into and nothing to sign out of — offering "disconnect"
+               * would imply a link the user could sever, when the only real
+               * control is Android's own permission settings.
+               */
+              const permanent = entry.connectorId === 'android';
+              const reconnectRequired = connection?.status === 'reconnect_required';
               const connectorConnections = entry.connectorId
                 ? connections?.filter(
                     (record) => record.connectorId === entry.connectorId,
@@ -114,14 +126,22 @@ export function ConnectorList() {
                   key={entry.key}
                   accessibilityRole="button"
                   accessibilityState={{
+                    disabled: permanent || !connectable || busy || isPending,
                     disabled: !canPress || busy || isPending,
                     selected: connected,
                   }}
                   accessibilityLabel={
-                    connectable
-                      ? `${entry.label}. ${connected ? 'Connected. Tap to disconnect' : reconnectRequired ? 'Reconnect required. Tap to reconnect' : entry.summary}`
-                      : `${entry.label}. ${entry.note ?? 'Coming soon'}`
+                    permanent
+                      ? `${entry.label}. Always available on this device.`
+                      : connectable
+                        ? `${entry.label}. ${connected ? 'Connected. Tap to disconnect' : reconnectRequired ? 'Reconnect required. Tap to reconnect' : entry.summary}`
+                        : `${entry.label}. ${entry.note ?? 'Coming soon'}`
                   }
+                  disabled={permanent || !connectable || busy || isPending}
+                  onPress={() => {
+                    if (!entry.connectorId || permanent) return;
+                    if (connected && connection) {
+                      disconnect.mutate(connection.id);
                   disabled={!canPress || busy || isPending}
                   onPress={() => {
                     if (!entry.connectorId) return;
@@ -163,13 +183,23 @@ export function ConnectorList() {
                     style={styles.cellText}
                     numberOfLines={2}
                   >
+                    {/*
+                      * The device tile shows the catalogue text, not the
+                      * stored displayName. The record is written before the
+                      * connection list is read, so a label migrated at startup
+                      * can still lose the race and render stale — and unlike a
+                      * real account, there is no account name here worth
+                      * showing anyway.
+                      */}
                     {busy
                       ? 'Working…'
-                      : connected
-                        ? (connection?.displayName ?? 'Connected')
-                        : reconnectRequired
-                          ? 'Reconnect required'
-                          : (entry.note ?? entry.summary)}
+                      : permanent
+                        ? entry.summary
+                        : connected
+                          ? (connection?.displayName ?? 'Connected')
+                          : reconnectRequired
+                            ? 'Reconnect required'
+                            : (entry.note ?? entry.summary)}
                   </Text>
                   {connected ? (
                     <Text variant="tag" tone="brand" uppercase>

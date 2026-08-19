@@ -17,6 +17,8 @@ import {
   annualSavingUsd,
   planFor,
 } from '../src/features/subscription/plans.js';
+import { resolvePricing } from '../src/features/subscription/pricing.js';
+import { describeHttpFailure } from '../src/api/httpErrors.js';
 import {
   ANDROID_GUIDE_CLUSTERS,
   ANDROID_GUIDE_LEAD_PROMPTS,
@@ -229,13 +231,143 @@ console.log('\nsubscription plans:');
     'the badge matches the derived saving',
   );
 
-  // Base plan ids are what Play matches offers on; a typo here is a paywall
-  // that cannot complete a purchase.
+  /*
+   * Base plan ids are what Play matches offers on; a wrong one is a paywall
+   * that cannot complete a purchase.
+   *
+   * This check used to assert /^creepyim-pro-(monthly|annual)$/ — a convention
+   * invented here, matching nothing in the Play Console, which generated
+   * plan-1 and plan-2. It passed for as long as the ids were wrong, because it
+   * validated our guess rather than reality. Pinned to the console's ids now,
+   * so changing one is a deliberate act.
+   */
   const ids = SUBSCRIPTION_PLANS.map((plan) => plan.basePlanId);
   assert(new Set(ids).size === ids.length, 'base plan ids are distinct');
+  assert(planFor('monthly').basePlanId === 'plan-1', 'monthly is plan-1');
+  assert(planFor('annual').basePlanId === 'plan-2', 'annual is plan-2');
+
+  console.log('\nAPI failures always say something:');
+  {
+    /*
+     * A proxy refusing on the backend's behalf answers in plain text, so
+     * response.json() throws and there is no `message` to show. The old
+     * fallback was response.statusText, which React Native leaves empty — the
+     * sign-up screen set its error to "" and rendered nothing, so Continue
+     * looked like it did nothing while api.creepy.im was returning 502.
+     */
+    const origin = 'https://api.creepy.im';
+    for (const status of [500, 502, 503, 504, 400, 404, 429]) {
+      const message = describeHttpFailure(status, '', origin);
+      assert(
+        message.trim().length > 0,
+        `HTTP ${status} with no body produces a message`,
+      );
+      assert(
+        message.includes(String(status)),
+        `HTTP ${status} names the status code`,
+      );
+    }
+
+    assert(
+      /not responding/u.test(describeHttpFailure(502, '', origin)),
+      'a 502 reads as the server being unreachable, not a client mistake',
+    );
+    assert(
+      describeHttpFailure(404, 'Not Found', origin).includes('Not Found'),
+      'a statusText is used when the runtime provides one',
+    );
+  }
+
+  /*
+   * Localized pricing must be all-or-nothing.
+   *
+   * The screen previously showed Play's price beside USD-derived copy, so a
+   * user in Hong Kong read "HK$99.00" above "Billed $12.90 today" and a
+   * "Save $36" badge in a currency they are never charged.
+   */
+  {
+    const hk = resolvePricing({
+      monthly: {
+        formattedPrice: 'HK$99.00',
+        currencyCode: 'HKD',
+        amountMicros: 99_000_000,
+      },
+      annual: {
+        formattedPrice: 'HK$939.00',
+        currencyCode: 'HKD',
+        amountMicros: 939_000_000,
+      },
+    });
+
+    assert(hk.fromStore, 'store prices are used when both periods are present');
+    assert(hk.price('monthly') === 'HK$99.00', 'monthly shows the store price');
+    assert(
+      !/\$12\.90|\$118\.80|\$9\.90/u.test(hk.terms('monthly')),
+      'monthly terms carry no USD figures when the store answered',
+    );
+    assert(
+      !/\$12\.90|\$118\.80|\$9\.90/u.test(hk.terms('annual')),
+      'annual terms carry no USD figures when the store answered',
+    );
+    // 99 x 12 - 939 = 249
+    assert(
+      (hk.badge('annual') ?? '').includes('249'),
+      'the badge is the saving in the store currency',
+    );
+    assert(
+      hk.badge('monthly') === undefined,
+      'no badge on the plan with nothing to advertise',
+    );
+
+    // A store that answered for one period only must not be half-used.
+    const partial = resolvePricing({
+      annual: {
+        formattedPrice: 'HK$939.00',
+        currencyCode: 'HKD',
+        amountMicros: 939_000_000,
+      },
+    });
+    assert(!partial.fromStore, 'one period alone falls back to the list prices');
+    assert(
+      partial.price('annual') === planFor('annual').listPrice,
+      'the fallback is the published price, not a mix',
+    );
+
+    // Two currencies cannot be compared, so neither is trusted.
+    const mixed = resolvePricing({
+      monthly: { formattedPrice: '$12.90', currencyCode: 'USD', amountMicros: 12_900_000 },
+      annual: {
+        formattedPrice: 'HK$939.00',
+        currencyCode: 'HKD',
+        amountMicros: 939_000_000,
+      },
+    });
+    assert(!mixed.fromStore, 'mismatched currencies fall back rather than compare');
+
+    // With no store at all, the published figures stay consistent.
+    const offline = resolvePricing({});
+    assert(!offline.fromStore, 'no store prices means the fallback');
+    assert(
+      offline.badge('annual') === `Save $${annualSavingUsd()}`,
+      'the fallback badge matches the derived USD saving',
+    );
+  }
+
+  // The trial offer (trial-2) exists on the annual base plan only, so only
+  // annual may advertise one — and its button is the only "free" one.
   assert(
-    ids.every((id) => /^creepyim-pro-(monthly|annual)$/u.test(id)),
-    'base plan ids follow the Play naming convention',
+    planFor('monthly').hasFreeTrial === false,
+    'monthly carries no free trial',
+  );
+  assert(planFor('annual').hasFreeTrial === true, 'annual carries the trial');
+  assert(planFor('monthly').cta === 'Start', 'monthly button reads Start');
+  assert(
+    planFor('annual').cta === 'Start free',
+    'annual button reads Start free',
+  );
+  assert(
+    !/free|trial/iu.test(planFor('monthly').terms.split('The free trial')[0]),
+    'monthly terms do not promise a trial',
   );
 }
 

@@ -8,11 +8,70 @@
 import * as SecureStore from 'expo-secure-store';
 import { Platform } from 'react-native';
 
+import { describeHttpFailure } from './httpErrors';
+
 const ACCESS_TOKEN_KEY = 'creepyim.auth.access-token.v1';
+const REFRESH_TOKEN_KEY = 'creepyim.auth.refresh-token.v1';
 
 export async function getToken(): Promise<string | null> {
   if (Platform.OS === 'web') return sessionStorage.getItem(ACCESS_TOKEN_KEY);
   return SecureStore.getItemAsync(ACCESS_TOKEN_KEY);
+}
+
+async function readRefreshToken(): Promise<string | null> {
+  if (Platform.OS === 'web') return sessionStorage.getItem(REFRESH_TOKEN_KEY);
+  return SecureStore.getItemAsync(REFRESH_TOKEN_KEY);
+}
+
+async function writeAccessToken(token: string): Promise<void> {
+  if (Platform.OS === 'web') {
+    sessionStorage.setItem(ACCESS_TOKEN_KEY, token);
+    return;
+  }
+  await SecureStore.setItemAsync(ACCESS_TOKEN_KEY, token);
+}
+
+/*
+ * Access tokens last fifteen minutes. Nothing renewed them.
+ *
+ * `tryRefreshToken` existed in the auth module and was called by nothing, and
+ * `request` had no 401 handling, so every authenticated call failed
+ * permanently a quarter of an hour after sign-in while a perfectly good
+ * refresh token sat in SecureStore. The paywall's exemption check was one of
+ * the casualties: it 401ed, the query gave up, and a demo account that the
+ * server said owed nothing was shown the paywall anyway.
+ *
+ * Single-flight, because a screen that fires three requests at once would
+ * otherwise start three refreshes and race to store the results.
+ */
+let refreshInFlight: Promise<string | null> | null = null;
+
+async function refreshAccessTokenOnce(): Promise<string | null> {
+  if (!refreshInFlight) {
+    refreshInFlight = (async () => {
+      try {
+        const refreshToken = await readRefreshToken();
+        if (!refreshToken) return null;
+        const result = await request<{ accessToken: string }>(
+          'POST',
+          '/auth/refresh',
+          { refreshToken },
+          // Never let a failing refresh trigger another refresh.
+          { allowRefresh: false },
+        );
+        if (!result?.accessToken) return null;
+        await writeAccessToken(result.accessToken);
+        return result.accessToken;
+      } catch {
+        // An expired or revoked refresh token is a real sign-out, not an
+        // error to surface here: the caller still gets its 401.
+        return null;
+      } finally {
+        refreshInFlight = null;
+      }
+    })();
+  }
+  return refreshInFlight;
 }
 
 /**
@@ -110,7 +169,13 @@ export const NETWORK_ERROR_STATUS = 0;
 
 type JsonObject = Record<string, unknown>;
 
-async function request<T>(method: string, path: string, body?: JsonObject): Promise<T> {
+async function request<T>(
+  method: string,
+  path: string,
+  body?: JsonObject,
+  options: { allowRefresh?: boolean } = {},
+): Promise<T> {
+  const allowRefresh = options.allowRefresh !== false;
   const token = await getToken();
   const headers: Record<string, string> = { 'Content-Type': 'application/json' };
   if (token) headers['Authorization'] = `Bearer ${token}`;
@@ -150,9 +215,28 @@ async function request<T>(method: string, path: string, body?: JsonObject): Prom
   let json: JsonObject = {};
   try { json = await response.json() as JsonObject; } catch { /* no body */ }
 
+  /*
+   * One retry, and only when a refresh actually produced a new token. A 401
+   * that survives the retry is a real authentication failure and must reach
+   * the caller rather than looping.
+   */
+  if (response.status === 401 && allowRefresh && token) {
+    const refreshed = await refreshAccessTokenOnce();
+    if (refreshed) {
+      return request<T>(method, path, body, { allowRefresh: false });
+    }
+  }
+
   if (!response.ok) {
-    const msg = typeof json.message === 'string' ? json.message : response.statusText;
-    throw new ApiError(msg, response.status, typeof json.code === 'string' ? json.code : undefined);
+    const message =
+      typeof json.message === 'string' && json.message
+        ? json.message
+        : describeHttpFailure(response.status, response.statusText, baseUrl());
+    throw new ApiError(
+      message,
+      response.status,
+      typeof json.code === 'string' ? json.code : undefined,
+    );
   }
 
   return json as T;
@@ -166,7 +250,24 @@ function post<T>(path: string, body?: JsonObject) { return request<T>('POST', pa
 export type EmailPurpose = 'registration' | 'login';
 
 export interface RequestCodeInput { email: string; name?: string; purpose: EmailPurpose; }
-export interface CodeChallenge { challengeId: string; expiresInSeconds: number; retryAfterSeconds: number; }
+export interface CodeChallenge {
+  challengeId: string;
+  expiresInSeconds: number;
+  retryAfterSeconds: number;
+  /**
+   * Set when the server signed this account in without a code, so there is no
+   * challenge to answer and the tokens below are already valid.
+   *
+   * Which accounts these are is a server-side decision the app cannot see: no
+   * address or rule identifying one is in the bundle. Optional, and absence
+   * means "a code was sent" — an older server or a partial response must never
+   * be read as an authenticated session.
+   */
+  autoVerified?: boolean;
+  accessToken?: string | null;
+  refreshToken?: string | null;
+  onboardingCompleted?: boolean | null;
+}
 export interface VerifyCodeInput { challengeId: string; code: string; email: string; }
 export interface AuthTokens { accessToken: string; refreshToken: string; onboardingCompleted?: boolean; }
 export interface UserProfile { userId: string; email: string | null; name: string | null; createdAt: string; }
@@ -183,4 +284,56 @@ export async function refreshAccessToken(refreshToken: string): Promise<{ access
 /** Backed by `GET /users/me`. The backend exposes no `/auth/session` route. */
 export async function getUserProfile(): Promise<UserProfile> {
   return get('/users/me');
+}
+
+export interface Entitlements {
+  agentAccess: boolean;
+  cloudAgentAllowed: boolean;
+  maxAgentMessagesPerDay: number | null;
+  planCode: string | null;
+  subscriptionStatus: string | null;
+  currentPeriodEnd: string | null;
+  /**
+   * Whether this account has to buy anything.
+   *
+   * The server decides; the app only reads. Which accounts are exempt, and
+   * why, is deliberately not knowable from here — no address, plan code or
+   * flag naming a particular user appears in the bundle, so shipping the app
+   * does not ship the list.
+   *
+   * Optional because an older server omits it. Treat a missing value as
+   * `true`: payment required is the safe reading, and a bypass must never be
+   * what happens when the server said nothing.
+   */
+  subscriptionRequired?: boolean;
+}
+
+export interface PlayVerifyResult {
+  subscription: { subscriptionId: string; status: string; currentPeriodEnd: string };
+  entitlements: Entitlements;
+}
+
+/**
+ * Exchange a Play purchase token for an entitlement.
+ *
+ * The token is proof of payment to Google, not entitlement to this app. Only
+ * the backend can turn one into the other: it resolves the token against the
+ * Play Developer API, so nothing the client claims here — plan, price, period
+ * — is believed. Call this immediately after Play reports success; until it
+ * returns, the user has paid and has nothing.
+ */
+export async function verifyPlayPurchase(input: {
+  purchaseToken: string;
+  productId?: string;
+  basePlanId?: string;
+}): Promise<PlayVerifyResult> {
+  return post('/subscriptions/play/verify', input as unknown as JsonObject);
+}
+
+/** The caller's own subscription and entitlements. Backed by `GET /subscriptions/me`. */
+export async function getMySubscription(): Promise<{
+  subscription: unknown | null;
+  entitlements: Entitlements;
+}> {
+  return get('/subscriptions/me');
 }

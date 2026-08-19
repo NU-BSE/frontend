@@ -10,7 +10,10 @@ import { Screen } from "@/components/Screen";
 import { Text } from "@/components/Text";
 import { TopAppBar } from "@/components/TopAppBar";
 import { ConnectorList } from "@/features/connections/ConnectorList";
+import { disconnectEverything } from "@/connections/connectionService";
+import { CONNECTIONS_QUERY_KEY } from "@/connections/useConnections";
 import { getMemoryProfile, resetOnboarding } from "@/storage/prefs";
+import { clearHistory } from "@/storage/history";
 import { gutter, palette, radius, shadow, spacing } from "@/theme/tokens";
 
 export default function Account() {
@@ -28,20 +31,38 @@ export default function Account() {
     queryFn: getMemoryProfile,
   });
 
+  /**
+   * Sign out leaves nothing behind.
+   *
+   * This used to be two buttons: "Sign out", which dropped the auth tokens
+   * only, and "Replay onboarding", which reset the local flags. Neither
+   * touched connections or the credential vault, so the next person through
+   * onboarding inherited the previous account's linked services and their
+   * secrets — on a shared or demo device, that is somebody else's Telegram
+   * session still signed in.
+   *
+   * Order matters. Connections go first, because disconnecting runs each
+   * connector's provider-side teardown and that has to happen while the app is
+   * still holding the credentials it needs to do it.
+   */
   const signOut = useMutation({
-    mutationFn: clearAuthSession,
+    mutationFn: async () => {
+      await disconnectEverything();
+      await clearAuthSession();
+      await resetOnboarding();
+      // Chat history is not a secret, but it is the previous account's
+      // conversations, and leaving them for whoever onboards next is the same
+      // problem as leaving their Telegram session.
+      await clearHistory();
+      await deactivateEngine();
+    },
     onSuccess: async () => {
       await queryClient.invalidateQueries({ queryKey: ["auth-session"] });
-      queryClient.removeQueries({ queryKey: ["authenticated-email"] });
-      router.replace("/auth");
-    },
-  });
-
-  const replay = useMutation({
-    mutationFn: resetOnboarding,
-    onSuccess: async () => {
-      await deactivateEngine();
       await queryClient.invalidateQueries({ queryKey: ["onboarding-status"] });
+      await queryClient.invalidateQueries({ queryKey: CONNECTIONS_QUERY_KEY });
+      queryClient.removeQueries({ queryKey: ["authenticated-email"] });
+      queryClient.removeQueries({ queryKey: ["memory-profile"] });
+      queryClient.removeQueries({ queryKey: ["history"] });
       router.replace("/onboarding");
     },
   });
@@ -60,6 +81,10 @@ export default function Account() {
             <Row label="Method" value="Email code" highlight />
           </View>
           <Button label="Sign out" variant="secondary" loading={signOut.isPending} onPress={() => signOut.mutate()} />
+          <Text variant="bodySmall" tone="muted">
+            Signs out and clears this device: every connected service, every
+            stored credential, and your on-device settings.
+          </Text>
         </View>
 
         <View style={styles.section}>
@@ -80,7 +105,6 @@ export default function Account() {
         <View style={styles.section}>
           <Text variant="headline">Developer</Text>
           <Button label="Agent diagnostics" variant="secondary" onPress={() => router.push("/dev/diagnostics")} />
-          <Button label="Replay onboarding" variant="secondary" loading={replay.isPending} onPress={() => replay.mutate()} />
         </View>
       </ScrollView>
     </Screen>

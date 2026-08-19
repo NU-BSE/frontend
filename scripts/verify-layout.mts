@@ -21,6 +21,7 @@ import Yoga, {
 
 import { chunkRows } from '../src/features/scenarios/chunkRows.js';
 import { ONBOARDING_SCENARIOS } from '../src/features/scenarios/registry.js';
+import { CONNECTOR_CATALOG } from '../src/features/connections/catalog.js';
 
 const GUTTER = 24;
 const GAP = 16;
@@ -239,7 +240,12 @@ console.log(
 const CONNECTOR_COLUMNS = 3;
 const CONNECTOR_GAP = 12;
 const CONNECTOR_MIN_HEIGHT = 104;
-const CONNECTOR_COUNT = 14;
+/*
+ * Read from the catalogue, not restated. Hardcoded, this measured a synthetic
+ * fourteen-cell grid and kept passing while the real screen rendered a
+ * different number — the same drift already fixed for the category grid.
+ */
+const CONNECTOR_COUNT = CONNECTOR_CATALOG.length;
 
 console.log('\nyoga layout — connectors grid, three across:');
 

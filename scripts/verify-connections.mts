@@ -42,6 +42,7 @@ import {
 } from '../src/mcp/runtime-singleton.js';
 import {
   connectConnector,
+  disconnectEverything,
   disconnectConnection,
 } from '../src/connections/connectionService.js';
 
@@ -165,18 +166,24 @@ async function main(): Promise<void> {
       'the Telegram failure explains what is missing',
     );
 
+    // The device connection is always present — it is not an account and
+    // needs no auth. What must not appear is a record for anything a failed
+    // attempt touched.
+    const afterFailures = await getConnectionStore().list();
     assert(
-      (await getConnectionStore().list()).length === 0,
-      'no connection record was created by failed attempts',
+      afterFailures.every((record) => record.connectorId === 'android'),
+      'no account connection was created by failed attempts',
     );
   }
 
   console.log('only a successful auth flow creates a connection:');
   {
     const store = new InMemoryConnectionStore();
+    const vault = new InMemoryCredentialVault();
     const adapter = new MockTdlibAdapter();
     const connector = new TelegramUserConnector({
       store,
+      vault,
       adapterFactory: () => adapter,
     });
 
@@ -199,6 +206,22 @@ async function main(): Promise<void> {
       (await store.list()).length === 1,
       'the connection is persisted in the store',
     );
+
+    /*
+     * The reference must resolve. A record pointing at a credential nobody
+     * wrote is not a connection: reconciliation demotes it to
+     * reconnect_required on the next launch, reconnecting writes the same
+     * dangling record, and Telegram asks to reconnect forever. That shipped,
+     * and nothing here noticed, because no check ever followed the reference.
+     */
+    assert(
+      Boolean(created.credentialReference),
+      'the connection declares a credential reference',
+    );
+    assert(
+      (await vault.get(created.credentialReference as string)) !== null,
+      'the declared credential actually exists in the vault',
+    );
   }
 
   console.log('disconnect removes the connection and its credential:');
@@ -209,10 +232,28 @@ async function main(): Promise<void> {
     const store = getConnectionStore();
     const vault = getCredentialVault();
 
-    const seeded = await store.get('telegram-user-default');
-    assert(Boolean(seeded), 'dev runtime seeds a labeled mock connection');
+    /*
+     * Create the connection this section disconnects. The runtime used to seed
+     * one; it no longer seeds any account, so the test makes its own — which
+     * is what it should always have done rather than depending on fixture data
+     * it did not control.
+     */
+    const now = Date.now();
+    await store.save({
+      id: 'telegram-user-default',
+      connectorId: 'telegram-user',
+      displayName: 'Telegram User (verification)',
+      status: 'connected',
+      scopes: [],
+      capabilities: [],
+      credentialReference: 'tdlib-session:dev',
+      createdAt: now,
+      updatedAt: now,
+    });
 
-    // Stand in for a credential saved during connect.
+    // Saved before anything reloads the runtime: credential reconciliation now
+    // runs in every mode, and a connection whose credential is missing is
+    // demoted on sight — which is the behaviour under test elsewhere, not here.
     await vault.save('tdlib-session:dev', {
       kind: 'tdlib',
       databaseKeyReference: 'dev-key',
@@ -234,6 +275,69 @@ async function main(): Promise<void> {
     assert(
       !names.some((name) => name.startsWith('telegram.user.')),
       'Telegram tools disappear after disconnect',
+    );
+  }
+
+  console.log('sign-out leaves nothing behind:');
+  {
+    await closeLocalMcpRuntime();
+    await getLocalMcpRuntime({ mode: 'development' });
+
+    const store = getConnectionStore();
+    const vault = getCredentialVault();
+
+    // Two accounts with secrets, plus the device connection that is always
+    // present and has none.
+    const now = Date.now();
+    for (const [id, connectorId] of [
+      ['telegram-user:signout', 'telegram-user'],
+      ['google-signout', 'google'],
+    ] as const) {
+      await store.save({
+        id,
+        connectorId,
+        displayName: id,
+        status: 'connected',
+        scopes: [],
+        capabilities: [],
+        credentialReference: `secret:${id}`,
+        createdAt: now,
+        updatedAt: now,
+      });
+      await vault.save(`secret:${id}`, { kind: 'static_token', token: 'x' });
+    }
+
+    assert((await store.list()).length >= 3, 'connections exist before sign-out');
+
+    await disconnectEverything();
+
+    /*
+     * No account may survive. Signing out on a shared or demo device and
+     * leaving somebody else's linked accounts — or their tokens — for the next
+     * person through onboarding is the failure this guards.
+     *
+     * The device connection is the exception and stays: it is not an account,
+     * it has no credential, and the runtime re-ensures it on every start. A
+     * signed-out phone is still the same phone.
+     */
+    const remaining = await store.list();
+    assert(
+      remaining.every((record) => record.connectorId === 'android'),
+      'every account connection is gone after sign-out',
+    );
+    assert(
+      (await vault.get('secret:telegram-user:signout')) === null &&
+        (await vault.get('secret:google-signout')) === null,
+      'every stored secret is revoked after sign-out',
+    );
+
+    const runtime = await getLocalMcpRuntime();
+    const names = (await runtime.mcp.listTools()).map((tool) => tool.name);
+    assert(
+      !names.some(
+        (name) => name.startsWith('telegram.') || name.startsWith('google.'),
+      ),
+      'no account tools remain after sign-out',
     );
   }
 

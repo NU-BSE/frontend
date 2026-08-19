@@ -1,4 +1,5 @@
 import React, { useCallback, useMemo, useState } from "react";
+import { useQueryClient } from "@tanstack/react-query";
 import { useRouter } from "expo-router";
 import {
   KeyboardAvoidingView,
@@ -27,6 +28,7 @@ const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 export default function OnboardingProfile() {
   const router = useRouter();
+  const queryClient = useQueryClient();
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
   const [saving, setSaving] = useState(false);
@@ -69,6 +71,21 @@ export default function OnboardingProfile() {
         name: normalizedName,
         purpose: "registration",
       });
+
+      /*
+       * Some accounts are signed in by the request itself and never receive a
+       * code; the session is already stored by then. Sending such a user to a
+       * screen asking for a code they will never get is the whole failure this
+       * avoids. The app does not know which accounts these are — it only knows
+       * the server said this one is done.
+       */
+      if (challenge.autoVerified) {
+        await setUserProfile({ name: normalizedName, email: normalizedEmail });
+        await queryClient.invalidateQueries({ queryKey: ["auth-session"] });
+        router.replace("/onboarding/features");
+        return;
+      }
+
       await Promise.all([
         setUserProfile({
           name: normalizedName,
@@ -91,7 +108,7 @@ export default function OnboardingProfile() {
     } finally {
       setSaving(false);
     }
-  }, [canContinue, normalizedEmail, normalizedName, router]);
+  }, [canContinue, normalizedEmail, normalizedName, queryClient, router]);
 
   return (
     <Screen>

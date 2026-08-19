@@ -1,4 +1,5 @@
 import React, { useCallback, useMemo, useState } from "react";
+import { useQueryClient } from "@tanstack/react-query";
 import { useRouter } from "expo-router";
 import {
   KeyboardAvoidingView,
@@ -21,6 +22,7 @@ const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 export default function EmailSignIn() {
   const router = useRouter();
+  const queryClient = useQueryClient();
   const [email, setEmail] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -41,6 +43,17 @@ export default function EmailSignIn() {
         email: normalizedEmail,
         purpose: "login",
       });
+
+      // As on the sign-up screen: an account the server signed in directly has
+      // no code to enter. In practice this screen sends no name, and the name
+      // is half the demo credential, so it will not normally happen here — the
+      // check is kept so the two entry points cannot drift.
+      if (challenge.autoVerified) {
+        await queryClient.invalidateQueries({ queryKey: ["auth-session"] });
+        router.replace("/(tabs)/feed");
+        return;
+      }
+
       await setPendingEmailAuth({
         challengeId: challenge.challengeId,
         email: normalizedEmail,
@@ -56,7 +69,7 @@ export default function EmailSignIn() {
     } finally {
       setSubmitting(false);
     }
-  }, [emailIsValid, normalizedEmail, router, submitting]);
+  }, [emailIsValid, normalizedEmail, queryClient, router, submitting]);
 
   return (
     <Screen>

@@ -1,0 +1,51 @@
+[
+  {
+    "category": "Communication",
+    "timestamps": [
+      1700000000,
+      1700010000,
+      1700025000,
+      1700039000
+    ],
+    "gapSeconds": 6646.608202653818,
+    "predictedAt": 1700045646.6082027,
+    "usedGlobalFallback": false
+  },
+  {
+    "category": "Communication",
+    "timestamps": [
+      1700000000,
+      1700003600,
+      1700007200,
+      1700010800,
+      1700014400
+    ],
+    "gapSeconds": 4039.9156042384534,
+    "predictedAt": 1700018439.9156044,
+    "usedGlobalFallback": false
+  },
+  {
+    "category": "Productivity",
+    "timestamps": [
+      1700000000,
+      1700086400,
+      1700172800,
+      1700259200
+    ],
+    "gapSeconds": 124629.25,
+    "predictedAt": 1700383829.25,
+    "usedGlobalFallback": false
+  },
+  {
+    "category": "Gardening",
+    "timestamps": [
+      1700000000,
+      1700050000,
+      1700100000,
+      1700150000
+    ],
+    "gapSeconds": 79692.23586265117,
+    "predictedAt": 1700229692.2358627,
+    "usedGlobalFallback": true
+  }
+]

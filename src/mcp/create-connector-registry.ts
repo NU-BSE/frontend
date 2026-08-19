@@ -103,6 +103,7 @@ export function createConnectorRegistry(
     new GoogleConnector(googleAuthOptions(connectionStore, credentialVault)),
     new TelegramUserConnector({
       store: connectionStore,
+      vault: credentialVault,
       adapterFactory:
         telegramAdapterMode === 'mock'
           ? () => new MockTdlibAdapter()

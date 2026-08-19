@@ -10,17 +10,19 @@ import {
   requestPermission as requestNotificationPermission,
   showCard,
   dismiss as dismissCard,
+  onCardPress,
 } from "@/notifications/smartCards";
-import { cardForNextCategory } from "@/prediction/schedule";
-import type { ModelBundle } from "@/prediction/inference";
-import MODEL_JSON from "@/prediction/fixtures/category_models.sample.json";
-
-const MODEL_BUNDLE = MODEL_JSON as unknown as ModelBundle;
 import { Screen } from "@/components/Screen";
 import { Text } from "@/components/Text";
 import { useConnections } from "@/connections/useConnections";
 import { getLocalMcpRuntime, getRuntimeMode } from "@/mcp/runtime-singleton";
+import MODEL_JSON from "@/prediction/fixtures/category_models.sample.json";
+import type { ModelBundle } from "@/prediction/inference";
+import { cardForNextCategory } from "@/prediction/schedule";
+import { approvalCard } from "@/agent/approvalCard";
 import { gutter, palette, radius, shadow, spacing } from "@/theme/tokens";
+
+const MODEL_BUNDLE = MODEL_JSON as unknown as ModelBundle;
 
 /**
  * Developer diagnostics for the agent stack (MCP health, registered tools,
@@ -75,6 +77,14 @@ async function postPredictedCard(
 
 export default function Diagnostics() {
   const [cardStatus, setCardStatus] = useState("idle");
+  const [pressStatus, setPressStatus] = useState("no press yet");
+
+  /*
+   * Proves the half of the approval bridge that crosses the native boundary:
+   * a button pressed on a notification has to reach JavaScript for the
+   * approval to be resolved without opening the app.
+   */
+  React.useEffect(() => onCardPress((actionId) => setPressStatus(actionId)), []);
   const insets = useSafeAreaInsets();
   const router = useRouter();
   const { modelId, capabilities } = useAgentContext();
@@ -119,6 +129,22 @@ export default function Diagnostics() {
             variant="secondary"
             onPress={() => void postPredictedCard(setCardStatus)}
           />
+          <Button
+            label="Post approval card"
+            variant="secondary"
+            onPress={() => {
+              void showCard(
+                approvalCard({
+                  approvalId: "diag-1",
+                  toolCallId: "call-1",
+                  toolName: "telegram.user.send_message",
+                  args: { chatId: "123456789", text: "on my way" },
+                  preview: null,
+                }),
+              );
+            }}
+          />
+          <Row label="Last press" value={pressStatus} />
           <Button label="Dismiss card" variant="ghost" onPress={() => dismissCard()} />
         </Section>
 

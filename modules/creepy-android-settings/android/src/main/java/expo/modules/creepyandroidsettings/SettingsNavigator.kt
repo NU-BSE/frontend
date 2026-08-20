@@ -19,6 +19,29 @@ import android.provider.Settings
 class SettingsNavigator(private val context: Context) {
 
     companion object {
+        /*
+         * Three Settings actions that cannot be referenced as constants.
+         *
+         * ACTION_NOTIFICATION_SETTINGS and ACTION_ZEN_MODE_SETTINGS are @hide
+         * in the framework, so they are absent from android.jar at every API
+         * level. ACTION_SYSTEM_UPDATE_SETTINGS became public only in 36.1,
+         * and this module compiles against compileSdk 36 — which is why it
+         * failed alongside the other two rather than on its own.
+         *
+         * The actions themselves are real: all three resolve on device (they
+         * are present in the framework image, and the names follow the same
+         * android.settings.<NAME> form as every public constant here). Naming
+         * them literally is the only way to reference them, and it is safe
+         * because screenAction's result is always passed through isResolvable
+         * before it is fired — an OEM that ships no such screen reports
+         * canOpenScreen == false instead of throwing.
+         */
+        private const val ACTION_NOTIFICATION_SETTINGS =
+            "android.settings.NOTIFICATION_SETTINGS"
+        private const val ACTION_ZEN_MODE_SETTINGS = "android.settings.ZEN_MODE_SETTINGS"
+        private const val ACTION_SYSTEM_UPDATE_SETTINGS =
+            "android.settings.SYSTEM_UPDATE_SETTINGS"
+
         val SCREENS: List<String> = listOf(
             "settings",
             "appDetails",
@@ -264,7 +287,7 @@ class SettingsNavigator(private val context: Context) {
         "display" -> Settings.ACTION_DISPLAY_SETTINGS
         "sound" -> Settings.ACTION_SOUND_SETTINGS
         // Top-level notification settings. Per-app notifications use APP_TARGETS.
-        "notifications" -> Settings.ACTION_NOTIFICATION_SETTINGS
+        "notifications" -> ACTION_NOTIFICATION_SETTINGS
         "accessibility" -> Settings.ACTION_ACCESSIBILITY_SETTINGS
         "usageAccess" -> Settings.ACTION_USAGE_ACCESS_SETTINGS
         "notificationListener" -> Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS
@@ -295,10 +318,10 @@ class SettingsNavigator(private val context: Context) {
         "apn" -> Settings.ACTION_APN_SETTINGS
         "roaming" -> Settings.ACTION_DATA_ROAMING_SETTINGS
         "doNotDisturb" ->
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) Settings.ACTION_ZEN_MODE_SETTINGS else null
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) ACTION_ZEN_MODE_SETTINGS else null
         "storage" -> Settings.ACTION_INTERNAL_STORAGE_SETTINGS
         "deviceInfo" -> Settings.ACTION_DEVICE_INFO_SETTINGS
-        "systemUpdate" -> Settings.ACTION_SYSTEM_UPDATE_SETTINGS
+        "systemUpdate" -> ACTION_SYSTEM_UPDATE_SETTINGS
         "sync" -> Settings.ACTION_SYNC_SETTINGS
         "addAccount" -> Settings.ACTION_ADD_ACCOUNT
         "userDictionary" -> Settings.ACTION_USER_DICTIONARY_SETTINGS

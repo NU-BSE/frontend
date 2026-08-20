@@ -20,18 +20,22 @@ export interface AndroidConnectorOptions extends StoreBackedConnectorOptions {
 const CAPABILITIES = [
   'android.settings.read',
   'android.settings.brightness',
+  'android.settings.brightness_mode',
   'android.settings.screen_timeout',
   'android.settings.auto_rotate',
+  'android.settings.haptic_feedback',
+  'android.settings.sound_effects',
   'android.settings.navigation',
+  'android.settings.app_navigation',
+  'android.apps.read',
 ];
 
 /**
  * Real on-device Android Settings connector.
  *
- * `partial`: the Settings tools are real (backed by the native Expo module),
- * while the rest of the Android surface (contacts, calendar, files, …) is not
- * implemented and is therefore not registered at all — it can never report a
- * fixture success in production.
+ * `partial`: the Settings and app-discovery tools are real, while unrelated
+ * Android data surfaces (contacts, calendar, files, notifications content,
+ * clipboard, …) are not implemented and therefore are not registered.
  */
 export class AndroidConnector extends StoreBackedConnector {
   readonly id = 'android' as const;

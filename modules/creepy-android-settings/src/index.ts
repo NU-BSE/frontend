@@ -14,12 +14,20 @@ export {
   percentToBrightness,
 } from './conversion';
 
-export { SETTINGS_PANELS, SETTINGS_SCREENS } from './screens';
+export {
+  APP_SETTINGS_TARGETS,
+  SETTINGS_PANELS,
+  SETTINGS_SCREENS,
+} from './screens';
 
 export type {
+  AndroidAppInfo,
   AndroidSettingsCapabilities,
+  AppSettingsTarget,
+  BrightnessMode,
   CreepyAndroidSettingsAPI,
   CreepyAndroidSettingsEvents,
+  InstalledAppSummary,
   SettingsNamespace,
   SettingsPanel,
   SettingsScreen,

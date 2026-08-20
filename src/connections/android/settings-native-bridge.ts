@@ -1,15 +1,18 @@
 import type {
+  AndroidAppInfo,
   AndroidSettingsBridge,
   AndroidSettingsCapabilities,
+  AppSettingsTarget,
+  BrightnessMode,
+  InstalledAppSummary,
   SettingsPanel,
   SettingsScreen,
 } from '@mobile-agent/connector-android';
 
 /**
  * Raw surface of the `CreepyAndroidSettings` Expo native module (Kotlin).
- * The native module is reached through `requireNativeModule` rather than the
- * `creepy-android-settings` TS wrapper so this file never pulls `expo` into
- * the Node verification bundles.
+ * Reached through requireNativeModule so this adapter remains import-safe in
+ * Node verification bundles.
  */
 type NativeAndroidSettingsModule = {
   getCapabilities(): {
@@ -21,6 +24,7 @@ type NativeAndroidSettingsModule = {
     canDrawOverlays: boolean;
     settingsPanelsSupported: boolean;
     supportedScreens: Record<string, boolean>;
+    supportedAppTargets: Record<string, boolean>;
   };
   canWriteSystemSettings(): boolean;
   requestWriteSystemSettingsPermission(): Promise<boolean>;
@@ -34,19 +38,25 @@ type NativeAndroidSettingsModule = {
   setScreenTimeout(milliseconds: number): boolean;
   getAutoRotate(): boolean;
   setAutoRotate(enabled: boolean): boolean;
+  getBrightnessMode(): BrightnessMode;
+  setBrightnessMode(mode: BrightnessMode): boolean;
+  getHapticFeedbackEnabled(): boolean;
+  setHapticFeedbackEnabled(enabled: boolean): boolean;
+  getSoundEffectsEnabled(): boolean;
+  setSoundEffectsEnabled(enabled: boolean): boolean;
   canOpenSettings(screen: string): boolean;
   openSettings(screen: string): Promise<boolean>;
+  canOpenAppSettings(target: string, packageName: string, channelId: string | null): boolean;
+  openAppSettings(target: string, packageName: string, channelId: string | null): Promise<boolean>;
   isSettingsPanelSupported(panel: string): boolean;
   openPanel(panel: string): Promise<boolean>;
+  findApps(query: string, limit: number): InstalledAppSummary[];
+  getAppInfo(packageName: string): AndroidAppInfo | null;
 };
 
 /**
- * Returns the native Android Settings bridge on Android, or `null` when
- * absent (iOS, web, Node, or a build without the native module).
- *
- * `react-native` and `expo-modules-core` are loaded lazily with guarded
- * `require` calls so this module is safe to import from Node verification
- * scripts — in Node both `require` calls throw and are caught.
+ * Returns the native Android Settings bridge on Android, or null when absent
+ * (iOS, web, Node or a build without the native module).
  */
 export function getAndroidSettingsBridge(): AndroidSettingsBridge | null {
   try {
@@ -78,6 +88,9 @@ export function getAndroidSettingsBridge(): AndroidSettingsBridge | null {
           supportedScreens: caps.supportedScreens as Partial<
             Record<SettingsScreen, boolean>
           >,
+          supportedAppTargets: caps.supportedAppTargets as Partial<
+            Record<AppSettingsTarget, boolean>
+          >,
         };
       },
 
@@ -101,13 +114,38 @@ export function getAndroidSettingsBridge(): AndroidSettingsBridge | null {
       getAutoRotate: () => native.getAutoRotate(),
       setAutoRotate: (enabled: boolean) => native.setAutoRotate(enabled),
 
-      canOpenSettings: (screen: SettingsScreen) =>
-        native.canOpenSettings(screen),
+      getBrightnessMode: () => native.getBrightnessMode(),
+      setBrightnessMode: (mode: BrightnessMode) => native.setBrightnessMode(mode),
+
+      getHapticFeedbackEnabled: () => native.getHapticFeedbackEnabled(),
+      setHapticFeedbackEnabled: (enabled: boolean) =>
+        native.setHapticFeedbackEnabled(enabled),
+
+      getSoundEffectsEnabled: () => native.getSoundEffectsEnabled(),
+      setSoundEffectsEnabled: (enabled: boolean) =>
+        native.setSoundEffectsEnabled(enabled),
+
+      canOpenSettings: (screen: SettingsScreen) => native.canOpenSettings(screen),
       openSettings: (screen: SettingsScreen) => native.openSettings(screen),
+
+      canOpenAppSettings: (
+        target: AppSettingsTarget,
+        packageName: string,
+        channelId?: string,
+      ) => native.canOpenAppSettings(target, packageName, channelId ?? null),
+      openAppSettings: (
+        target: AppSettingsTarget,
+        packageName: string,
+        channelId?: string,
+      ) => native.openAppSettings(target, packageName, channelId ?? null),
 
       isSettingsPanelSupported: (panel: SettingsPanel) =>
         native.isSettingsPanelSupported(panel),
       openPanel: (panel: SettingsPanel) => native.openPanel(panel),
+
+      findApps: (query: string, limit?: number) =>
+        native.findApps(query, limit ?? 20),
+      getAppInfo: (packageName: string) => native.getAppInfo(packageName),
     };
   } catch {
     return null;

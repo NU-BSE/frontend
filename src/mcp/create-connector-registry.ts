@@ -24,6 +24,7 @@ import { resolveTelegramAdapterMode } from './telegram-adapter-mode';
 import { getGoogleAuthorizationBridge } from '@/connections/google/native-bridge';
 import { createGoogleFileSink } from '@/connections/google/file-sink';
 import { getAndroidSettingsBridge } from '@/connections/android/settings-native-bridge';
+import { getAndroidIntentBridge } from '@/connections/android/intent-native-bridge';
 
 export interface AppRegistryOptions {
   mode: McpRuntimeMode;
@@ -32,23 +33,12 @@ export interface AppRegistryOptions {
 }
 
 /**
- * The registry factory with explicit dependencies (section 33 of
- * FINISH_FRONTEND_AGENT.md): no connector constructor secretly creates its
- * own in-memory store — every connector reads the shared ConnectionStore.
+ * Registry factory with explicit dependencies: connector packages stay
+ * platform-neutral and native app bridges are injected here.
  *
- * Mode rules:
- * - `development`: mock connectors may register and expose dev tools.
- * - `production`: connectors whose `implementationStatus` is `mock` are not
- *   registered at all, so the model can never see tools that would report
- *   fake success. Telegram's personal connector registers when it runs on
- *   the native TDLib adapter (status follows the adapter).
- */
-/**
- * Google's real sign-in, injected here rather than imported by the connector
- * package: the package is bundled for Node by the verification scripts, and
- * the native AuthorizationClient bridge cannot load there. Without these the
- * connector still registers, and `connect()` reports that sign-in is
- * unavailable.
+ * Development may register mock connectors; production rejects mocks. Local
+ * Android Settings/Intent connectors register only when their native bridge is
+ * actually present, so no fixture success can leak into a production build.
  */
 function googleAuthOptions(
   connectionStore: ConnectionStore,
@@ -85,11 +75,8 @@ export function createConnectorRegistry(
   });
 
   const telegramAdapterMode = resolveTelegramAdapterMode(mode);
-
-  // The Android device connector only registers when the native Settings
-  // bridge is actually available (Android + native module built in). On
-  // web/iOS/Node it is omitted entirely — never a fake connector.
   const androidSettingsBridge = getAndroidSettingsBridge();
+  const androidIntentBridge = getAndroidIntentBridge();
 
   const connectors = [
     ...(androidSettingsBridge
@@ -97,6 +84,14 @@ export function createConnectorRegistry(
           new AndroidConnector({
             store: connectionStore,
             settingsBridge: androidSettingsBridge,
+          }),
+        ]
+      : []),
+    ...(androidIntentBridge
+      ? [
+          new IntentConnector({
+            store: connectionStore,
+            bridge: androidIntentBridge,
           }),
         ]
       : []),
@@ -118,7 +113,6 @@ export function createConnectorRegistry(
     new DropboxConnector(store),
     new DiscordConnector(store),
     new SpotifyConnector(store),
-    new IntentConnector(store),
   ];
 
   for (const connector of connectors) {

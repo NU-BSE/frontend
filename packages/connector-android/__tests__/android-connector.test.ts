@@ -25,6 +25,7 @@ function makeBridge(
       canDrawOverlays: false,
       settingsPanelsSupported: true,
       supportedScreens: { wifi: true, bluetooth: true },
+      supportedAppTargets: { appDetails: true, appNotifications: true },
     }),
     canWriteSystemSettings: () => true,
     requestWriteSystemSettingsPermission: async () => true,
@@ -38,10 +39,36 @@ function makeBridge(
     setScreenTimeout: () => true,
     getAutoRotate: () => false,
     setAutoRotate: () => true,
+    getBrightnessMode: () => 'automatic',
+    setBrightnessMode: () => true,
+    getHapticFeedbackEnabled: () => true,
+    setHapticFeedbackEnabled: () => true,
+    getSoundEffectsEnabled: () => true,
+    setSoundEffectsEnabled: () => true,
     canOpenSettings: () => true,
     openSettings: async () => true,
+    canOpenAppSettings: () => true,
+    openAppSettings: async () => true,
     isSettingsPanelSupported: () => true,
     openPanel: async () => true,
+    findApps: () => [
+      {
+        packageName: 'org.telegram.messenger',
+        label: 'Telegram',
+        enabled: true,
+        systemApp: false,
+        launchable: true,
+      },
+    ],
+    getAppInfo: () => ({
+      packageName: 'org.telegram.messenger',
+      label: 'Telegram',
+      versionName: '12.0',
+      versionCode: 12000,
+      enabled: true,
+      systemApp: false,
+      launchable: true,
+    }),
     ...overrides,
   };
 }
@@ -90,33 +117,27 @@ describe('AndroidConnector.connect', () => {
     expect(record.displayName).toBe('samsung SM-S928B');
     expect(record.scopes).toContain('android.settings.read');
     expect(record.scopes).toContain('android.settings.write');
-    expect(record.scopes).not.toContain('android.overlay');
+    expect(record.capabilities).toContain('android.apps.read');
+    expect(record.capabilities).toContain('android.settings.app_navigation');
   });
 
   it('is idempotent and preserves createdAt', async () => {
     const store = new InMemoryConnectionStore();
     const connector = makeConnector(makeBridge(), store);
-
     const first = await connector.connect();
     const second = await connector.connect();
-
     expect(second.id).toBe(first.id);
     expect(second.createdAt).toBe(first.createdAt);
     expect((await store.list()).length).toBe(1);
   });
 
   it('reflects live permissions in scopes', async () => {
-    const store = new InMemoryConnectionStore();
-    const connector = makeConnector(
+    const record = await makeConnector(
       makeBridge({
         canWriteSystemSettings: () => false,
         canDrawOverlays: () => true,
       }),
-      store,
-    );
-
-    const record = await connector.connect();
-
+    ).connect();
     expect(record.scopes).toEqual(['android.settings.read', 'android.overlay']);
   });
 
@@ -126,167 +147,192 @@ describe('AndroidConnector.connect', () => {
 });
 
 describe('AndroidConnector tools', () => {
-  it('get_brightness reads from the bridge', async () => {
-    const bridge = makeBridge();
-    const connector = makeConnector(bridge);
-    const tools = await connector.getTools({} as ConnectionRecord);
-
-    const output = (await executeTool(tools, 'android.settings.get_brightness', {
-      connectionId: ANDROID_CONNECTION_ID,
-    })) as { percent: number; raw: number };
-
-    expect(output).toEqual({ percent: 50, raw: 128 });
-  });
-
-  it('set_brightness writes through the bridge', async () => {
+  it('reads and writes core typed settings', async () => {
     const setBrightness = jest.fn(() => true);
-    const bridge = makeBridge({ setScreenBrightnessPercent: setBrightness });
+    const setBrightnessMode = jest.fn(() => true);
+    const setHaptics = jest.fn(() => true);
+    const bridge = makeBridge({
+      setScreenBrightnessPercent: setBrightness,
+      setBrightnessMode,
+      setHapticFeedbackEnabled: setHaptics,
+    });
     const tools = createAndroidSettingsTools({ bridge });
 
-    const output = (await executeTool(tools, 'android.settings.set_brightness', {
-      connectionId: ANDROID_CONNECTION_ID,
-      percent: 40,
-    })) as { percent: number };
+    expect(
+      await executeTool(tools, 'android.settings.get_brightness', {
+        connectionId: ANDROID_CONNECTION_ID,
+      }),
+    ).toEqual({ percent: 50, raw: 128 });
 
+    expect(
+      await executeTool(tools, 'android.settings.set_brightness', {
+        connectionId: ANDROID_CONNECTION_ID,
+        percent: 40,
+      }),
+    ).toEqual({ percent: 40 });
     expect(setBrightness).toHaveBeenCalledWith(40);
-    expect(output).toEqual({ percent: 40 });
+
+    expect(
+      await executeTool(tools, 'android.settings.set_brightness_mode', {
+        connectionId: ANDROID_CONNECTION_ID,
+        mode: 'manual',
+      }),
+    ).toEqual({ mode: 'manual' });
+    expect(setBrightnessMode).toHaveBeenCalledWith('manual');
+
+    expect(
+      await executeTool(tools, 'android.settings.set_haptic_feedback', {
+        connectionId: ANDROID_CONNECTION_ID,
+        enabled: false,
+      }),
+    ).toEqual({ enabled: false });
+    expect(setHaptics).toHaveBeenCalledWith(false);
   });
 
-  it('set_auto_rotate writes through the bridge', async () => {
-    const setAutoRotate = jest.fn(() => true);
-    const bridge = makeBridge({ setAutoRotate });
+  it('finds apps and reads app info', async () => {
+    const tools = createAndroidSettingsTools({ bridge: makeBridge() });
+    const found = (await executeTool(tools, 'android.apps.find', {
+      connectionId: ANDROID_CONNECTION_ID,
+      query: 'telegram',
+    })) as { apps: Array<{ packageName: string }> };
+    expect(found.apps[0]?.packageName).toBe('org.telegram.messenger');
+
+    const info = (await executeTool(tools, 'android.apps.get_info', {
+      connectionId: ANDROID_CONNECTION_ID,
+      packageName: 'org.telegram.messenger',
+    })) as { app: { label: string } | null };
+    expect(info.app?.label).toBe('Telegram');
+  });
+
+  it('opens package-scoped settings with package and channel arguments', async () => {
+    const openAppSettings = jest.fn(async () => true);
+    const bridge = makeBridge({ openAppSettings });
     const tools = createAndroidSettingsTools({ bridge });
 
-    const output = (await executeTool(tools, 'android.settings.set_auto_rotate', {
-      connectionId: ANDROID_CONNECTION_ID,
-      enabled: true,
-    })) as { enabled: boolean };
+    expect(
+      await executeTool(tools, 'android.settings.open_app', {
+        connectionId: ANDROID_CONNECTION_ID,
+        target: 'notificationChannel',
+        packageName: 'org.telegram.messenger',
+        channelId: 'messages',
+      }),
+    ).toEqual({
+      opened: true,
+      target: 'notificationChannel',
+      packageName: 'org.telegram.messenger',
+      channelId: 'messages',
+    });
+    expect(openAppSettings).toHaveBeenCalledWith(
+      'notificationChannel',
+      'org.telegram.messenger',
+      'messages',
+    );
+  });
 
-    expect(setAutoRotate).toHaveBeenCalledWith(true);
-    expect(output).toEqual({ enabled: true });
+  it('requires channelId for notificationChannel at schema validation', () => {
+    const tools = createAndroidSettingsTools({ bridge: makeBridge() });
+    const tool = tools.find((candidate) => candidate.name === 'android.settings.open_app');
+    if (!tool) throw new Error('tool not found');
+
+    expect(
+      tool.inputSchema.safeParse({
+        connectionId: 'x',
+        target: 'notificationChannel',
+        packageName: 'org.telegram.messenger',
+      }).success,
+    ).toBe(false);
+    expect(
+      tool.inputSchema.safeParse({
+        connectionId: 'x',
+        target: 'appDetails',
+        packageName: 'org.telegram.messenger',
+      }).success,
+    ).toBe(true);
   });
 
   it('rejects missing WRITE_SETTINGS with PERMISSION_REQUIRED', async () => {
-    const bridge = makeBridge({ canWriteSystemSettings: () => false });
-    const tools = createAndroidSettingsTools({ bridge });
-
+    const tools = createAndroidSettingsTools({
+      bridge: makeBridge({ canWriteSystemSettings: () => false }),
+    });
     await expect(
-      executeTool(tools, 'android.settings.set_brightness', {
+      executeTool(tools, 'android.settings.set_sound_effects', {
         connectionId: ANDROID_CONNECTION_ID,
-        percent: 50,
+        enabled: false,
       }),
     ).rejects.toMatchObject({ code: 'PERMISSION_REQUIRED' });
   });
 
-  it('validates brightness range in the schema', async () => {
+  it('validates brightness and timeout ranges', () => {
     const tools = createAndroidSettingsTools({ bridge: makeBridge() });
-    const tool = tools.find((candidate) => candidate.name === 'android.settings.set_brightness');
-    if (!tool) throw new Error('tool not found');
+    const brightness = tools.find((candidate) => candidate.name === 'android.settings.set_brightness');
+    const timeout = tools.find((candidate) => candidate.name === 'android.settings.set_screen_timeout');
+    if (!brightness || !timeout) throw new Error('tool not found');
 
-    expect(
-      tool.inputSchema.safeParse({ connectionId: 'x', percent: 101 }).success,
-    ).toBe(false);
-    expect(
-      tool.inputSchema.safeParse({ connectionId: 'x', percent: 0 }).success,
-    ).toBe(true);
-    expect(
-      tool.inputSchema.safeParse({ connectionId: 'x', percent: 100 }).success,
-    ).toBe(true);
+    expect(brightness.inputSchema.safeParse({ connectionId: 'x', percent: 101 }).success).toBe(false);
+    expect(brightness.inputSchema.safeParse({ connectionId: 'x', percent: 100 }).success).toBe(true);
+    expect(timeout.inputSchema.safeParse({ connectionId: 'x', milliseconds: -1 }).success).toBe(false);
+    expect(timeout.inputSchema.safeParse({ connectionId: 'x', milliseconds: 30000 }).success).toBe(true);
   });
 
-  it('validates timeout range in the schema', async () => {
-    const tools = createAndroidSettingsTools({ bridge: makeBridge() });
-    const tool = tools.find((candidate) => candidate.name === 'android.settings.set_screen_timeout');
-    if (!tool) throw new Error('tool not found');
-
-    expect(
-      tool.inputSchema.safeParse({ connectionId: 'x', milliseconds: -1 }).success,
-    ).toBe(false);
-    expect(
-      tool.inputSchema.safeParse({ connectionId: 'x', milliseconds: 30000 }).success,
-    ).toBe(true);
-  });
-
-  it('open screen allowlist rejects permission screens', async () => {
+  it('keeps special-access permission screens out of the global open allowlist', () => {
     const tools = createAndroidSettingsTools({ bridge: makeBridge() });
     const tool = tools.find((candidate) => candidate.name === 'android.settings.open');
     if (!tool) throw new Error('tool not found');
 
-    expect(
-      tool.inputSchema.safeParse({ connectionId: 'x', screen: 'wifi' }).success,
-    ).toBe(true);
-    expect(
-      tool.inputSchema.safeParse({ connectionId: 'x', screen: 'writeSettings' }).success,
-    ).toBe(false);
-    expect(
-      tool.inputSchema.safeParse({ connectionId: 'x', screen: 'overlay' }).success,
-    ).toBe(false);
+    expect(tool.inputSchema.safeParse({ connectionId: 'x', screen: 'batterySaver' }).success).toBe(true);
+    expect(tool.inputSchema.safeParse({ connectionId: 'x', screen: 'writeSettings' }).success).toBe(false);
+    expect(tool.inputSchema.safeParse({ connectionId: 'x', screen: 'overlay' }).success).toBe(false);
+    expect(tool.inputSchema.safeParse({ connectionId: 'x', screen: 'unknownSources' }).success).toBe(false);
+    expect(tool.inputSchema.safeParse({ connectionId: 'x', screen: 'batteryOptimization' }).success).toBe(false);
   });
 
-  it('open panel allowlist accepts only the four official panels', async () => {
+  it('open panel accepts only the official panels', () => {
     const tools = createAndroidSettingsTools({ bridge: makeBridge() });
     const tool = tools.find((candidate) => candidate.name === 'android.settings.open_panel');
     if (!tool) throw new Error('tool not found');
-
-    expect(
-      tool.inputSchema.safeParse({ connectionId: 'x', panel: 'volume' }).success,
-    ).toBe(true);
-    expect(
-      tool.inputSchema.safeParse({ connectionId: 'x', panel: 'bogus' }).success,
-    ).toBe(false);
+    expect(tool.inputSchema.safeParse({ connectionId: 'x', panel: 'volume' }).success).toBe(true);
+    expect(tool.inputSchema.safeParse({ connectionId: 'x', panel: 'bogus' }).success).toBe(false);
   });
 
-  it('every production tool is real', async () => {
-    const connector = makeConnector(makeBridge());
-    const tools = await connector.getTools({} as ConnectionRecord);
-
-    expect(tools.length).toBeGreaterThan(0);
+  it('every production tool is real and no raw Settings keys are exposed', async () => {
+    const tools = await makeConnector(makeBridge()).getTools({} as ConnectionRecord);
     for (const tool of tools) {
       expect(tool.implementationStatus).toBe('real');
+      expect(tool.name).not.toMatch(/^android\.settings\.(set_system|get_system|get_secure|get_global)/u);
+      expect(tool.name).not.toMatch(/request_(write_settings|overlay)_permission/u);
+      expect(tool.name).not.toMatch(/set_secure|set_global/u);
     }
-  });
 
-  it('never exposes low-level or permission-request tools', async () => {
-    const connector = makeConnector(makeBridge());
-    const tools = await connector.getTools({} as ConnectionRecord);
-    const names = tools.map((tool) => tool.name);
-
-    for (const name of names) {
-      expect(name).not.toMatch(/^android\.settings\.(set_system|get_system|get_secure|get_global)/u);
-      expect(name).not.toMatch(/request_(write_settings|overlay)_permission/u);
-      expect(name).not.toMatch(/set_secure|set_global/u);
-    }
-    expect(names.sort()).toEqual([
+    expect(tools.map((tool) => tool.name).sort()).toEqual([
+      'android.apps.find',
+      'android.apps.get_info',
       'android.settings.get_auto_rotate',
       'android.settings.get_brightness',
+      'android.settings.get_brightness_mode',
       'android.settings.get_capabilities',
+      'android.settings.get_haptic_feedback',
       'android.settings.get_screen_timeout',
+      'android.settings.get_sound_effects',
       'android.settings.open',
+      'android.settings.open_app',
       'android.settings.open_panel',
       'android.settings.set_auto_rotate',
       'android.settings.set_brightness',
+      'android.settings.set_brightness_mode',
+      'android.settings.set_haptic_feedback',
       'android.settings.set_screen_timeout',
+      'android.settings.set_sound_effects',
     ]);
   });
 });
 
 describe('mapAndroidSettingsError', () => {
   it('maps known native codes', () => {
-    expect(mapAndroidSettingsError({ code: 'ERR_WRITE_SETTINGS_PERMISSION_REQUIRED' }, 'x').code).toBe(
-      'PERMISSION_REQUIRED',
-    );
-    expect(mapAndroidSettingsError({ code: 'ERR_PLATFORM_NOT_SUPPORTED' }, 'x').code).toBe(
-      'UNSUPPORTED',
-    );
-    expect(mapAndroidSettingsError({ code: 'ERR_SETTINGS_SCREEN_UNAVAILABLE' }, 'x').code).toBe(
-      'UNSUPPORTED',
-    );
-    expect(mapAndroidSettingsError({ code: 'ERR_INVALID_ARGUMENT' }, 'x').code).toBe(
-      'VALIDATION_FAILED',
-    );
-    expect(mapAndroidSettingsError({ code: 'ERR_SETTING_READ_FAILED' }, 'x').code).toBe(
-      'PROVIDER_ERROR',
-    );
+    expect(mapAndroidSettingsError({ code: 'ERR_WRITE_SETTINGS_PERMISSION_REQUIRED' }, 'x').code).toBe('PERMISSION_REQUIRED');
+    expect(mapAndroidSettingsError({ code: 'ERR_PLATFORM_NOT_SUPPORTED' }, 'x').code).toBe('UNSUPPORTED');
+    expect(mapAndroidSettingsError({ code: 'ERR_SETTINGS_SCREEN_UNAVAILABLE' }, 'x').code).toBe('UNSUPPORTED');
+    expect(mapAndroidSettingsError({ code: 'ERR_INVALID_ARGUMENT' }, 'x').code).toBe('VALIDATION_FAILED');
+    expect(mapAndroidSettingsError({ code: 'ERR_SETTING_READ_FAILED' }, 'x').code).toBe('PROVIDER_ERROR');
   });
 
   it('falls back to PROVIDER_ERROR for unknown errors', () => {

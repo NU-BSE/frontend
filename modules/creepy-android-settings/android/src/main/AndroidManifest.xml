@@ -1,4 +1,16 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
   <uses-permission android:name="android.permission.WRITE_SETTINGS" />
   <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
+
+  <!--
+    Android 11+ filters package queries. The agent only needs to discover apps
+    the user can launch, so declare the launcher intent instead of requesting
+    the Play-restricted QUERY_ALL_PACKAGES permission.
+  -->
+  <queries>
+    <intent>
+      <action android:name="android.intent.action.MAIN" />
+      <category android:name="android.intent.category.LAUNCHER" />
+    </intent>
+  </queries>
 </manifest>

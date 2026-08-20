@@ -26,9 +26,57 @@ export type SettingsScreen =
   | 'language'
   | 'dateTime'
   | 'keyboard'
-  | 'developerOptions';
+  | 'developerOptions'
+  | 'apps'
+  | 'allApps'
+  | 'defaultApps'
+  | 'home'
+  | 'batterySaver'
+  | 'dataUsage'
+  | 'airplaneMode'
+  | 'apn'
+  | 'roaming'
+  | 'doNotDisturb'
+  | 'storage'
+  | 'deviceInfo'
+  | 'systemUpdate'
+  | 'sync'
+  | 'addAccount'
+  | 'userDictionary'
+  | 'hardwareKeyboard'
+  | 'captioning'
+  | 'cast'
+  | 'print'
+  | 'dream'
+  | 'autoRotateSettings'
+  | 'webView'
+  | 'allNotifications';
+
+export type AppSettingsTarget =
+  | 'appDetails'
+  | 'appNotifications'
+  | 'notificationChannel'
+  | 'notificationBubbles'
+  | 'appOpenByDefault'
+  | 'appLocale'
+  | 'appUsage'
+  | 'backgroundData';
 
 export type SettingsPanel = 'internet' | 'wifi' | 'volume' | 'nfc';
+export type BrightnessMode = 'manual' | 'automatic';
+
+export interface InstalledAppSummary {
+  packageName: string;
+  label: string;
+  enabled: boolean;
+  systemApp: boolean;
+  launchable: boolean;
+}
+
+export interface AndroidAppInfo extends InstalledAppSummary {
+  versionName: string | null;
+  versionCode: number | null;
+}
 
 export interface AndroidSettingsCapabilities {
   platform: 'android';
@@ -39,6 +87,7 @@ export interface AndroidSettingsCapabilities {
   canDrawOverlays: boolean;
   settingsPanelsSupported: boolean;
   supportedScreens: Partial<Record<SettingsScreen, boolean>>;
+  supportedAppTargets: Partial<Record<AppSettingsTarget, boolean>>;
 }
 
 export type SettingValue = string | number | null;
@@ -56,44 +105,36 @@ export type CreepyAndroidSettingsEvents = {
 };
 
 export interface CreepyAndroidSettingsAPI {
-  // Capabilities
   getCapabilities(): AndroidSettingsCapabilities;
 
-  // Generic reads
   getSetting(namespace: SettingsNamespace, key: string): string | null;
   getSettingInt(namespace: SettingsNamespace, key: string, defaultValue?: number): number;
 
-  // Settings.System
   getSystemInt(key: string, defaultValue?: number): number;
   getSystemString(key: string): string | null;
   getSystemFloat(key: string, defaultValue?: number): number;
   getSystemLong(key: string, defaultValue?: number): number;
 
-  // LOW LEVEL API — prefer the high-level helpers below.
   setSystemInt(key: string, value: number): boolean;
   setSystemString(key: string, value: string): boolean;
   setSystemFloat(key: string, value: number): boolean;
   setSystemLong(key: string, value: number): boolean;
 
-  // Settings.Secure (read-only)
   getSecureInt(key: string, defaultValue?: number): number;
   getSecureString(key: string): string | null;
   getSecureFloat(key: string, defaultValue?: number): number;
   getSecureLong(key: string, defaultValue?: number): number;
 
-  // Settings.Global (read-only)
   getGlobalInt(key: string, defaultValue?: number): number;
   getGlobalString(key: string): string | null;
   getGlobalFloat(key: string, defaultValue?: number): number;
   getGlobalLong(key: string, defaultValue?: number): number;
 
-  // Special access
   canWriteSystemSettings(): boolean;
   requestWriteSystemSettingsPermission(): Promise<boolean>;
   canDrawOverlays(): boolean;
   requestOverlayPermission(): Promise<boolean>;
 
-  // High-level settings
   getScreenBrightness(): number;
   setScreenBrightness(value: number): boolean;
   getScreenBrightnessPercent(): number;
@@ -102,21 +143,52 @@ export interface CreepyAndroidSettingsAPI {
   setScreenTimeout(milliseconds: number): boolean;
   getAutoRotate(): boolean;
   setAutoRotate(enabled: boolean): boolean;
+  getBrightnessMode(): BrightnessMode;
+  setBrightnessMode(mode: BrightnessMode): boolean;
+  getHapticFeedbackEnabled(): boolean;
+  setHapticFeedbackEnabled(enabled: boolean): boolean;
+  getSoundEffectsEnabled(): boolean;
+  setSoundEffectsEnabled(enabled: boolean): boolean;
 
-  // Navigation
   canOpenSettings(screen: SettingsScreen): boolean;
   openSettings(screen: SettingsScreen): Promise<boolean>;
+  canOpenAppSettings(
+    target: AppSettingsTarget,
+    packageName: string,
+    channelId?: string,
+  ): boolean;
+  openAppSettings(
+    target: AppSettingsTarget,
+    packageName: string,
+    channelId?: string,
+  ): Promise<boolean>;
 
-  // Panels
   isSettingsPanelSupported(panel: SettingsPanel): boolean;
   openPanel(panel: SettingsPanel): Promise<boolean>;
 
-  // Observer
+  findApps(query: string, limit?: number): InstalledAppSummary[];
+  getAppInfo(packageName: string): AndroidAppInfo | null;
+
+  intentOpenUri(uri: string): Promise<boolean>;
+  intentOpenApp(packageName: string): Promise<boolean>;
+  intentShareText(text: string, targetPackage?: string): Promise<boolean>;
+  intentShareFile(
+    fileUri: string,
+    mimeType?: string,
+    targetPackage?: string,
+  ): Promise<boolean>;
+  intentComposeEmail(to?: string, subject?: string, body?: string): Promise<boolean>;
+  intentOpenMap(
+    query?: string,
+    latitude?: number,
+    longitude?: number,
+  ): Promise<boolean>;
+  intentOpenDialer(phoneNumber?: string): Promise<boolean>;
+
   watchSetting(namespace: SettingsNamespace, key: string): string;
   unwatchSetting(subscriptionId: string): void;
   unwatchAllSettings(): void;
 
-  // Events
   addListener(
     eventName: 'onSettingChanged',
     listener: (event: SettingChangedEvent) => void,

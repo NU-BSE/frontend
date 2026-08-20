@@ -3,8 +3,12 @@ export type { AndroidConnectorOptions } from './android-connector';
 export { ANDROID_CONNECTION_ID } from './android-connector';
 
 export type {
+  AndroidAppInfo,
   AndroidSettingsBridge,
   AndroidSettingsCapabilities,
+  AppSettingsTarget,
+  BrightnessMode,
+  InstalledAppSummary,
   SettingsPanel,
   SettingsScreen,
 } from './android-settings-bridge';

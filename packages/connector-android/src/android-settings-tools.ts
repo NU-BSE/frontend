@@ -1,14 +1,17 @@
 import * as z from 'zod/v4';
 import { ConnectorError, type ConnectorTool } from '@mobile-agent/connector-core';
 
-import type { AndroidSettingsBridge } from './android-settings-bridge';
+import type {
+  AndroidSettingsBridge,
+  AppSettingsTarget,
+  BrightnessMode,
+} from './android-settings-bridge';
 import { mapAndroidSettingsError } from './android-settings-errors';
 
 /**
- * Agent-facing Settings screens. Permission-granting screens (`overlay`,
- * `writeSettings`, `batteryOptimization`, `unknownSources`) are intentionally
- * excluded: the model must not steer the user through permission escalation —
- * that path is the user's, via Account → Connectors → This device.
+ * Agent-facing global Settings screens. Permission-granting destinations
+ * (`overlay`, `writeSettings`, `batteryOptimization`, `unknownSources`) remain
+ * deliberately excluded: those grants belong to the user-owned connector UI.
  */
 const OPEN_SCREENS = [
   'settings',
@@ -31,13 +34,79 @@ const OPEN_SCREENS = [
   'dateTime',
   'keyboard',
   'developerOptions',
+  'apps',
+  'allApps',
+  'defaultApps',
+  'home',
+  'batterySaver',
+  'dataUsage',
+  'airplaneMode',
+  'apn',
+  'roaming',
+  'doNotDisturb',
+  'storage',
+  'deviceInfo',
+  'systemUpdate',
+  'sync',
+  'addAccount',
+  'userDictionary',
+  'hardwareKeyboard',
+  'captioning',
+  'cast',
+  'print',
+  'dream',
+  'autoRotateSettings',
+  'webView',
+  'allNotifications',
 ] as const;
 
 type OpenScreen = (typeof OPEN_SCREENS)[number];
 
+const APP_TARGETS = [
+  'appDetails',
+  'appNotifications',
+  'notificationChannel',
+  'notificationBubbles',
+  'appOpenByDefault',
+  'appLocale',
+  'appUsage',
+  'backgroundData',
+] as const satisfies readonly AppSettingsTarget[];
+
 const OPEN_PANELS = ['internet', 'wifi', 'volume', 'nfc'] as const;
 
 const CONNECTION_ID = z.string().min(1);
+const PACKAGE_NAME = z.string().trim().min(1).max(255);
+
+const APP_TARGET_INPUT = z
+  .object({
+    connectionId: CONNECTION_ID,
+    target: z.enum(APP_TARGETS),
+    packageName: PACKAGE_NAME,
+    channelId: z.string().trim().min(1).max(255).optional(),
+  })
+  .superRefine((value, ctx) => {
+    if (value.target === 'notificationChannel' && !value.channelId) {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['channelId'],
+        message: 'channelId is required for notificationChannel settings.',
+      });
+    }
+  });
+
+const APP_SUMMARY_SCHEMA = z.object({
+  packageName: z.string(),
+  label: z.string(),
+  enabled: z.boolean(),
+  systemApp: z.boolean(),
+  launchable: z.boolean(),
+});
+
+const APP_INFO_SCHEMA = APP_SUMMARY_SCHEMA.extend({
+  versionName: z.string().nullable(),
+  versionCode: z.number().int().nullable(),
+});
 
 const PERMISSION_MESSAGE =
   'Permission to modify Android system settings is required. Enable it in Account → Connectors → This device.';
@@ -47,11 +116,9 @@ export interface AndroidSettingsToolsDeps {
 }
 
 /**
- * The real, native-backed Android Settings tool set.
- *
- * Every tool is marked `implementationStatus: 'real'` — no fixture is ever
- * returned. Arbitrary `Settings` reads/writes and permission-request tools are
- * deliberately not exposed: the model gets capability-level tools only.
+ * Real native-backed Android Settings tools. Arbitrary Settings provider keys
+ * are intentionally never model-facing: every read/write below is a narrow,
+ * validated capability with a stable semantic contract.
  */
 export function createAndroidSettingsTools(
   deps: AndroidSettingsToolsDeps,
@@ -64,12 +131,21 @@ export function createAndroidSettingsTools(
     }
   };
 
+  const requireApplied = (applied: boolean, description: string) => {
+    if (!applied) {
+      throw new ConnectorError(
+        `Android did not apply the requested ${description}.`,
+        'PROVIDER_ERROR',
+      );
+    }
+  };
+
   return [
     {
       name: 'android.settings.get_capabilities',
       title: 'Device settings capabilities',
       description:
-        'Report this device model and which Android settings capabilities are available.',
+        'Report this Android device and the Settings destinations available on it.',
       inputSchema: z.object({ connectionId: CONNECTION_ID }),
       outputSchema: z.object({
         apiLevel: z.number(),
@@ -79,6 +155,7 @@ export function createAndroidSettingsTools(
         canDrawOverlays: z.boolean(),
         settingsPanelsSupported: z.boolean(),
         supportedScreens: z.record(z.string(), z.boolean()),
+        supportedAppTargets: z.record(z.string(), z.boolean()),
       }),
       risk: 'read',
       capabilities: ['android.settings.read'],
@@ -95,9 +172,54 @@ export function createAndroidSettingsTools(
             canDrawOverlays: caps.canDrawOverlays,
             settingsPanelsSupported: caps.settingsPanelsSupported,
             supportedScreens: caps.supportedScreens ?? {},
+            supportedAppTargets: caps.supportedAppTargets ?? {},
           };
         } catch (error) {
           throw mapAndroidSettingsError(error, 'reading Android capabilities');
+        }
+      },
+    },
+
+    {
+      name: 'android.apps.find',
+      title: 'Find installed apps',
+      description:
+        'Find launchable Android apps by display name or package name. Results respect Android package-visibility rules.',
+      inputSchema: z.object({
+        connectionId: CONNECTION_ID,
+        query: z.string().max(255).default(''),
+        limit: z.number().int().min(1).max(50).optional(),
+      }),
+      outputSchema: z.object({ apps: z.array(APP_SUMMARY_SCHEMA) }),
+      risk: 'read',
+      capabilities: ['android.apps.read'],
+      requiredScopes: ['android.settings.read'],
+      implementationStatus: 'real',
+      execute: async (input: { connectionId: string; query: string; limit?: number }) => {
+        try {
+          return { apps: bridge.findApps(input.query, input.limit ?? 20) };
+        } catch (error) {
+          throw mapAndroidSettingsError(error, 'finding installed Android apps');
+        }
+      },
+    },
+
+    {
+      name: 'android.apps.get_info',
+      title: 'Get app information',
+      description:
+        'Read basic package, version, enabled, system-app and launchability information for an Android app visible to this app.',
+      inputSchema: z.object({ connectionId: CONNECTION_ID, packageName: PACKAGE_NAME }),
+      outputSchema: z.object({ app: APP_INFO_SCHEMA.nullable() }),
+      risk: 'read',
+      capabilities: ['android.apps.read'],
+      requiredScopes: ['android.settings.read'],
+      implementationStatus: 'real',
+      execute: async (input: { connectionId: string; packageName: string }) => {
+        try {
+          return { app: bridge.getAppInfo(input.packageName) };
+        } catch (error) {
+          throw mapAndroidSettingsError(error, `reading app info for "${input.packageName}"`);
         }
       },
     },
@@ -140,16 +262,53 @@ export function createAndroidSettingsTools(
       execute: async (input: { connectionId: string; percent: number }) => {
         requireWriteSettings();
         try {
-          const applied = bridge.setScreenBrightnessPercent(input.percent);
-          if (!applied) {
-            throw new ConnectorError(
-              'Android did not apply the requested brightness.',
-              'PROVIDER_ERROR',
-            );
-          }
+          requireApplied(bridge.setScreenBrightnessPercent(input.percent), 'brightness');
           return { percent: input.percent };
         } catch (error) {
           throw mapAndroidSettingsError(error, 'setting screen brightness');
+        }
+      },
+    },
+
+    {
+      name: 'android.settings.get_brightness_mode',
+      title: 'Get brightness mode',
+      description: 'Read whether Android brightness is manual or automatic.',
+      inputSchema: z.object({ connectionId: CONNECTION_ID }),
+      outputSchema: z.object({ mode: z.enum(['manual', 'automatic']) }),
+      risk: 'read',
+      capabilities: ['android.settings.read'],
+      requiredScopes: ['android.settings.read'],
+      implementationStatus: 'real',
+      execute: async () => {
+        try {
+          return { mode: bridge.getBrightnessMode() };
+        } catch (error) {
+          throw mapAndroidSettingsError(error, 'reading brightness mode');
+        }
+      },
+    },
+
+    {
+      name: 'android.settings.set_brightness_mode',
+      title: 'Set brightness mode',
+      description: 'Switch Android screen brightness between manual and automatic mode.',
+      inputSchema: z.object({
+        connectionId: CONNECTION_ID,
+        mode: z.enum(['manual', 'automatic']),
+      }),
+      outputSchema: z.object({ mode: z.enum(['manual', 'automatic']) }),
+      risk: 'write',
+      capabilities: ['android.settings.brightness_mode'],
+      requiredScopes: ['android.settings.write'],
+      implementationStatus: 'real',
+      execute: async (input: { connectionId: string; mode: BrightnessMode }) => {
+        requireWriteSettings();
+        try {
+          requireApplied(bridge.setBrightnessMode(input.mode), 'brightness mode');
+          return { mode: input.mode };
+        } catch (error) {
+          throw mapAndroidSettingsError(error, 'setting brightness mode');
         }
       },
     },
@@ -189,13 +348,7 @@ export function createAndroidSettingsTools(
       execute: async (input: { connectionId: string; milliseconds: number }) => {
         requireWriteSettings();
         try {
-          const applied = bridge.setScreenTimeout(input.milliseconds);
-          if (!applied) {
-            throw new ConnectorError(
-              'Android did not apply the requested screen timeout.',
-              'PROVIDER_ERROR',
-            );
-          }
+          requireApplied(bridge.setScreenTimeout(input.milliseconds), 'screen timeout');
           return { milliseconds: input.milliseconds };
         } catch (error) {
           throw mapAndroidSettingsError(error, 'setting screen timeout');
@@ -226,10 +379,7 @@ export function createAndroidSettingsTools(
       name: 'android.settings.set_auto_rotate',
       title: 'Set auto-rotate',
       description: 'Enable or disable auto-rotate.',
-      inputSchema: z.object({
-        connectionId: CONNECTION_ID,
-        enabled: z.boolean(),
-      }),
+      inputSchema: z.object({ connectionId: CONNECTION_ID, enabled: z.boolean() }),
       outputSchema: z.object({ enabled: z.boolean() }),
       risk: 'write',
       capabilities: ['android.settings.auto_rotate'],
@@ -238,13 +388,7 @@ export function createAndroidSettingsTools(
       execute: async (input: { connectionId: string; enabled: boolean }) => {
         requireWriteSettings();
         try {
-          const applied = bridge.setAutoRotate(input.enabled);
-          if (!applied) {
-            throw new ConnectorError(
-              'Android did not apply the requested auto-rotate setting.',
-              'PROVIDER_ERROR',
-            );
-          }
+          requireApplied(bridge.setAutoRotate(input.enabled), 'auto-rotate setting');
           return { enabled: input.enabled };
         } catch (error) {
           throw mapAndroidSettingsError(error, 'setting auto-rotate');
@@ -253,14 +397,91 @@ export function createAndroidSettingsTools(
     },
 
     {
+      name: 'android.settings.get_haptic_feedback',
+      title: 'Get haptic feedback',
+      description: 'Read whether system haptic feedback is enabled.',
+      inputSchema: z.object({ connectionId: CONNECTION_ID }),
+      outputSchema: z.object({ enabled: z.boolean() }),
+      risk: 'read',
+      capabilities: ['android.settings.read'],
+      requiredScopes: ['android.settings.read'],
+      implementationStatus: 'real',
+      execute: async () => {
+        try {
+          return { enabled: bridge.getHapticFeedbackEnabled() };
+        } catch (error) {
+          throw mapAndroidSettingsError(error, 'reading haptic feedback');
+        }
+      },
+    },
+
+    {
+      name: 'android.settings.set_haptic_feedback',
+      title: 'Set haptic feedback',
+      description: 'Enable or disable system haptic feedback.',
+      inputSchema: z.object({ connectionId: CONNECTION_ID, enabled: z.boolean() }),
+      outputSchema: z.object({ enabled: z.boolean() }),
+      risk: 'write',
+      capabilities: ['android.settings.haptic_feedback'],
+      requiredScopes: ['android.settings.write'],
+      implementationStatus: 'real',
+      execute: async (input: { connectionId: string; enabled: boolean }) => {
+        requireWriteSettings();
+        try {
+          requireApplied(bridge.setHapticFeedbackEnabled(input.enabled), 'haptic feedback setting');
+          return { enabled: input.enabled };
+        } catch (error) {
+          throw mapAndroidSettingsError(error, 'setting haptic feedback');
+        }
+      },
+    },
+
+    {
+      name: 'android.settings.get_sound_effects',
+      title: 'Get system sound effects',
+      description: 'Read whether Android system sound effects are enabled.',
+      inputSchema: z.object({ connectionId: CONNECTION_ID }),
+      outputSchema: z.object({ enabled: z.boolean() }),
+      risk: 'read',
+      capabilities: ['android.settings.read'],
+      requiredScopes: ['android.settings.read'],
+      implementationStatus: 'real',
+      execute: async () => {
+        try {
+          return { enabled: bridge.getSoundEffectsEnabled() };
+        } catch (error) {
+          throw mapAndroidSettingsError(error, 'reading system sound effects');
+        }
+      },
+    },
+
+    {
+      name: 'android.settings.set_sound_effects',
+      title: 'Set system sound effects',
+      description: 'Enable or disable Android system sound effects.',
+      inputSchema: z.object({ connectionId: CONNECTION_ID, enabled: z.boolean() }),
+      outputSchema: z.object({ enabled: z.boolean() }),
+      risk: 'write',
+      capabilities: ['android.settings.sound_effects'],
+      requiredScopes: ['android.settings.write'],
+      implementationStatus: 'real',
+      execute: async (input: { connectionId: string; enabled: boolean }) => {
+        requireWriteSettings();
+        try {
+          requireApplied(bridge.setSoundEffectsEnabled(input.enabled), 'system sound effects setting');
+          return { enabled: input.enabled };
+        } catch (error) {
+          throw mapAndroidSettingsError(error, 'setting system sound effects');
+        }
+      },
+    },
+
+    {
       name: 'android.settings.open',
       title: 'Open Android settings screen',
       description:
-        'Open a specific Android system settings screen. Permission screens are not available here.',
-      inputSchema: z.object({
-        connectionId: CONNECTION_ID,
-        screen: z.enum(OPEN_SCREENS),
-      }),
+        'Open a global Android Settings screen. Permission-granting special-access screens are not available here.',
+      inputSchema: z.object({ connectionId: CONNECTION_ID, screen: z.enum(OPEN_SCREENS) }),
       outputSchema: z.object({ opened: z.literal(true), screen: z.string() }),
       risk: 'external_side_effect',
       capabilities: ['android.settings.navigation'],
@@ -289,13 +510,65 @@ export function createAndroidSettingsTools(
     },
 
     {
+      name: 'android.settings.open_app',
+      title: 'Open settings for an app',
+      description:
+        'Open a package-scoped Android Settings destination such as App info, notifications, a notification channel, Open by default, language, usage or background data.',
+      inputSchema: APP_TARGET_INPUT,
+      outputSchema: z.object({
+        opened: z.literal(true),
+        target: z.enum(APP_TARGETS),
+        packageName: z.string(),
+        channelId: z.string().optional(),
+      }),
+      risk: 'external_side_effect',
+      capabilities: ['android.settings.app_navigation'],
+      requiredScopes: [],
+      implementationStatus: 'real',
+      execute: async (input: {
+        connectionId: string;
+        target: AppSettingsTarget;
+        packageName: string;
+        channelId?: string;
+      }) => {
+        try {
+          if (!bridge.canOpenAppSettings(input.target, input.packageName, input.channelId)) {
+            throw new ConnectorError(
+              `The "${input.target}" settings destination is unavailable for ${input.packageName} on this device.`,
+              'UNSUPPORTED',
+            );
+          }
+          const opened = await bridge.openAppSettings(
+            input.target,
+            input.packageName,
+            input.channelId,
+          );
+          if (!opened) {
+            throw new ConnectorError(
+              `Android did not open "${input.target}" for ${input.packageName}.`,
+              'PROVIDER_ERROR',
+            );
+          }
+          return {
+            opened: true as const,
+            target: input.target,
+            packageName: input.packageName,
+            ...(input.channelId ? { channelId: input.channelId } : {}),
+          };
+        } catch (error) {
+          throw mapAndroidSettingsError(
+            error,
+            `opening "${input.target}" for ${input.packageName}`,
+          );
+        }
+      },
+    },
+
+    {
       name: 'android.settings.open_panel',
       title: 'Open Android settings panel',
       description: 'Open a floating Android Settings Panel (internet, wifi, volume or nfc).',
-      inputSchema: z.object({
-        connectionId: CONNECTION_ID,
-        panel: z.enum(OPEN_PANELS),
-      }),
+      inputSchema: z.object({ connectionId: CONNECTION_ID, panel: z.enum(OPEN_PANELS) }),
       outputSchema: z.object({ opened: z.literal(true), panel: z.string() }),
       risk: 'external_side_effect',
       capabilities: ['android.settings.navigation'],

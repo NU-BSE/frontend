@@ -1,4 +1,4 @@
-import { NativeEventEmitter, NativeModules, Platform } from 'react-native';
+import { NativeEventEmitter, Platform } from 'react-native';
 
 import NativeSmartCards from '@/specs/NativeSmartCards';
 
@@ -85,15 +85,28 @@ const PRESS_EVENT = 'SmartCards.press';
  * Returns an unsubscribe function.
  */
 export function onCardPress(listener: (actionId: string) => void): () => void {
-  if (!isAndroid()) return () => {};
+  if (!isAvailable()) return () => {};
 
   const emitter = new NativeEventEmitter(
-    NativeModules.SmartCards as ConstructorParameters<typeof NativeEventEmitter>[0],
+    NativeSmartCards as ConstructorParameters<typeof NativeEventEmitter>[0],
   );
   const subscription = emitter.addListener(PRESS_EVENT, (actionId: string) => {
     listener(actionId);
   });
   return () => subscription.remove();
+}
+
+/**
+ * Whether notification cards can be used at all.
+ *
+ * False on iOS and web, and false on Android when the build has no native
+ * module — either it predates the config plugin being registered in app.json,
+ * or it is a dev client that never included it.
+ * Everything below is a no-op in that state rather than an error: cards are an
+ * enhancement, and an approval is always answerable in the app itself.
+ */
+export function isAvailable(): boolean {
+  return isAndroid() && NativeSmartCards != null;
 }
 
 export class SmartCardError extends Error {
@@ -133,8 +146,8 @@ function validate(card: SmartCard, path = 'card'): void {
 
 /** Whether notifications can be posted right now. */
 export async function hasPermission(): Promise<boolean> {
-  if (!isAndroid()) return false;
-  return NativeSmartCards.hasPermission();
+  if (!isAvailable()) return false;
+  return NativeSmartCards!.hasPermission();
 }
 
 /**
@@ -145,8 +158,8 @@ export async function hasPermission(): Promise<boolean> {
  * "ask again".
  */
 export async function requestPermission(): Promise<boolean> {
-  if (!isAndroid()) return false;
-  return NativeSmartCards.requestPermission();
+  if (!isAvailable()) return false;
+  return NativeSmartCards!.requestPermission();
 }
 
 /**
@@ -156,14 +169,14 @@ export async function requestPermission(): Promise<boolean> {
  * only surface when the user pressed the button that reveals it.
  */
 export async function showCard(card: SmartCard): Promise<void> {
-  if (!isAndroid()) return;
+  if (!isAvailable()) return;
   validate(card);
-  NativeSmartCards.createChannel();
-  await NativeSmartCards.showCard(JSON.stringify(card));
+  NativeSmartCards!.createChannel();
+  await NativeSmartCards!.showCard(JSON.stringify(card));
 }
 
 /** Remove the card. */
 export function dismiss(notificationId = SMART_CARD_NOTIFICATION_ID): void {
-  if (!isAndroid()) return;
-  NativeSmartCards.dismiss(notificationId);
+  if (!isAvailable()) return;
+  NativeSmartCards!.dismiss(notificationId);
 }

@@ -1,4 +1,4 @@
-import { TurboModuleRegistry, type TurboModule } from 'react-native';
+import { NativeModules } from 'react-native';
 
 /**
  * Android notification cards, driven from JavaScript.
@@ -24,7 +24,7 @@ import { TurboModuleRegistry, type TurboModule } from 'react-native';
  * That is only possible if the next state is already on the device when the
  * user taps, so it travels inside the PendingIntent that the tap fires.
  */
-export interface Spec extends TurboModule {
+export interface Spec {
   /** Create the notification channel. Idempotent; safe to call on every start. */
   createChannel(): void;
 
@@ -45,6 +45,36 @@ export interface Spec extends TurboModule {
 
   /** Remove a posted card by its notification id. */
   dismiss(notificationId: number): void;
+
+  /**
+   * The event-emitter contract. Implemented as no-ops in Kotlin — the
+   * subscriptions live in JS — but they have to be declared, because
+   * NativeEventEmitter is typed against a module that provides them.
+   */
+  addListener(eventName: string): void;
+  removeListeners(count: number): void;
 }
 
-export default TurboModuleRegistry.getEnforcing<Spec>('SmartCards');
+/**
+ * The native module, or null when it is not in the binary.
+ *
+ * Resolved through `NativeModules` rather than `TurboModuleRegistry`. Nothing
+ * here is a TurboModule: the project has no `codegenConfig`, so this file is
+ * never fed to codegen and no native spec class is generated from it. The
+ * Kotlin side is a plain ReactContextBaseJavaModule behind a `ReactPackage`,
+ * and under the New Architecture those reach the TurboModuleManager only when
+ * `useTurboModuleInterop` is on, which defaults to false — so
+ * `TurboModuleRegistry.getEnforcing('SmartCards')` threw on every build,
+ * including correct ones, and took the app down at startup because this file
+ * is imported transitively from app/_layout.tsx.
+ *
+ * `NativeModules` is the accessor the identically-registered Google
+ * authorization module already uses successfully on device.
+ *
+ * Null is a normal state — a build predating the config plugin has no module —
+ * and smartCards.ts treats it as "notifications unavailable" rather than an
+ * error.
+ */
+const NativeSmartCards = (NativeModules.SmartCards as Spec | undefined) ?? null;
+
+export default NativeSmartCards;

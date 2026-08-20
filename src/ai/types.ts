@@ -50,11 +50,19 @@ export type EngineOrigin = 'on-device' | 'remote' | 'stub';
  * What a model can actually do. Tool use must never be pretended: an engine
  * without `toolCalling` gets no tools, and a plain text completion is never
  * passed off as a native tool call.
+ *
+ * `fileInput`/`imageInput` are optional on purpose: a local text-only GGUF
+ * model must never pretend to be multimodal. Only a backend that genuinely
+ * accepts file references declares `fileInput`.
  */
 export interface LlmCapabilities {
   textGeneration: boolean;
   toolCalling: boolean;
   structuredOutput: boolean;
+  /** True when the model can consume uploaded file references. */
+  fileInput?: boolean;
+  /** True when the model can actually *see* image content. */
+  imageInput?: boolean;
 }
 
 export interface EngineDescriptor {

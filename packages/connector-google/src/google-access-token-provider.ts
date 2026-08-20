@@ -43,8 +43,27 @@ export function createGoogleAccessTokenProvider(
           credential?.kind === 'oauth' ? credential.accountName : undefined;
       }
 
-      const result = await options.bridge.getAccessToken({ scopes, accountName });
-      return result.accessToken;
+      try {
+        const result = await options.bridge.getAccessToken({
+          scopes,
+          ...(accountName ? { accountName } : {}),
+        });
+        return result.accessToken;
+      } catch (error) {
+        // The native bridge rejects with RECONNECT_REQUIRED when Google needs
+        // interactive re-consent (e.g. a requested scope is no longer granted).
+        // Surface that as a permission error so the caller can prompt the user,
+        // rather than leaking a raw native module rejection.
+        const code = (error as { code?: string } | null)?.code;
+        const message = error instanceof Error ? error.message : String(error);
+        if (code === 'RECONNECT_REQUIRED' || /re-consent|reconnect/i.test(message)) {
+          throw new ConnectorError(
+            'Google permission is required for this account. Ask the user to reconnect and authorize the requested access.',
+            'PERMISSION_REQUIRED',
+          );
+        }
+        throw error;
+      }
     },
   };
 }

@@ -45,8 +45,52 @@ export interface AgentToolResult {
   approvalPreview?: unknown;
 }
 
+/**
+ * The single normalized attachment contract used across the whole chat
+ * architecture: the file picker, the composer draft, the transcript and the
+ * remote transport all speak this shape.
+ *
+ * `uri` is a local `file://`/`content://` reference that never leaves the
+ * device. `remoteId`/`remoteUrl` appear only after a successful backend
+ * upload and are what the remote model actually receives. Raw binary is never
+ * embedded in an `AgentMessage`.
+ */
+export type ChatAttachmentKind =
+  | 'image'
+  | 'document'
+  | 'audio'
+  | 'video'
+  | 'other';
+
+export interface ChatAttachment {
+  id: string;
+  name: string;
+  mimeType: string;
+  size: number;
+  kind: ChatAttachmentKind;
+  /** Local reference inside the app. Never sent to the backend. */
+  uri?: string;
+  /** Backend file id, set after a successful upload. */
+  remoteId?: string;
+  /** Optional backend URL, for backends that expose one. */
+  remoteUrl?: string;
+}
+
+/** Transient upload lifecycle for a draft attachment (never persisted). */
+export type AttachmentStatus =
+  | 'ready'
+  | 'uploading'
+  | 'uploaded'
+  | 'failed';
+
+/** What the composer hands to the chat layer when the user sends. */
+export interface ChatSendInput {
+  text: string;
+  attachments: ChatAttachment[];
+}
+
 export type AgentMessage =
-  | { id: string; role: 'user'; content: string }
+  | { id: string; role: 'user'; content: string; attachments?: ChatAttachment[] }
   | {
       id: string;
       role: 'assistant';
@@ -219,6 +263,12 @@ export interface AgentRunRecord {
   threadId: string;
   createdAt: number;
   userMessage: string;
+  /**
+   * Safe attachment metadata only — file names, never binary/base64/extracted
+   * content. The full `ChatAttachment[]` (with local URIs) lives in the
+   * conversation messages, not in the persisted run record.
+   */
+  attachmentNames?: string[];
   finalAnswer?: string;
   steps: AgentRunStep[];
   engine: string;

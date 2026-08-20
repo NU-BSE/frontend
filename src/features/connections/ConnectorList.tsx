@@ -43,15 +43,21 @@ export function ConnectorList() {
   const rows = useMemo(() => chunkRows(CONNECTOR_CATALOG, COLUMNS), []);
 
   const failed =
-    connect.isError && typeof connect.variables === 'string'
+    disconnect.isError
       ? {
-          connectorId: connect.variables,
           message:
-            connect.error instanceof Error
-              ? connect.error.message
-              : 'Could not connect',
+            disconnect.error instanceof Error
+              ? disconnect.error.message
+              : 'Could not disconnect',
         }
-      : null;
+      : connect.isError
+        ? {
+            message:
+              connect.error instanceof Error
+                ? connect.error.message
+                : 'Could not connect',
+          }
+        : null;
 
   return (
     <View style={styles.wrapper}>
@@ -88,6 +94,21 @@ export function ConnectorList() {
                */
               const permanent = entry.connectorId === 'android';
               const reconnectRequired = connection?.status === 'reconnect_required';
+              const connectorConnections = entry.connectorId
+                ? connections?.filter(
+                    (record) => record.connectorId === entry.connectorId,
+                  ) ?? []
+                : [];
+
+              const hasConnections = connectorConnections.length > 0;
+
+              const connected = connectorConnections.some(
+                (record) => record.status === 'connected',
+              );
+
+              const reconnectRequired = connectorConnections.some(
+                (record) => record.status === 'reconnect_required',
+              );
 
               // Availability comes from the live registry, not the catalogue:
               // a connector the registry omitted is "Coming soon", not tappable.
@@ -98,6 +119,7 @@ export function ConnectorList() {
               const busy =
                 (connect.isPending && connect.variables === entry.connectorId) ||
                 (disconnect.isPending && disconnect.variables === connection?.id);
+              const canPress = hasConnections || connectable;
 
               return (
                 <Pressable
@@ -105,6 +127,7 @@ export function ConnectorList() {
                   accessibilityRole="button"
                   accessibilityState={{
                     disabled: permanent || !connectable || busy || isPending,
+                    disabled: !canPress || busy || isPending,
                     selected: connected,
                   }}
                   accessibilityLabel={
@@ -119,13 +142,20 @@ export function ConnectorList() {
                     if (!entry.connectorId || permanent) return;
                     if (connected && connection) {
                       disconnect.mutate(connection.id);
+                  disabled={!canPress || busy || isPending}
+                  onPress={() => {
+                    if (!entry.connectorId) return;
+                    if (connectorConnections.length > 0) {
+                      void (async () => {
+                        for (const record of connectorConnections) {
+                          await disconnect.mutateAsync(record.id);
+                        }
+                      })();
+
+                      return;
                     } else if (entry.connectorId === 'telegram-user') {
                       router.push('/connect/telegram');
                     } else if (entry.connectorId === 'google') {
-                      // Google's flow shows the account picker and a consent
-                      // sheet. Connecting straight from the grid would launch
-                      // both with no statement of what is being requested, so
-                      // it goes through a screen that says so first.
                       router.push('/connect/google');
                     } else {
                       connect.mutate(entry.connectorId);

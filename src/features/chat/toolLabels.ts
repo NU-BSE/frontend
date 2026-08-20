@@ -22,6 +22,15 @@ const ACTIVITY_LABELS: Record<string, string> = {
   'android.apps.list': 'Listing apps',
   'google.calendar.list_events': 'Reading Google Calendar',
   'google.gmail.search': 'Searching Gmail',
+  'google.gmail.get_message': 'Reading a Gmail message',
+  'google.gmail.get_thread': 'Reading a Gmail thread',
+  'google.gmail.list_drafts': 'Listing Gmail drafts',
+  'google.gmail.create_draft': 'Creating a Gmail draft',
+  'google.gmail.update_draft': 'Updating a Gmail draft',
+  'google.gmail.send_draft': 'Sending a Gmail draft',
+  'google.gmail.archive': 'Archiving a Gmail message',
+  'google.gmail.mark_read': 'Marking a Gmail message read',
+  'google.gmail.get_attachment': 'Downloading a Gmail attachment',
   'google.people.search': 'Searching Google contacts',
 };
 

@@ -39,6 +39,8 @@ interface RequestOptions {
   query?: Record<string, string | number | boolean | undefined>;
   body?: unknown;
   headers?: Record<string, string>;
+  /** Abort signal forwarded to fetch (used for request timeouts). */
+  signal?: AbortSignal;
   /** Return the raw response instead of parsed JSON. */
   rawResponse?: boolean;
 }
@@ -99,6 +101,7 @@ export class GoogleApiClient {
       return {
         method,
         headers,
+        ...(options.signal ? { signal: options.signal } : {}),
         ...(options.body !== undefined
           ? { body: JSON.stringify(options.body) }
           : {}),
@@ -131,7 +134,15 @@ export class GoogleApiClient {
   }
 
   private async toError(response: Response): Promise<GoogleApiError> {
-    let body: { error?: { code?: number; message?: string }; message?: string } = {};
+    let body: {
+      error?: {
+        code?: number;
+        message?: string;
+        status?: string;
+        errors?: { reason?: string; message?: string }[];
+      };
+      message?: string;
+    } = {};
     try {
       body = (await response.json()) as typeof body;
     } catch {
@@ -143,8 +154,17 @@ export class GoogleApiClient {
     switch (response.status) {
       case 401:
         return new GoogleApiError(message, response.status, 'AUTH_REQUIRED');
-      case 403:
+      case 403: {
+        // A 403 is not always a permission problem: Gmail surfaces
+        // `rateLimitExceeded` / `userRateLimitExceeded` under a 403 status for
+        // some quota errors. Distinguish them so the model backs off instead
+        // of asking the user to re-consent.
+        const reasons = (body?.error?.errors ?? []).map((e) => e.reason ?? '');
+        if (reasons.some((reason) => /rate/i.test(reason))) {
+          return new GoogleApiError(message, response.status, 'RATE_LIMITED');
+        }
         return new GoogleApiError(message, response.status, 'PERMISSION_REQUIRED');
+      }
       case 404:
         return new GoogleApiError(message, response.status, 'NOT_FOUND');
       case 429:
@@ -160,6 +180,11 @@ export function mapGoogleError(
   error: unknown,
   context: string,
 ): ConnectorError {
+  // Already a structured connector error (e.g. thrown by the token provider):
+  // preserve its code and retryability rather than masking it as a provider
+  // failure.
+  if (error instanceof ConnectorError) return error;
+
   if (error instanceof GoogleApiError) {
     switch (error.code) {
       case 'AUTH_REQUIRED':

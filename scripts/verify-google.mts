@@ -148,7 +148,7 @@ async function main(): Promise<void> {
     assertEq(harness.connector.implementationStatus, 'partial', 'GoogleConnector is partial');
   }
 
-  console.log('production registry publishes only real read-only tools:');
+  console.log('production registry publishes only real tools:');
   {
     const store = new InMemoryConnectionStore();
     const record = connection('google:sub-1', [CAL, DRIVE]);
@@ -161,14 +161,14 @@ async function main(): Promise<void> {
     const active = await registry.listActiveTools();
     const names = active.map(({ tool }) => tool.name).sort();
 
-    assertEq(names.length, 6, 'exactly six real Google tools are published');
+    assertEq(names.length, 16, 'sixteen real Google tools are published');
     assert(names.includes('google.calendar.list_events'), 'calendar.list_events is published');
     assert(names.includes('google.calendar.get_event'), 'calendar.get_event is published');
     assert(names.includes('google.calendar.check_availability'), 'calendar.check_availability is published');
     assert(names.includes('google.drive.search'), 'drive.search is published');
     assert(names.includes('google.drive.get_metadata'), 'drive.get_metadata is published');
     assert(names.includes('google.drive.download'), 'drive.download is published');
-    assert(!names.some((n) => n.startsWith('google.gmail')), 'no Gmail tools are published');
+    assert(names.includes('google.gmail.search'), 'gmail.search is published');
     assert(!names.some((n) => n.startsWith('google.people')), 'no People tools are published');
     assert(!names.some((n) => n.startsWith('google.tasks')), 'no Tasks tools are published');
     assert(!names.some((n) => n.startsWith('google.calendar.create')), 'no write Calendar tools');

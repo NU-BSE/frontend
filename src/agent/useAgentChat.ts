@@ -20,6 +20,7 @@ import { AgentError } from './types';
 import type {
   AgentMessage,
   AgentRunState,
+  ChatSendInput,
   PendingApproval,
 } from './types';
 
@@ -46,7 +47,7 @@ export interface AgentChat {
   isRunning: boolean;
   /** Non-null when the local MCP runtime failed to initialize. Chat still works degraded. */
   mcpError: string | null;
-  sendMessage(text: string): void;
+  sendMessage(input: ChatSendInput): void;
   approvePendingApproval(): void;
   rejectPendingApproval(): void;
   cancel(): void;
@@ -170,7 +171,7 @@ export function useAgentChat(options: UseAgentChatOptions = {}): AgentChat {
   );
 
   const sendAgentMessage = useCallback(
-    (text: string) => {
+    (input: ChatSendInput) => {
       if (!agentRuntime) {
         // Defensive: the agent branch is only rendered when a model exists,
         // which guarantees a runtime. If it is somehow absent, surface an
@@ -187,7 +188,7 @@ export function useAgentChat(options: UseAgentChatOptions = {}): AgentChat {
       if (agentRuntime.isRunning()) return;
       setIsRunning(true);
       void agentRuntime
-        .sendMessage(text, threadId)
+        .sendMessage(input, threadId)
         .finally(() => setIsRunning(false));
     },
     [agentRuntime, threadId],
@@ -234,7 +235,15 @@ export function useAgentChat(options: UseAgentChatOptions = {}): AgentChat {
       pendingApproval: null,
       isRunning: textChat.isLoading,
       mcpError: null,
-      sendMessage: (text) => void textChat.sendMessage(text),
+      // Text-only mode has no model at all. Attachments are preserved by
+      // naming them in the message rather than being silently dropped.
+      sendMessage: (input) => {
+        const names = input.attachments.map((a) => a.name).join(', ');
+        const suffix = input.attachments.length > 0
+          ? `${input.text ? '\n' : ''}[Attached: ${names}]`
+          : '';
+        void textChat.sendMessage(`${input.text}${suffix}`);
+      },
       approvePendingApproval: () => undefined,
       rejectPendingApproval: () => undefined,
       cancel: () => textChat.stop(),

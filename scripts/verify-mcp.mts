@@ -82,7 +82,6 @@ function assertQuiet(condition: unknown, message: string): asserts condition {
 process.env.EXPO_PUBLIC_TELEGRAM_ADAPTER = 'mock';
 
 const CONNECTOR_NAMESPACES = [
-  'android',
   'google',
   'telegram',
   'microsoft',
@@ -198,25 +197,26 @@ async function main(): Promise<void> {
 
   console.log('read tools need no approval:');
 
-  const clipboard = await runtimeWithConnectors.mcp.callTool({
-    name: 'android.clipboard.read',
-    arguments: { connectionId: 'android-device' },
+  const page = await runtimeWithConnectors.mcp.callTool({
+    name: 'notion.pages.get',
+    arguments: { connectionId: 'notion-default' },
   });
 
   assert(
-    (clipboard.structuredContent as { status?: string })?.status === 'success',
-    'android.clipboard.read executes without an approval',
+    (page.structuredContent as { status?: string })?.status === 'success',
+    'notion.pages.get executes without an approval',
   );
 
   console.log('write tools enforce the approval round-trip:');
 
   const writeArgs = {
-    connectionId: 'android-device',
-    text: 'approved clipboard text',
+    connectionId: 'notion-default',
+    parentId: 'p1',
+    title: 'approved page',
   };
 
   const firstCall = await runtimeWithConnectors.mcp.callTool({
-    name: 'android.clipboard.write',
+    name: 'notion.pages.create',
     arguments: writeArgs,
   });
 
@@ -227,7 +227,7 @@ async function main(): Promise<void> {
 
   assert(
     pending?.status === 'approval_required',
-    'android.clipboard.write first returns approval_required',
+    'notion.pages.create first returns approval_required',
   );
   assert(
     typeof pending.approvalId === 'string' && pending.approvalId.length > 0,
@@ -238,7 +238,7 @@ async function main(): Promise<void> {
 
   const unapproved = await callAndCatch(() =>
     runtimeWithConnectors.mcp.callTool({
-      name: 'android.clipboard.write',
+      name: 'notion.pages.create',
       arguments: { ...writeArgs, approvalId },
     }),
   );
@@ -253,10 +253,10 @@ async function main(): Promise<void> {
 
   const tampered = await callAndCatch(() =>
     runtimeWithConnectors.mcp.callTool({
-      name: 'android.clipboard.write',
+      name: 'notion.pages.create',
       arguments: {
         ...writeArgs,
-        text: 'something the user never saw',
+        title: 'something the user never saw',
         approvalId,
       },
     }),
@@ -268,7 +268,7 @@ async function main(): Promise<void> {
   );
 
   const executed = await runtimeWithConnectors.mcp.callTool({
-    name: 'android.clipboard.write',
+    name: 'notion.pages.create',
     arguments: { ...writeArgs, approvalId },
   });
 
@@ -279,7 +279,7 @@ async function main(): Promise<void> {
 
   const replayed = await callAndCatch(() =>
     runtimeWithConnectors.mcp.callTool({
-      name: 'android.clipboard.write',
+      name: 'notion.pages.create',
       arguments: { ...writeArgs, approvalId },
     }),
   );
@@ -329,10 +329,12 @@ async function main(): Promise<void> {
 
   for (const tool of gated) {
     const args: Record<string, unknown> = {
-      // Ids created by this script above, not seeded by the runtime.
+      // Development-seeded mock connections (the runtime still seeds these in
+      // development mode; the `-verify` rows above exercise the namespace
+      // assertion without re-seeding Telegram's adapter).
       connectionId: tool.name.startsWith('telegram.bot')
-        ? 'telegram-bot-verify'
-        : 'telegram-user-verify',
+        ? 'telegram-bot-default'
+        : 'telegram-user-default',
       chatId: '1',
       text: 'x',
       messageId: 1,

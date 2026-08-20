@@ -23,6 +23,7 @@ import type { McpRuntimeMode } from './runtime-mode';
 import { resolveTelegramAdapterMode } from './telegram-adapter-mode';
 import { getGoogleAuthorizationBridge } from '@/connections/google/native-bridge';
 import { createGoogleFileSink } from '@/connections/google/file-sink';
+import { getAndroidSettingsBridge } from '@/connections/android/settings-native-bridge';
 
 export interface AppRegistryOptions {
   mode: McpRuntimeMode;
@@ -85,8 +86,20 @@ export function createConnectorRegistry(
 
   const telegramAdapterMode = resolveTelegramAdapterMode(mode);
 
+  // The Android device connector only registers when the native Settings
+  // bridge is actually available (Android + native module built in). On
+  // web/iOS/Node it is omitted entirely — never a fake connector.
+  const androidSettingsBridge = getAndroidSettingsBridge();
+
   const connectors = [
-    new AndroidConnector(store),
+    ...(androidSettingsBridge
+      ? [
+          new AndroidConnector({
+            store: connectionStore,
+            settingsBridge: androidSettingsBridge,
+          }),
+        ]
+      : []),
     new GoogleConnector(googleAuthOptions(connectionStore, credentialVault)),
     new TelegramUserConnector({
       store: connectionStore,

@@ -4,7 +4,8 @@
   "main": "expo-router/entry",
   "workspaces": [
     "app/*",
-    "packages/*"
+    "packages/*",
+    "modules/*"
   ],
   "dependencies": {
     "@expo-google-fonts/lora": "^0.4.2",
@@ -82,12 +83,16 @@
   },
   "devDependencies": {
     "@react-native-community/cli": "^20.2.0",
+    "@react-native/jest-preset": "^0.86.2",
     "@react-native/metro-config": "^0.87.0",
+    "@types/jest": "^30.0.0",
     "@types/node": "^26.2.0",
     "@types/react": "~19.2.2",
     "esbuild": "^0.28.1",
     "eslint": "^9.0.0",
     "eslint-config-expo": "~57.0.0",
+    "jest": "^29.7.0",
+    "jest-expo": "~57.0.0",
     "react-native-svg-transformer": "^1.5.3",
     "typescript": "~6.0.3",
     "wrangler": "^4.114.0",

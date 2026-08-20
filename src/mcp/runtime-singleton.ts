@@ -20,8 +20,9 @@ import {
 
 import { createConnectorRegistry } from './create-connector-registry';
 import type { ConnectorRegistry } from '@mobile-agent/connector-registry';
-import { ensureDeviceConnection, removeDevelopmentConnections } from './dev-seed';
+import { seedDevelopmentConnections, removeDevelopmentConnections } from './dev-seed';
 import { resolveDefaultRuntimeMode, type McpRuntimeMode } from './runtime-mode';
+import { resolveTelegramAdapterMode } from './telegram-adapter-mode';
 
 export interface AppMcpDependencies {
   connectionStore: ConnectionStore;
@@ -39,6 +40,7 @@ let approvalStore: InMemoryApprovalStore | null = null;
 let approvalService: InMemoryApprovalService | null = null;
 // Seeding is a once-per-session bootstrap: a runtime restart (e.g. after a
 // disconnect) must not resurrect a connection the user just removed.
+let devConnectionsSeeded = false;
 
 /**
  * The app registers its real dependencies (persistent ConnectionStore,
@@ -127,22 +129,26 @@ export function getLocalMcpRuntime(
     const connectionStore = getConnectionStore();
 
     runtimePromise = (async () => {
-      /*
-       * The same connection state in both modes. Development used to
-       * pre-connect every service, so a fresh install claimed a dozen accounts
-       * were linked when none were; the cleanup runs here rather than only in
-       * production because those rows are already on disk for anyone who ran
-       * such a build, and they are wrong in either mode.
-       */
-      await removeDevelopmentConnections(connectionStore);
-      await ensureDeviceConnection(connectionStore);
-
-      // A persistent connection whose credential has vanished must not keep
-      // claiming `connected` — reconcile before the registry reads it.
-      await reconcileConnectionCredentials(
-        connectionStore,
-        getCredentialVault(),
-      );
+      if (mode === 'production') {
+        await removeDevelopmentConnections(connectionStore);
+        // A persistent connection whose credential has vanished must not keep
+        // claiming `connected` — reconcile before the registry reads it.
+        await reconcileConnectionCredentials(
+          connectionStore,
+          getCredentialVault(),
+        );
+      } else if (!devConnectionsSeeded) {
+        const telegramMode = resolveTelegramAdapterMode(mode);
+        await seedDevelopmentConnections(connectionStore, {
+          skipTelegramSeed: telegramMode === 'native',
+        });
+        // Also clean up any leftover mock Telegram record from a previous
+        // run with a different adapter mode.
+        if (telegramMode === 'native') {
+          await connectionStore.remove('telegram-user-default');
+        }
+        devConnectionsSeeded = true;
+      }
 
       const registry = createConnectorRegistry({
         mode,

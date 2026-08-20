@@ -9,8 +9,14 @@ web-build/
 # `git status` never lists them, so the omission is invisible. Keep Kotlin
 # under a native/kotlin/ directory instead; see
 # src/connections/google/native/kotlin/.
-android/
-ios/
+# Ignore only the root Expo generated projects. Local Expo modules keep their
+# native sources under modules/*/android and modules/*/ios and MUST stay
+# tracked, so these rules are anchored to the repository root.
+/android/
+/ios/
+# Generated duplicate of the tracked src/connections/google/native/kotlin
+# sources (the config plugin copies from native/kotlin into the build).
+/src/connections/google/native/android/
 *.log
 .env
 .DS_Store
@@ -20,3 +26,8 @@ ios/
 .dev.vars*
 !.dev.vars.example
 !.env.example
+desktop.ini
+bundletool-all.jar
+kotleta552-release.jks
+app.apks
+application.aab

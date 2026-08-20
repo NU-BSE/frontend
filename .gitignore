@@ -4,19 +4,24 @@ dist/
 deploy/
 web-build/
 # Unanchored on purpose: any directory called android/ or ios/ is generated
-# output. The consequence is that hand-written native sources must NOT live
-# under a path segment with those names, or they are silently untracked —
-# `git status` never lists them, so the omission is invisible. Keep Kotlin
-# under a native/kotlin/ directory instead; see
+# output, wherever it turns up — the root Expo projects, and copies a config
+# plugin stamps out (src/connections/google/native/android/, for one). Leaving
+# these unanchored makes the rule fail safe: a generated native directory is
+# ignored even in a location nobody thought to list.
+#
+# The one exception is a local Expo module, which has to keep its native
+# sources at modules/<name>/android/ for autolinking to find them. Those are
+# re-included below, and only those.
+#
+# Everywhere else, hand-written native sources must NOT sit under a path
+# segment named android/ or ios/: they are silently untracked, `git status`
+# never lists them, and the omission only surfaces as a feature missing from a
+# store build. Keep them under native/kotlin/ instead — see
 # src/connections/google/native/kotlin/.
-# Ignore only the root Expo generated projects. Local Expo modules keep their
-# native sources under modules/*/android and modules/*/ios and MUST stay
-# tracked, so these rules are anchored to the repository root.
-/android/
-/ios/
-# Generated duplicate of the tracked src/connections/google/native/kotlin
-# sources (the config plugin copies from native/kotlin into the build).
-/src/connections/google/native/android/
+android/
+ios/
+!modules/*/android/
+!modules/*/ios/
 *.log
 .env
 .DS_Store

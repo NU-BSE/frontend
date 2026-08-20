@@ -1,12 +1,10 @@
-import type { SettingsPanel, SettingsScreen } from './CreepyAndroidSettings.types';
+import type {
+  AppSettingsTarget,
+  SettingsPanel,
+  SettingsScreen,
+} from './CreepyAndroidSettings.types';
 
-/**
- * The complete set of Android Settings screens this module can open.
- *
- * The native `SettingsNavigator` owns the authoritative `ACTION_*` mapping;
- * this list mirrors it so consumers (and the future MCP connector) can
- * enumerate available screens without touching Kotlin.
- */
+/** Mirrors SettingsNavigator.SCREENS so TS/MCP can enumerate global screens. */
 export const SETTINGS_SCREENS: readonly SettingsScreen[] = [
   'settings',
   'appDetails',
@@ -32,11 +30,44 @@ export const SETTINGS_SCREENS: readonly SettingsScreen[] = [
   'dateTime',
   'keyboard',
   'developerOptions',
+  'apps',
+  'allApps',
+  'defaultApps',
+  'home',
+  'batterySaver',
+  'dataUsage',
+  'airplaneMode',
+  'apn',
+  'roaming',
+  'doNotDisturb',
+  'storage',
+  'deviceInfo',
+  'systemUpdate',
+  'sync',
+  'addAccount',
+  'userDictionary',
+  'hardwareKeyboard',
+  'captioning',
+  'cast',
+  'print',
+  'dream',
+  'autoRotateSettings',
+  'webView',
+  'allNotifications',
 ];
 
-/**
- * Android Settings Panels (API 29+): Internet Connectivity, Wi-Fi, Volume, NFC.
- */
+export const APP_SETTINGS_TARGETS: readonly AppSettingsTarget[] = [
+  'appDetails',
+  'appNotifications',
+  'notificationChannel',
+  'notificationBubbles',
+  'appOpenByDefault',
+  'appLocale',
+  'appUsage',
+  'backgroundData',
+];
+
+/** Android Settings Panels (API 29+): Internet Connectivity, Wi-Fi, Volume, NFC. */
 export const SETTINGS_PANELS: readonly SettingsPanel[] = [
   'internet',
   'wifi',

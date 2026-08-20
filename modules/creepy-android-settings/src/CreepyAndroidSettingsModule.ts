@@ -6,9 +6,13 @@ import {
   assertScreenTimeoutNonNegative,
 } from './conversion';
 import type {
+  AndroidAppInfo,
   AndroidSettingsCapabilities,
+  AppSettingsTarget,
+  BrightnessMode,
   CreepyAndroidSettingsAPI,
   CreepyAndroidSettingsEvents,
+  InstalledAppSummary,
   SettingsNamespace,
   SettingsPanel,
   SettingsScreen,
@@ -53,12 +57,31 @@ declare class CreepyAndroidSettingsNativeModule extends NativeModule<CreepyAndro
   setScreenTimeout(milliseconds: number): boolean;
   getAutoRotate(): boolean;
   setAutoRotate(enabled: boolean): boolean;
+  getBrightnessMode(): BrightnessMode;
+  setBrightnessMode(mode: BrightnessMode): boolean;
+  getHapticFeedbackEnabled(): boolean;
+  setHapticFeedbackEnabled(enabled: boolean): boolean;
+  getSoundEffectsEnabled(): boolean;
+  setSoundEffectsEnabled(enabled: boolean): boolean;
 
   canOpenSettings(screen: string): boolean;
   openSettings(screen: string): Promise<boolean>;
+  canOpenAppSettings(target: string, packageName: string, channelId: string | null): boolean;
+  openAppSettings(target: string, packageName: string, channelId: string | null): Promise<boolean>;
 
   isSettingsPanelSupported(panel: string): boolean;
   openPanel(panel: string): Promise<boolean>;
+
+  findApps(query: string, limit: number): InstalledAppSummary[];
+  getAppInfo(packageName: string): AndroidAppInfo | null;
+
+  intentOpenUri(uri: string): Promise<boolean>;
+  intentOpenApp(packageName: string): Promise<boolean>;
+  intentShareText(text: string, targetPackage: string | null): Promise<boolean>;
+  intentShareFile(fileUri: string, mimeType: string | null, targetPackage: string | null): Promise<boolean>;
+  intentComposeEmail(to: string | null, subject: string | null, body: string | null): Promise<boolean>;
+  intentOpenMap(query: string | null, latitude: number | null, longitude: number | null): Promise<boolean>;
+  intentOpenDialer(phoneNumber: string | null): Promise<boolean>;
 
   watchSetting(namespace: string, key: string): string;
   unwatchSetting(subscriptionId: string): void;
@@ -117,12 +140,38 @@ export const CreepyAndroidSettings: CreepyAndroidSettingsAPI = {
   },
   getAutoRotate: () => nativeModule.getAutoRotate(),
   setAutoRotate: (enabled: boolean) => nativeModule.setAutoRotate(enabled),
+  getBrightnessMode: () => nativeModule.getBrightnessMode(),
+  setBrightnessMode: (mode: BrightnessMode) => nativeModule.setBrightnessMode(mode),
+  getHapticFeedbackEnabled: () => nativeModule.getHapticFeedbackEnabled(),
+  setHapticFeedbackEnabled: (enabled: boolean) => nativeModule.setHapticFeedbackEnabled(enabled),
+  getSoundEffectsEnabled: () => nativeModule.getSoundEffectsEnabled(),
+  setSoundEffectsEnabled: (enabled: boolean) => nativeModule.setSoundEffectsEnabled(enabled),
 
   canOpenSettings: (screen: SettingsScreen) => nativeModule.canOpenSettings(screen),
   openSettings: (screen: SettingsScreen) => nativeModule.openSettings(screen),
+  canOpenAppSettings: (target: AppSettingsTarget, packageName: string, channelId?: string) =>
+    nativeModule.canOpenAppSettings(target, packageName, channelId ?? null),
+  openAppSettings: (target: AppSettingsTarget, packageName: string, channelId?: string) =>
+    nativeModule.openAppSettings(target, packageName, channelId ?? null),
 
   isSettingsPanelSupported: (panel: SettingsPanel) => nativeModule.isSettingsPanelSupported(panel),
   openPanel: (panel: SettingsPanel) => nativeModule.openPanel(panel),
+
+  findApps: (query: string, limit?: number) => nativeModule.findApps(query, limit ?? 20),
+  getAppInfo: (packageName: string) => nativeModule.getAppInfo(packageName),
+
+  intentOpenUri: (uri: string) => nativeModule.intentOpenUri(uri),
+  intentOpenApp: (packageName: string) => nativeModule.intentOpenApp(packageName),
+  intentShareText: (text: string, targetPackage?: string) =>
+    nativeModule.intentShareText(text, targetPackage ?? null),
+  intentShareFile: (fileUri: string, mimeType?: string, targetPackage?: string) =>
+    nativeModule.intentShareFile(fileUri, mimeType ?? null, targetPackage ?? null),
+  intentComposeEmail: (to?: string, subject?: string, body?: string) =>
+    nativeModule.intentComposeEmail(to ?? null, subject ?? null, body ?? null),
+  intentOpenMap: (query?: string, latitude?: number, longitude?: number) =>
+    nativeModule.intentOpenMap(query ?? null, latitude ?? null, longitude ?? null),
+  intentOpenDialer: (phoneNumber?: string) =>
+    nativeModule.intentOpenDialer(phoneNumber ?? null),
 
   watchSetting: (namespace: SettingsNamespace, key: string) => nativeModule.watchSetting(namespace, key),
   unwatchSetting: (subscriptionId: string) => nativeModule.unwatchSetting(subscriptionId),

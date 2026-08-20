@@ -8,12 +8,13 @@ import android.os.Build
 import android.provider.Settings
 
 /**
- * Opens Android Settings screens and Settings Panels through the official
- * `Settings.ACTION_*` / `Settings.Panel.*` intents only.
+ * Opens Android Settings screens and app-scoped Settings destinations through
+ * public Settings.ACTION_* / Settings.Panel.* intents only.
  *
- * No OEM activity class names are used; availability is resolved through the
- * [android.content.pm.PackageManager] before starting any activity so that
- * unsupported screens fail with a controlled result instead of crashing.
+ * Global screens stay as a small enum. Anything that addresses a particular
+ * application is parameterized explicitly with a package name (and channel id
+ * where Android requires one) so the agent can never silently fall back to
+ * Creepy.IM's own package.
  */
 class SettingsNavigator(private val context: Context) {
 
@@ -43,6 +44,41 @@ class SettingsNavigator(private val context: Context) {
             "dateTime",
             "keyboard",
             "developerOptions",
+            "apps",
+            "allApps",
+            "defaultApps",
+            "home",
+            "batterySaver",
+            "dataUsage",
+            "airplaneMode",
+            "apn",
+            "roaming",
+            "doNotDisturb",
+            "storage",
+            "deviceInfo",
+            "systemUpdate",
+            "sync",
+            "addAccount",
+            "userDictionary",
+            "hardwareKeyboard",
+            "captioning",
+            "cast",
+            "print",
+            "dream",
+            "autoRotateSettings",
+            "webView",
+            "allNotifications",
+        )
+
+        val APP_TARGETS: List<String> = listOf(
+            "appDetails",
+            "appNotifications",
+            "notificationChannel",
+            "notificationBubbles",
+            "appOpenByDefault",
+            "appLocale",
+            "appUsage",
+            "backgroundData",
         )
 
         val PANELS: List<String> = listOf("internet", "wifi", "volume", "nfc")
@@ -59,6 +95,21 @@ class SettingsNavigator(private val context: Context) {
             throw SettingsScreenUnavailableException(screen)
         }
         startActivity(intent, screen)
+        return true
+    }
+
+    fun canOpenAppTarget(target: String, packageName: String, channelId: String?): Boolean {
+        val intent = buildAppTargetIntent(target, packageName, channelId) ?: return false
+        return isResolvable(intent)
+    }
+
+    fun openAppTarget(target: String, packageName: String, channelId: String?): Boolean {
+        val intent = buildAppTargetIntent(target, packageName, channelId)
+            ?: throw UnknownSettingsScreenException(target)
+        if (!isResolvable(intent)) {
+            throw SettingsScreenUnavailableException(target)
+        }
+        startActivity(intent, target)
         return true
     }
 
@@ -80,30 +131,20 @@ class SettingsNavigator(private val context: Context) {
         return true
     }
 
-    fun canOpenWriteSettings(): Boolean {
-        val intent = writeSettingsIntent()
-        return isResolvable(intent)
-    }
+    fun canOpenWriteSettings(): Boolean = isResolvable(writeSettingsIntent())
 
     fun openWriteSettings(): Boolean {
         val intent = writeSettingsIntent()
-        if (!isResolvable(intent)) {
-            throw SettingsScreenUnavailableException("writeSettings")
-        }
+        if (!isResolvable(intent)) throw SettingsScreenUnavailableException("writeSettings")
         startActivity(intent, "writeSettings")
         return true
     }
 
-    fun canOpenOverlay(): Boolean {
-        val intent = overlayIntent()
-        return isResolvable(intent)
-    }
+    fun canOpenOverlay(): Boolean = isResolvable(overlayIntent())
 
     fun openOverlay(): Boolean {
         val intent = overlayIntent()
-        if (!isResolvable(intent)) {
-            throw SettingsScreenUnavailableException("overlay")
-        }
+        if (!isResolvable(intent)) throw SettingsScreenUnavailableException("overlay")
         startActivity(intent, "overlay")
         return true
     }
@@ -136,12 +177,63 @@ class SettingsNavigator(private val context: Context) {
 
     private fun buildScreenIntent(screen: String): Intent? {
         val action = screenAction(screen) ?: return null
-        val intent = if (requiresPackageUri(screen)) {
+        return if (requiresOwnPackageUri(screen)) {
             Intent(action, Uri.parse("package:${context.packageName}"))
         } else {
             Intent(action)
         }
-        return intent
+    }
+
+    private fun buildAppTargetIntent(
+        target: String,
+        packageName: String,
+        channelId: String?,
+    ): Intent? {
+        if (packageName.isBlank()) throw InvalidArgumentException("packageName must not be empty.")
+
+        val packageUri = Uri.parse("package:$packageName")
+        return when (target) {
+            "appDetails" -> Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, packageUri)
+            "appNotifications" ->
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                    Intent(Settings.ACTION_APP_NOTIFICATION_SETTINGS)
+                        .putExtra(Settings.EXTRA_APP_PACKAGE, packageName)
+                } else null
+            "notificationChannel" ->
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                    if (channelId.isNullOrBlank()) {
+                        throw InvalidArgumentException(
+                            "channelId is required for notificationChannel settings.",
+                        )
+                    }
+                    Intent(Settings.ACTION_CHANNEL_NOTIFICATION_SETTINGS)
+                        .putExtra(Settings.EXTRA_APP_PACKAGE, packageName)
+                        .putExtra(Settings.EXTRA_CHANNEL_ID, channelId)
+                } else null
+            "notificationBubbles" ->
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                    Intent(Settings.ACTION_APP_NOTIFICATION_BUBBLE_SETTINGS)
+                        .putExtra(Settings.EXTRA_APP_PACKAGE, packageName)
+                } else null
+            "appOpenByDefault" ->
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                    Intent(Settings.ACTION_APP_OPEN_BY_DEFAULT_SETTINGS, packageUri)
+                } else null
+            "appLocale" ->
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                    Intent(Settings.ACTION_APP_LOCALE_SETTINGS, packageUri)
+                } else null
+            "appUsage" ->
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                    Intent(Settings.ACTION_APP_USAGE_SETTINGS)
+                        .putExtra(Intent.EXTRA_PACKAGE_NAME, packageName)
+                } else null
+            "backgroundData" ->
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
+                    Intent(Settings.ACTION_IGNORE_BACKGROUND_DATA_RESTRICTIONS_SETTINGS, packageUri)
+                } else null
+            else -> null
+        }
     }
 
     private fun buildPanelIntent(panel: String): Intent? {
@@ -155,8 +247,12 @@ class SettingsNavigator(private val context: Context) {
         return action?.let { Intent(it) }
     }
 
-    private fun requiresPackageUri(screen: String): Boolean =
-        screen == "appDetails" || screen == "overlay" || screen == "writeSettings" || screen == "usageAccess"
+    /** Legacy self-app destinations kept for direct module consumers. */
+    private fun requiresOwnPackageUri(screen: String): Boolean =
+        screen == "appDetails" ||
+            screen == "overlay" ||
+            screen == "writeSettings" ||
+            screen == "unknownSources"
 
     private fun screenAction(screen: String): String? = when (screen) {
         "settings" -> Settings.ACTION_SETTINGS
@@ -167,8 +263,8 @@ class SettingsNavigator(private val context: Context) {
         "location" -> Settings.ACTION_LOCATION_SOURCE_SETTINGS
         "display" -> Settings.ACTION_DISPLAY_SETTINGS
         "sound" -> Settings.ACTION_SOUND_SETTINGS
-        "notifications" ->
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) Settings.ACTION_APP_NOTIFICATION_SETTINGS else null
+        // Top-level notification settings. Per-app notifications use APP_TARGETS.
+        "notifications" -> Settings.ACTION_NOTIFICATION_SETTINGS
         "accessibility" -> Settings.ACTION_ACCESSIBILITY_SETTINGS
         "usageAccess" -> Settings.ACTION_USAGE_ACCESS_SETTINGS
         "notificationListener" -> Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS
@@ -185,6 +281,43 @@ class SettingsNavigator(private val context: Context) {
         "dateTime" -> Settings.ACTION_DATE_SETTINGS
         "keyboard" -> Settings.ACTION_INPUT_METHOD_SETTINGS
         "developerOptions" -> Settings.ACTION_APPLICATION_DEVELOPMENT_SETTINGS
+        "apps" -> Settings.ACTION_MANAGE_APPLICATIONS_SETTINGS
+        "allApps" -> Settings.ACTION_MANAGE_ALL_APPLICATIONS_SETTINGS
+        "defaultApps" ->
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) Settings.ACTION_MANAGE_DEFAULT_APPS_SETTINGS else null
+        "home" ->
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) Settings.ACTION_HOME_SETTINGS else null
+        "batterySaver" ->
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP_MR1) Settings.ACTION_BATTERY_SAVER_SETTINGS else null
+        "dataUsage" ->
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) Settings.ACTION_DATA_USAGE_SETTINGS else null
+        "airplaneMode" -> Settings.ACTION_AIRPLANE_MODE_SETTINGS
+        "apn" -> Settings.ACTION_APN_SETTINGS
+        "roaming" -> Settings.ACTION_DATA_ROAMING_SETTINGS
+        "doNotDisturb" ->
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) Settings.ACTION_ZEN_MODE_SETTINGS else null
+        "storage" -> Settings.ACTION_INTERNAL_STORAGE_SETTINGS
+        "deviceInfo" -> Settings.ACTION_DEVICE_INFO_SETTINGS
+        "systemUpdate" -> Settings.ACTION_SYSTEM_UPDATE_SETTINGS
+        "sync" -> Settings.ACTION_SYNC_SETTINGS
+        "addAccount" -> Settings.ACTION_ADD_ACCOUNT
+        "userDictionary" -> Settings.ACTION_USER_DICTIONARY_SETTINGS
+        "hardwareKeyboard" ->
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) Settings.ACTION_HARD_KEYBOARD_SETTINGS else null
+        "captioning" ->
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.KITKAT) Settings.ACTION_CAPTIONING_SETTINGS else null
+        "cast" ->
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) Settings.ACTION_CAST_SETTINGS else null
+        "print" ->
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.KITKAT) Settings.ACTION_PRINT_SETTINGS else null
+        "dream" ->
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.JELLY_BEAN_MR2) Settings.ACTION_DREAM_SETTINGS else null
+        "autoRotateSettings" ->
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) Settings.ACTION_AUTO_ROTATE_SETTINGS else null
+        "webView" ->
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) Settings.ACTION_WEBVIEW_SETTINGS else null
+        "allNotifications" ->
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) Settings.ACTION_ALL_APPS_NOTIFICATION_SETTINGS else null
         else -> null
     }
 }

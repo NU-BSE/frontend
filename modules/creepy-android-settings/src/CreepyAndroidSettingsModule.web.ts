@@ -14,10 +14,7 @@ function noopSubscription(): EventSubscription {
   return { remove: () => {} };
 }
 
-/**
- * Web stub. The Android Settings provider does not exist outside Android, so
- * every call fails with a normalized `ERR_PLATFORM_NOT_SUPPORTED` error.
- */
+/** Web/iOS-safe stub: every device operation fails explicitly. */
 export const CreepyAndroidSettings: CreepyAndroidSettingsAPI = {
   getCapabilities: () => platformNotSupported(),
 
@@ -57,12 +54,31 @@ export const CreepyAndroidSettings: CreepyAndroidSettingsAPI = {
   setScreenTimeout: () => platformNotSupported(),
   getAutoRotate: () => platformNotSupported(),
   setAutoRotate: () => platformNotSupported(),
+  getBrightnessMode: () => platformNotSupported(),
+  setBrightnessMode: () => platformNotSupported(),
+  getHapticFeedbackEnabled: () => platformNotSupported(),
+  setHapticFeedbackEnabled: () => platformNotSupported(),
+  getSoundEffectsEnabled: () => platformNotSupported(),
+  setSoundEffectsEnabled: () => platformNotSupported(),
 
   canOpenSettings: () => platformNotSupported(),
   openSettings: () => platformNotSupported(),
+  canOpenAppSettings: () => platformNotSupported(),
+  openAppSettings: () => platformNotSupported(),
 
   isSettingsPanelSupported: () => platformNotSupported(),
   openPanel: () => platformNotSupported(),
+
+  findApps: () => platformNotSupported(),
+  getAppInfo: () => platformNotSupported(),
+
+  intentOpenUri: () => platformNotSupported(),
+  intentOpenApp: () => platformNotSupported(),
+  intentShareText: () => platformNotSupported(),
+  intentShareFile: () => platformNotSupported(),
+  intentComposeEmail: () => platformNotSupported(),
+  intentOpenMap: () => platformNotSupported(),
+  intentOpenDialer: () => platformNotSupported(),
 
   watchSetting: () => platformNotSupported(),
   unwatchSetting: () => platformNotSupported(),

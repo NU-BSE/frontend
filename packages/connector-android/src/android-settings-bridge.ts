@@ -1,15 +1,8 @@
 /**
- * Platform-neutral contract between `AndroidConnector` and the real native
- * Android Settings module.
- *
- * The connector package must stay importable from Node (verification scripts,
- * Jest, `tsc`), so it only knows this interface and small pure TypeScript DTO
- * types. The real `creepy-android-settings` → `AndroidSettingsBridge` adapter
- * lives in the app layer (`src/connections/android/`) and is injected into the
- * connector — never imported here.
+ * Platform-neutral contract between AndroidConnector and the native Android
+ * device module. The connector package never imports Expo or React Native.
  */
 
-/** Mirrors the native module's `SettingsScreen` union (all 24 screens). */
 export type SettingsScreen =
   | 'settings'
   | 'appDetails'
@@ -34,9 +27,57 @@ export type SettingsScreen =
   | 'language'
   | 'dateTime'
   | 'keyboard'
-  | 'developerOptions';
+  | 'developerOptions'
+  | 'apps'
+  | 'allApps'
+  | 'defaultApps'
+  | 'home'
+  | 'batterySaver'
+  | 'dataUsage'
+  | 'airplaneMode'
+  | 'apn'
+  | 'roaming'
+  | 'doNotDisturb'
+  | 'storage'
+  | 'deviceInfo'
+  | 'systemUpdate'
+  | 'sync'
+  | 'addAccount'
+  | 'userDictionary'
+  | 'hardwareKeyboard'
+  | 'captioning'
+  | 'cast'
+  | 'print'
+  | 'dream'
+  | 'autoRotateSettings'
+  | 'webView'
+  | 'allNotifications';
+
+export type AppSettingsTarget =
+  | 'appDetails'
+  | 'appNotifications'
+  | 'notificationChannel'
+  | 'notificationBubbles'
+  | 'appOpenByDefault'
+  | 'appLocale'
+  | 'appUsage'
+  | 'backgroundData';
 
 export type SettingsPanel = 'internet' | 'wifi' | 'volume' | 'nfc';
+export type BrightnessMode = 'manual' | 'automatic';
+
+export interface InstalledAppSummary {
+  packageName: string;
+  label: string;
+  enabled: boolean;
+  systemApp: boolean;
+  launchable: boolean;
+}
+
+export interface AndroidAppInfo extends InstalledAppSummary {
+  versionName: string | null;
+  versionCode: number | null;
+}
 
 export interface AndroidSettingsCapabilities {
   platform: 'android';
@@ -47,6 +88,7 @@ export interface AndroidSettingsCapabilities {
   canDrawOverlays: boolean;
   settingsPanelsSupported: boolean;
   supportedScreens: Partial<Record<SettingsScreen, boolean>>;
+  supportedAppTargets: Partial<Record<AppSettingsTarget, boolean>>;
 }
 
 export interface AndroidSettingsBridge {
@@ -60,7 +102,6 @@ export interface AndroidSettingsBridge {
 
   getScreenBrightness(): number;
   getScreenBrightnessPercent(): number;
-
   setScreenBrightness(value: number): boolean;
   setScreenBrightnessPercent(percent: number): boolean;
 
@@ -70,9 +111,32 @@ export interface AndroidSettingsBridge {
   getAutoRotate(): boolean;
   setAutoRotate(enabled: boolean): boolean;
 
+  getBrightnessMode(): BrightnessMode;
+  setBrightnessMode(mode: BrightnessMode): boolean;
+
+  getHapticFeedbackEnabled(): boolean;
+  setHapticFeedbackEnabled(enabled: boolean): boolean;
+
+  getSoundEffectsEnabled(): boolean;
+  setSoundEffectsEnabled(enabled: boolean): boolean;
+
   canOpenSettings(screen: SettingsScreen): boolean;
   openSettings(screen: SettingsScreen): Promise<boolean>;
 
+  canOpenAppSettings(
+    target: AppSettingsTarget,
+    packageName: string,
+    channelId?: string,
+  ): boolean;
+  openAppSettings(
+    target: AppSettingsTarget,
+    packageName: string,
+    channelId?: string,
+  ): Promise<boolean>;
+
   isSettingsPanelSupported(panel: SettingsPanel): boolean;
   openPanel(panel: SettingsPanel): Promise<boolean>;
+
+  findApps(query: string, limit?: number): InstalledAppSummary[];
+  getAppInfo(packageName: string): AndroidAppInfo | null;
 }

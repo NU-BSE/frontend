@@ -6,6 +6,7 @@ import { InMemoryApprovalService } from '@mobile-agent/approval-core';
 import { DefaultPolicyEngine } from '@mobile-agent/policy-core';
 import {
   InMemoryConnectionStore,
+  isConnectable,
   isDisposableConnector,
   type ConnectionStore,
 } from '@mobile-agent/connector-core';
@@ -38,37 +39,18 @@ let runtimeMode: McpRuntimeMode | null = null;
 let currentRegistry: ConnectorRegistry | null = null;
 let approvalStore: InMemoryApprovalStore | null = null;
 let approvalService: InMemoryApprovalService | null = null;
-// Seeding is a once-per-session bootstrap: a runtime restart (e.g. after a
-// disconnect) must not resurrect a connection the user just removed.
 let devConnectionsSeeded = false;
 
-/**
- * The app registers its real dependencies (persistent ConnectionStore,
- * Keystore-backed CredentialVault) at startup. Verification scripts and
- * other non-app contexts simply never call this and get in-memory fallbacks.
- */
 export function configureAppDependencies(deps: AppMcpDependencies): void {
   appDependencies = deps;
 }
 
-/**
- * The single source of truth for connection state. UI, ConnectionService,
- * MCP tool registration and connector auth flows all read/write this store —
- * there is never one connection state in the UI and another in MCP.
- */
 export function getConnectionStore(): ConnectionStore {
   if (appDependencies) return appDependencies.connectionStore;
   if (!fallbackStore) fallbackStore = new InMemoryConnectionStore();
   return fallbackStore;
 }
 
-/**
- * Marks connected-but-credential-less connections as `reconnect_required` so
- * their tools are never exposed. A connection can claim `connected` while its
- * credential has vanished (web reload with an in-memory vault, SecureStore
- * reset, partial restore, migration) — reconciliation turns that into an
- * honest state instead of a tool that 401s at call time.
- */
 async function reconcileConnectionCredentials(
   connectionStore: ConnectionStore,
   credentialVault: CredentialVault,
@@ -88,14 +70,31 @@ async function reconcileConnectionCredentials(
   }
 }
 
-/**
- * Secrets live only in the vault. Connection records carry a
- * `credentialReference` pointing here — never the credential itself.
- */
 export function getCredentialVault(): CredentialVault {
   if (appDependencies) return appDependencies.credentialVault;
   if (!fallbackVault) fallbackVault = new InMemoryCredentialVault();
   return fallbackVault;
+}
+
+/**
+ * Android Settings and Intents are local device capabilities, not external
+ * accounts. When their real native connector is registered, ensure its stable
+ * local connection exists before MCP enumerates active tools.
+ */
+async function ensureLocalDeviceConnections(
+  registry: ConnectorRegistry,
+): Promise<void> {
+  for (const connectorId of ['android', 'intent'] as const) {
+    try {
+      const connector = registry.get(connectorId);
+      if (isConnectable(connector)) {
+        await connector.connect();
+      }
+    } catch {
+      // Connector absent on this platform/build, or the native bridge failed.
+      // Do not manufacture a connection; the connector will simply expose no tools.
+    }
+  }
 }
 
 export interface GetRuntimeOptions {
@@ -104,18 +103,8 @@ export interface GetRuntimeOptions {
 }
 
 /**
- * Синглтон локального MCP runtime.
- *
- * Client и server живут в одном JS-процессе
- * и соединены через InMemoryTransport.
- * Runtime создаётся один раз на сессию приложения
- * и не пересоздаётся при React re-render.
- *
- * Режим решает, что видит модель:
- * - development — mock-подключения и встроенный
- *   mock-календарь (демо и тесты);
- * - production — только реальные коннекторы и ни
- *   одного mock-аккаунта.
+ * Singleton local MCP runtime. Development may expose explicit mocks;
+ * production registers only real connectors.
  */
 export function getLocalMcpRuntime(
   options: GetRuntimeOptions = {},
@@ -131,8 +120,6 @@ export function getLocalMcpRuntime(
     runtimePromise = (async () => {
       if (mode === 'production') {
         await removeDevelopmentConnections(connectionStore);
-        // A persistent connection whose credential has vanished must not keep
-        // claiming `connected` — reconcile before the registry reads it.
         await reconcileConnectionCredentials(
           connectionStore,
           getCredentialVault(),
@@ -142,8 +129,6 @@ export function getLocalMcpRuntime(
         await seedDevelopmentConnections(connectionStore, {
           skipTelegramSeed: telegramMode === 'native',
         });
-        // Also clean up any leftover mock Telegram record from a previous
-        // run with a different adapter mode.
         if (telegramMode === 'native') {
           await connectionStore.remove('telegram-user-default');
         }
@@ -156,6 +141,8 @@ export function getLocalMcpRuntime(
         credentialVault: getCredentialVault(),
       });
       currentRegistry = registry;
+
+      await ensureLocalDeviceConnections(registry);
 
       return createLocalMcpRuntime(
         {
@@ -180,8 +167,6 @@ export function getLocalMcpRuntime(
         return runtime;
       })
       .catch((error) => {
-        // Разрешаем повторную инициализацию,
-        // если первый запуск завершился ошибкой.
         runtimePromise = null;
         runtimeMode = null;
         currentRegistry = null;
@@ -192,25 +177,14 @@ export function getLocalMcpRuntime(
   return runtimePromise;
 }
 
-/** Mode the singleton was created with (diagnostics). */
 export function getRuntimeMode(): McpRuntimeMode | null {
   return runtimeMode;
 }
 
-/**
- * The registry backing the live runtime, if initialized. ConnectionService
- * uses it so connect/disconnect act on the same connector instances that
- * serve the model's tools.
- */
 export function getCurrentRegistry(): ConnectorRegistry | null {
   return currentRegistry;
 }
 
-/**
- * The ids actually registered in this build's runtime. The UI uses this to
- * decide whether a catalogue tile is really connectable — a mock connector
- * omitted from a production registry must not be offered as available.
- */
 export async function getRegisteredConnectorIds(): Promise<Set<string>> {
   await getLocalMcpRuntime();
   const registry = getCurrentRegistry();
@@ -218,23 +192,12 @@ export async function getRegisteredConnectorIds(): Promise<Set<string>> {
   return new Set(registry.listConnectors().map((connector) => connector.id));
 }
 
-/**
- * Rebuilds the runtime so newly connected/disconnected accounts change the
- * tool list. ConnectionService calls this after every connect/disconnect.
- */
 export async function restartLocalMcpRuntime(): Promise<LocalMcpRuntime> {
   const mode = runtimeMode;
   await closeLocalMcpRuntime();
   return getLocalMcpRuntime(mode ? { mode } : {});
 }
 
-/**
- * Выдаёт одноразовый approval для встроенных
- * calendar-инструментов.
- *
- * В реальном приложении вызывается UI-слоем
- * после явного подтверждения пользователя.
- */
 export function issueToolApproval(input: {
   toolName: string;
   payload: Record<string, unknown>;
@@ -246,18 +209,6 @@ export function issueToolApproval(input: {
   return approvalStore.issue(input);
 }
 
-/**
- * Подтверждает approval, выданный connector-инструментом.
- *
- * Connector tools возвращают `status: "approval_required"`
- * вместе с `approvalId`. UI показывает preview, и после
- * согласия пользователя вызывает эту функцию — только
- * после этого повторный вызов инструмента с тем же
- * `approvalId` будет выполнен.
- *
- * This function is UI-only. The model has no tool that approves actions —
- * an LLM can never approve its own side effect.
- */
 export async function approveConnectorTool(approvalId: string): Promise<void> {
   if (!approvalService) {
     throw new Error('MCP runtime is not initialized');
@@ -284,8 +235,6 @@ export async function closeLocalMcpRuntime(): Promise<void> {
 
     await runtime.close();
   } finally {
-    // A close failure must never strand the singleton on a stale runtime:
-    // clearing these lets the next getLocalMcpRuntime()/restart rebuild clean.
     runtimePromise = null;
     runtimeMode = null;
     currentRegistry = null;

@@ -1,116 +1,116 @@
 # @mobile-agent/connector-android
 
-Real on-device **Android Settings** connector for Creepy.IM.
+Real on-device **Android Settings and app-discovery** connector for Creepy.IM.
 
-This package exposes the Android device as an MCP connector backed by the
-`creepy-android-settings` Expo native module. It replaces the earlier mock
-connector: no fixture data, no fake successes.
-
-## Architecture
-
-```
-Creepy.IM Agent
-      ↓
-Local MCP Runtime
-      ↓
-AndroidConnector (this package)
-      ↓
-AndroidSettingsBridge (interface in this package)
-      ↓
-creepy-android-settings (Expo native module, Android/Kotlin)
-      ↓
-android.provider.Settings
-```
-
-The package itself is **platform-neutral**: it only knows the
-`AndroidSettingsBridge` interface and small pure TypeScript DTO types. The real
-`creepy-android-settings → AndroidSettingsBridge` adapter lives in the app
-layer (`src/connections/android/settings-native-bridge.ts`) and is injected
-into `AndroidConnector` at registry construction. This package never imports
-Expo, React Native, or the native module, so it stays importable from Node
-verification scripts, Jest and `tsc`.
-
-## Native bridge
-
-`AndroidSettingsBridge` (see `src/android-settings-bridge.ts`) is the seam. The
-app supplies it via `getAndroidSettingsBridge()`:
-
-```ts
-new AndroidConnector({ store, settingsBridge });
-```
-
-If no bridge is available (web, iOS, Node, or a build without the native
-module), the Android connector is **not registered** — there is never a fake
-connector or a fake `connected` connection.
+The package is platform-neutral: it depends only on the `AndroidSettingsBridge`
+contract. The app layer injects the real Expo/Kotlin bridge from
+`src/connections/android/settings-native-bridge.ts`, so Node verification can
+import this package without loading React Native or Expo.
 
 ## Connection lifecycle
 
-`connect()` is a local, idempotent operation — no OAuth, no account picker. It
-creates or refreshes a single stable connection:
+`connect()` is a local, idempotent operation with no OAuth flow. It maintains a
+single stable connection:
 
-- id: `android-device` (never regenerated)
-- `displayName`: from `getCapabilities()` (`manufacturer model`)
-- `scopes`: always `android.settings.read`, plus `android.settings.write` and
-  `android.overlay` when those permissions are currently granted
-- preserves `createdAt`, updates `updatedAt`
+- id: `android-device`
+- display name: manufacturer + model from native capabilities
+- scopes: `android.settings.read`, plus `android.settings.write` and
+  `android.overlay` when those user-granted special accesses are currently on
+- capabilities include typed Settings reads/writes, global and per-app Settings
+  navigation, Settings Panels and installed-app metadata
 
-`disconnect()` removes the record via the shared `ConnectionStore`. It does
-**not** revoke Android system permissions — those live in Android Settings.
+The runtime auto-connects this local connector when the native Android bridge
+exists. On web, iOS and Node the connector is omitted rather than mocked.
 
-## Settings MCP tools
+## MCP tools
 
-| Tool | Risk | Capability | Requires WRITE_SETTINGS |
-| --- | --- | --- | --- |
-| `android.settings.get_capabilities` | read | `android.settings.read` | no |
-| `android.settings.get_brightness` | read | `android.settings.read` | no |
-| `android.settings.set_brightness` | write | `android.settings.brightness` | yes |
-| `android.settings.get_screen_timeout` | read | `android.settings.read` | no |
-| `android.settings.set_screen_timeout` | write | `android.settings.screen_timeout` | yes |
-| `android.settings.get_auto_rotate` | read | `android.settings.read` | no |
-| `android.settings.set_auto_rotate` | write | `android.settings.auto_rotate` | yes |
-| `android.settings.open` | external_side_effect | `android.settings.navigation` | no |
-| `android.settings.open_panel` | external_side_effect | `android.settings.navigation` | no |
+### Device and installed apps
 
-Every tool is marked `implementationStatus: 'real'`.
+- `android.settings.get_capabilities`
+- `android.apps.find`
+- `android.apps.get_info`
 
-Deliberately **not exposed** to the model:
+App discovery uses Android's launcher visibility query. It deliberately does
+**not** request `QUERY_ALL_PACKAGES`; results therefore respect Android package
+visibility and are limited to apps visible through the launcher query.
 
-- arbitrary `Settings` writes (`setSystemInt`, `setSystemString`, …) and
-  arbitrary reads (`getSetting(namespace, key)`) — the model gets
-  capability-level tools only;
-- permission-request tools (`requestWriteSystemSettingsPermission`,
-  `requestOverlayPermission`) — special Android permissions are granted by the
-  user through Account → Connectors → This device, never by the agent.
+### Typed Settings reads/writes
 
-## Permission model
+- `android.settings.get_brightness`
+- `android.settings.set_brightness`
+- `android.settings.get_brightness_mode`
+- `android.settings.set_brightness_mode`
+- `android.settings.get_screen_timeout`
+- `android.settings.set_screen_timeout`
+- `android.settings.get_auto_rotate`
+- `android.settings.set_auto_rotate`
+- `android.settings.get_haptic_feedback`
+- `android.settings.set_haptic_feedback`
+- `android.settings.get_sound_effects`
+- `android.settings.set_sound_effects`
 
-- `WRITE_SETTINGS` gates every write tool. Each write performs a **live**
-  `canWriteSystemSettings()` check before calling the bridge — the persisted
-  `ConnectionRecord.scopes` is a snapshot, not a security boundary. When the
-  permission is missing the tool returns `PERMISSION_REQUIRED`.
-- `Overlay` (`canDrawOverlays`) is optional and does not gate the settings
-  tools.
+Every setter performs a live `Settings.System.canWrite()` check. The persisted
+connection scope is only a snapshot; it is not used as the security boundary.
 
-## Error mapping
+Arbitrary provider keys such as `setSystemInt(key, value)`, generic
+`Settings.Secure`/`Settings.Global` access and permission-request functions are
+not exposed as MCP tools. The agent receives narrow typed capabilities only.
 
-Native `ERR_*` codes are mapped to `ConnectorError` in
-`src/android-settings-errors.ts`; raw Kotlin messages are sanitized and never
-reach the model.
+### Global Settings navigation
 
-## Security restrictions
+`android.settings.open` opens an allow-listed global Settings destination.
+Alongside the original Wi-Fi, Bluetooth, location, display, sound, security,
+privacy, VPN, NFC, language, date/time, keyboard and developer screens, the
+connector now includes public Android destinations for applications, default
+apps/home, Battery Saver, data usage, airplane/APN/roaming, Do Not Disturb,
+storage, device info/system update, accounts/sync, user dictionary/hardware
+keyboard, captions, cast, print, screensaver, auto-rotate, WebView and the
+all-app notifications list when supported by the device/API level.
 
-No root, `su`, `adb`, Shizuku, hidden APIs, `WRITE_SECURE_SETTINGS` hacks or
-accessibility tricks. `Settings.Secure` and `Settings.Global` writes are never
-exposed. If an operation is not permitted to a normal app, the tool reports
-`UNSUPPORTED` or `PERMISSION_REQUIRED`.
+Special-access grant screens (`overlay`, `writeSettings`,
+`batteryOptimization`, `unknownSources`) remain excluded from the model-facing
+allowlist. Those grants belong to the user-owned Account → Connectors → This
+device flow.
+
+### Per-app Settings navigation
+
+`android.settings.open_app` takes an explicit `packageName` and one of:
+
+- `appDetails`
+- `appNotifications`
+- `notificationChannel` (`channelId` required)
+- `notificationBubbles`
+- `appOpenByDefault`
+- `appLocale`
+- `appUsage`
+- `backgroundData`
+
+This fixes the former ambiguity where `appDetails` was hard-wired to Creepy.IM's
+own package. The native layer now passes the package URI or Android extras that
+each official `Settings.ACTION_*` contract requires.
+
+### Settings Panels
+
+`android.settings.open_panel` supports `internet`, `wifi`, `volume` and `nfc`
+on Android 10 / API 29+ when the panel resolves on the current device.
+
+## Security model
+
+The connector uses ordinary public Android APIs only. It does not use root,
+`su`, adb, Shizuku, hidden APIs, `WRITE_SECURE_SETTINGS`, accessibility tricks
+or OEM private activity class names. `Settings.Secure` and `Settings.Global`
+writes are not exposed. Unsupported or rejected operations return controlled
+connector errors instead of fake success.
 
 ## Known limitations
 
-- Android-only; on other platforms the connector is not registered.
-- Settings Panels require API 29+.
-- The remaining Android surface (contacts, calendar, files, notifications,
-  clipboard, …) is not implemented and therefore not registered — the previous
-  mocks were removed, not promoted.
+- Android-only; the connector is not registered when the native bridge is absent.
+- OEM Settings apps may omit or redirect some public `Settings.ACTION_*`
+  destinations, so availability is resolved before launch.
+- App lookup obeys Android package visibility and is not an unrestricted package
+  inventory.
+- Android data/content surfaces such as contacts, files, notification contents
+  and clipboard are separate capabilities and are not implemented here.
 
 ## Tests
 

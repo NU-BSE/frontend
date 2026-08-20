@@ -7,11 +7,11 @@ import expo.modules.kotlin.modules.Module
 import expo.modules.kotlin.modules.ModuleDefinition
 
 /**
- * Expo Modules API surface for the Creepy.IM Android settings bridge.
+ * Expo Modules API surface for Creepy.IM's Android device bridge.
  *
- * This module only wires the Kotlin helpers together; all responsibilities are
- * split across [SettingsReader], [SettingsWriter], [SettingsNavigator] and
- * [SettingsObserverManager].
+ * Settings, package lookup and outward intents are split into focused helpers.
+ * The model-facing connector exposes only typed operations; the low-level
+ * Settings provider methods remain available to trusted app code only.
  */
 class CreepyAndroidSettingsModule : Module() {
 
@@ -21,6 +21,10 @@ class CreepyAndroidSettingsModule : Module() {
     private val reader: SettingsReader by lazy { SettingsReader(context.contentResolver) }
     private val writer: SettingsWriter by lazy { SettingsWriter(context) }
     private val navigator: SettingsNavigator by lazy { SettingsNavigator(context) }
+    private val appManager: AppManager by lazy { AppManager(context.packageManager) }
+    private val appLauncher: AppLauncher by lazy { AppLauncher(context) }
+    private val shareLauncher: ShareLauncher by lazy { ShareLauncher(context) }
+    private val externalLauncher: ExternalActionLauncher by lazy { ExternalActionLauncher(context) }
 
     private var observerManager: SettingsObserverManager? = null
 
@@ -56,6 +60,15 @@ class CreepyAndroidSettingsModule : Module() {
                 supportedScreens[screen] = navigator.canOpenScreen(screen)
             }
 
+            val supportedAppTargets = linkedMapOf<String, Boolean>()
+            for (target in SettingsNavigator.APP_TARGETS) {
+                supportedAppTargets[target] = navigator.canOpenAppTarget(
+                    target,
+                    context.packageName,
+                    if (target == "notificationChannel") "default" else null,
+                )
+            }
+
             val capabilities: Map<String, Any?> = linkedMapOf(
                 "platform" to "android",
                 "apiLevel" to Build.VERSION.SDK_INT,
@@ -65,6 +78,7 @@ class CreepyAndroidSettingsModule : Module() {
                 "canDrawOverlays" to Settings.canDrawOverlays(context),
                 "settingsPanelsSupported" to (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q),
                 "supportedScreens" to supportedScreens,
+                "supportedAppTargets" to supportedAppTargets,
             )
             capabilities
         }
@@ -157,7 +171,7 @@ class CreepyAndroidSettingsModule : Module() {
 
         // endregion
 
-        // region Settings.System writes (LOW LEVEL API — use the high-level helpers instead)
+        // region Settings.System writes (trusted app code only)
 
         Function("setSystemInt") { key: String, value: Int ->
             requireKey(key)
@@ -188,9 +202,7 @@ class CreepyAndroidSettingsModule : Module() {
         }
 
         AsyncFunction("requestWriteSystemSettingsPermission") {
-            if (navigator.canOpenWriteSettings()) {
-                navigator.openWriteSettings()
-            }
+            if (navigator.canOpenWriteSettings()) navigator.openWriteSettings()
             Settings.System.canWrite(context)
         }
 
@@ -199,15 +211,13 @@ class CreepyAndroidSettingsModule : Module() {
         }
 
         AsyncFunction("requestOverlayPermission") {
-            if (navigator.canOpenOverlay()) {
-                navigator.openOverlay()
-            }
+            if (navigator.canOpenOverlay()) navigator.openOverlay()
             Settings.canDrawOverlays(context)
         }
 
         // endregion
 
-        // region High-level settings
+        // region Typed high-level settings
 
         Function("getScreenBrightness") {
             reader.getInt(SettingsNamespace.SYSTEM, Settings.System.SCREEN_BRIGHTNESS, 0)
@@ -245,9 +255,46 @@ class CreepyAndroidSettingsModule : Module() {
             writer.putInt(Settings.System.ACCELEROMETER_ROTATION, if (enabled) 1 else 0)
         }
 
+        Function("getBrightnessMode") {
+            if (
+                reader.getInt(
+                    SettingsNamespace.SYSTEM,
+                    Settings.System.SCREEN_BRIGHTNESS_MODE,
+                    Settings.System.SCREEN_BRIGHTNESS_MODE_MANUAL,
+                ) == Settings.System.SCREEN_BRIGHTNESS_MODE_AUTOMATIC
+            ) "automatic" else "manual"
+        }
+
+        Function("setBrightnessMode") { mode: String ->
+            val value = when (mode) {
+                "manual" -> Settings.System.SCREEN_BRIGHTNESS_MODE_MANUAL
+                "automatic" -> Settings.System.SCREEN_BRIGHTNESS_MODE_AUTOMATIC
+                else -> throw InvalidArgumentException(
+                    "brightness mode must be 'manual' or 'automatic'.",
+                )
+            }
+            writer.putInt(Settings.System.SCREEN_BRIGHTNESS_MODE, value)
+        }
+
+        Function("getHapticFeedbackEnabled") {
+            reader.getInt(SettingsNamespace.SYSTEM, Settings.System.HAPTIC_FEEDBACK_ENABLED, 1) == 1
+        }
+
+        Function("setHapticFeedbackEnabled") { enabled: Boolean ->
+            writer.putInt(Settings.System.HAPTIC_FEEDBACK_ENABLED, if (enabled) 1 else 0)
+        }
+
+        Function("getSoundEffectsEnabled") {
+            reader.getInt(SettingsNamespace.SYSTEM, Settings.System.SOUND_EFFECTS_ENABLED, 1) == 1
+        }
+
+        Function("setSoundEffectsEnabled") { enabled: Boolean ->
+            writer.putInt(Settings.System.SOUND_EFFECTS_ENABLED, if (enabled) 1 else 0)
+        }
+
         // endregion
 
-        // region Navigation
+        // region Settings navigation
 
         Function("canOpenSettings") { screen: String ->
             navigator.canOpenScreen(screen)
@@ -257,12 +304,54 @@ class CreepyAndroidSettingsModule : Module() {
             navigator.openScreen(screen)
         }
 
+        Function("canOpenAppSettings") { target: String, packageName: String, channelId: String? ->
+            navigator.canOpenAppTarget(target, packageName, channelId)
+        }
+
+        AsyncFunction("openAppSettings") { target: String, packageName: String, channelId: String? ->
+            navigator.openAppTarget(target, packageName, channelId)
+        }
+
         Function("isSettingsPanelSupported") { panel: String ->
             navigator.isPanelSupported(panel)
         }
 
         AsyncFunction("openPanel") { panel: String ->
             navigator.openPanel(panel)
+        }
+
+        // endregion
+
+        // region Installed applications
+
+        Function("findApps") { query: String, limit: Int ->
+            appManager.findApps(query, limit)
+        }
+
+        Function("getAppInfo") { packageName: String ->
+            appManager.getAppInfo(packageName)
+        }
+
+        // endregion
+
+        // region Outward intents
+
+        AsyncFunction("intentOpenUri") { uri: String -> externalLauncher.openUri(uri) }
+        AsyncFunction("intentOpenApp") { packageName: String -> appLauncher.openApp(packageName) }
+        AsyncFunction("intentShareText") { text: String, targetPackage: String? ->
+            shareLauncher.shareText(text, targetPackage)
+        }
+        AsyncFunction("intentShareFile") { fileUri: String, mimeType: String?, targetPackage: String? ->
+            shareLauncher.shareFile(fileUri, mimeType, targetPackage)
+        }
+        AsyncFunction("intentComposeEmail") { to: String?, subject: String?, body: String? ->
+            externalLauncher.composeEmail(to, subject, body)
+        }
+        AsyncFunction("intentOpenMap") { query: String?, latitude: Double?, longitude: Double? ->
+            externalLauncher.openMap(query, latitude, longitude)
+        }
+        AsyncFunction("intentOpenDialer") { phoneNumber: String? ->
+            externalLauncher.openDialer(phoneNumber)
         }
 
         // endregion
@@ -287,9 +376,7 @@ class CreepyAndroidSettingsModule : Module() {
     }
 
     private fun requireKey(key: String) {
-        if (key.isBlank()) {
-            throw InvalidArgumentException("Settings key must not be empty.")
-        }
+        if (key.isBlank()) throw InvalidArgumentException("Settings key must not be empty.")
     }
 
     private fun requireInRange(value: Int, min: Int, max: Int, name: String) {
@@ -299,9 +386,7 @@ class CreepyAndroidSettingsModule : Module() {
     }
 
     private fun requireNonNegative(value: Int, name: String) {
-        if (value < 0) {
-            throw InvalidArgumentException("$name must be >= 0, received $value.")
-        }
+        if (value < 0) throw InvalidArgumentException("$name must be >= 0, received $value.")
     }
 
     private fun brightnessFromPercent(percent: Int): Int =

@@ -2,18 +2,9 @@ import type { ConnectionRecord, ConnectionStore } from '@mobile-agent/connector-
 import { TELEGRAM_USER_SCOPES } from '@mobile-agent/connector-telegram';
 
 /**
- * Development-mode seeding.
- *
- * In `development` mode the runtime pre-connects clearly labeled mock
- * accounts so the agent loop is demoable end-to-end without real provider
- * credentials (the same affordance the app had before the connection model
- * became real). In `production` this function is never called: connections
- * only appear through real auth flows.
- *
- * The Android device is deliberately not seeded: the real `AndroidConnector`
- * uses the stable `android-device` id and only registers when the native
- * settings bridge is present, so seeding a mock copy here would either shadow
- * the real connection or be removed as a "legacy" row on the next startup.
+ * Development-mode account seeding. Local device connectors (Android Settings
+ * and Android Intents) are never mocked or seeded; the runtime connects them
+ * only when their real native bridges are present.
  */
 function devConnection(
   id: string,
@@ -51,7 +42,6 @@ const DEV_CONNECTIONS: ConnectionRecord[] = [
   devConnection('dropbox-default', 'dropbox', 'Dropbox'),
   devConnection('discord-default', 'discord', 'Discord'),
   devConnection('spotify-default', 'spotify', 'Spotify'),
-  devConnection('intent-default', 'intent', 'Android Intents'),
 ];
 
 export interface SeedOptions {
@@ -71,12 +61,15 @@ export async function seedDevelopmentConnections(
   }
 }
 
-const CLEANUP_IDS = new Set(DEV_CONNECTIONS.map((c) => c.id));
+/** Include the retired mock intent id so upgrades clean it up once. */
+const CLEANUP_IDS = new Set([
+  ...DEV_CONNECTIONS.map((connection) => connection.id),
+  'intent-default',
+]);
 
 /**
- * Removes known development-seed connections from the store.
- * Safe to call in production — only removes the well-known fixed IDs,
- * never touches real user connections.
+ * Removes known development-seed connections from the store. Safe in
+ * production because only fixed fixture ids are removed.
  */
 export async function removeDevelopmentConnections(
   store: ConnectionStore,

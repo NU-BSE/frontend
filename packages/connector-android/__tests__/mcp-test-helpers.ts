@@ -25,6 +25,7 @@ export function makeBridge(
       canDrawOverlays: false,
       settingsPanelsSupported: true,
       supportedScreens: { wifi: true, bluetooth: true },
+      supportedAppTargets: { appDetails: true, appNotifications: true },
     }),
     canWriteSystemSettings: () => true,
     requestWriteSystemSettingsPermission: async () => true,
@@ -38,10 +39,36 @@ export function makeBridge(
     setScreenTimeout: () => true,
     getAutoRotate: () => false,
     setAutoRotate: () => true,
+    getBrightnessMode: () => 'automatic',
+    setBrightnessMode: () => true,
+    getHapticFeedbackEnabled: () => true,
+    setHapticFeedbackEnabled: () => true,
+    getSoundEffectsEnabled: () => true,
+    setSoundEffectsEnabled: () => true,
     canOpenSettings: () => true,
     openSettings: async () => true,
+    canOpenAppSettings: () => true,
+    openAppSettings: async () => true,
     isSettingsPanelSupported: () => true,
     openPanel: async () => true,
+    findApps: () => [
+      {
+        packageName: 'org.telegram.messenger',
+        label: 'Telegram',
+        enabled: true,
+        systemApp: false,
+        launchable: true,
+      },
+    ],
+    getAppInfo: () => ({
+      packageName: 'org.telegram.messenger',
+      label: 'Telegram',
+      versionName: '12.0',
+      versionCode: 12000,
+      enabled: true,
+      systemApp: false,
+      launchable: true,
+    }),
     ...overrides,
   };
 }
@@ -75,17 +102,11 @@ export interface TestRuntime {
 
 const openRuntimes: LocalMcpRuntime[] = [];
 
-/** Close every runtime opened by `startRuntime` (call in `afterEach`). */
 export async function closeTestRuntimes(): Promise<void> {
   const runtimes = openRuntimes.splice(0);
   await Promise.all(runtimes.map((runtime) => runtime.close()));
 }
 
-/**
- * Spins up a real in-process MCP server + client with the given connector
- * registered, so tests exercise the full boundary (registerConnectorTools →
- * MCP SDK output validation → client), not `tool.execute` directly.
- */
 export async function startRuntime(connector: Connector): Promise<TestRuntime> {
   const registry = new ConnectorRegistry({ allowDevelopmentMocks: true });
   registry.register(connector);

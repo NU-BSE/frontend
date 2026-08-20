@@ -13,15 +13,18 @@ web-build/
 # sources at modules/<name>/android/ for autolinking to find them. Those are
 # re-included below, and only those.
 #
-# Everywhere else, hand-written native sources must NOT sit under a path
-# segment named android/ or ios/: they are silently untracked, `git status`
-# never lists them, and the omission only surfaces as a feature missing from a
-# store build. Keep them under native/kotlin/ instead — see
-# src/connections/google/native/kotlin/.
+# Every other directory named android/ or ios/ that holds real source has to
+# be re-included by name below. Nothing warns you when one is missed: the
+# files stay tracked and `git status` stays clean, because the rules filter
+# what gets uploaded to the builder rather than what git records. The symptom
+# is a remote build failing to resolve a module that resolves fine locally.
+# scripts/verify-ignored-sources.mts fails the verify suite if a tracked file
+# is ever excluded again, so this list cannot silently fall behind.
 android/
 ios/
 !modules/*/android/
 !modules/*/ios/
+!src/connections/android/
 *.log
 .env
 .DS_Store

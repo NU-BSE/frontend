@@ -305,4 +305,113 @@ assert(
   'a 33.3% + 12pt-gap rule would overflow at three columns — regression reproduced',
 );
 
+/*
+ * Device-access rows (app/connect/android.tsx).
+ *
+ * Each permission used to be a block "Manage" button stacked under its
+ * description, which made three permissions read as a form. The status and the
+ * affordance now sit beside the text. That is a claim about frames, not about
+ * styles, so it is measured: the status column must start to the right of the
+ * text column and share its vertical band, and the row must still be tappable.
+ */
+console.log('\ndevice access rows:');
+
+const ROW_GAP = 12;
+const ROW_PADDING_V = 12;
+const MIN_TOUCH_TARGET = 48;
+const TITLE_HEIGHT = 20;
+const DESCRIPTION_HEIGHT = 32;
+const STATUS_WIDTH = 62;
+const CHEVRON_WIDTH = 8;
+const STATUS_GAP = 8;
+
+function layoutAccessRow(windowWidth: number): {
+  row: Frame;
+  text: Frame;
+  status: Frame;
+} {
+  const root = Yoga.Node.create();
+  root.setWidth(windowWidth);
+  root.setPadding(Edge.Horizontal, GUTTER);
+
+  const row = Yoga.Node.create();
+  row.setFlexDirection(FlexDirection.Row);
+  row.setAlignItems(Align.Center);
+  row.setJustifyContent(Justify.SpaceBetween);
+  row.setGap(Gutter.All, ROW_GAP);
+  row.setMinHeight(MIN_TOUCH_TARGET);
+  row.setPadding(Edge.Vertical, ROW_PADDING_V);
+  root.insertChild(row, 0);
+
+  const text = Yoga.Node.create();
+  text.setFlexGrow(1);
+  text.setFlexShrink(1);
+  text.setFlexBasis(0);
+  text.setMinWidth(0);
+  text.setFlexDirection(FlexDirection.Column);
+  text.setGap(Gutter.All, 4);
+  row.insertChild(text, 0);
+
+  const title = Yoga.Node.create();
+  title.setHeight(TITLE_HEIGHT);
+  text.insertChild(title, 0);
+  const description = Yoga.Node.create();
+  description.setHeight(DESCRIPTION_HEIGHT);
+  text.insertChild(description, 1);
+
+  const status = Yoga.Node.create();
+  status.setFlexDirection(FlexDirection.Row);
+  status.setAlignItems(Align.Center);
+  status.setGap(Gutter.All, STATUS_GAP);
+  row.insertChild(status, 1);
+
+  const tag = Yoga.Node.create();
+  tag.setWidth(STATUS_WIDTH);
+  tag.setHeight(14);
+  status.insertChild(tag, 0);
+  const chevron = Yoga.Node.create();
+  chevron.setWidth(CHEVRON_WIDTH);
+  chevron.setHeight(20);
+  status.insertChild(chevron, 1);
+
+  root.calculateLayout(windowWidth, undefined, Direction.LTR);
+  const frameOf = (node: ReturnType<typeof Yoga.Node.create>): Frame => {
+    const c = node.getComputedLayout();
+    return { left: c.left, top: c.top, width: c.width, height: c.height };
+  };
+  return { row: frameOf(row), text: frameOf(text), status: frameOf(status) };
+}
+
+for (const windowWidth of [360, 390, 412]) {
+  const { row, text, status } = layoutAccessRow(windowWidth);
+
+  // Frames are relative to the row for its children, so compare directly.
+  assert(
+    status.left >= text.left + text.width - 0.01,
+    `${windowWidth}pt: status starts right of the text (${status.left.toFixed(1)} >= ${(text.left + text.width).toFixed(1)})`,
+  );
+  const statusMid = status.top + status.height / 2;
+  assert(
+    statusMid > text.top && statusMid < text.top + text.height,
+    `${windowWidth}pt: status shares the text's vertical band, so it is beside it and not below`,
+  );
+  assert(
+    row.height >= MIN_TOUCH_TARGET,
+    `${windowWidth}pt: row stays tappable (${row.height.toFixed(1)}pt >= ${MIN_TOUCH_TARGET}pt)`,
+  );
+  assert(
+    text.width > 0,
+    `${windowWidth}pt: text column keeps positive width (${text.width.toFixed(1)}pt)`,
+  );
+}
+
+// The counter-example: the old layout put the button in the column flow, so
+// the row's height was the sum of its parts rather than the taller of two.
+const stacked = TITLE_HEIGHT + DESCRIPTION_HEIGHT + MIN_TOUCH_TARGET + ROW_PADDING_V * 2;
+const beside = layoutAccessRow(390).row.height;
+assert(
+  beside < stacked,
+  `beside-the-text is shorter than stacked (${beside.toFixed(0)}pt vs ${stacked}pt) — three of these fit without scrolling`,
+);
+
 console.log('\nlayout verified.');

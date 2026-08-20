@@ -6,6 +6,7 @@ import type { AgentMessage } from '@/agent/types';
 import { palette, radius, shadow, spacing } from '@/theme/tokens';
 
 import { AttachmentCard } from './AttachmentCard';
+import { InlineBold } from './RichText';
 import { toolActivityLabel } from './toolLabels';
 
 /**
@@ -46,7 +47,7 @@ export function AgentMessageItem({
     return (
       <View style={[styles.bubble, styles.assistant]}>
         <Text variant="body" tone="primary">
-          {message.content}
+          <InlineBold>{message.content}</InlineBold>
           {streaming ? <Text tone="brand">▍</Text> : null}
         </Text>
       </View>

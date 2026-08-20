@@ -38,5 +38,5 @@ export interface ConnectorCatalogEntry {
 export const CONNECTOR_CATALOG: ConnectorCatalogEntry[] = [
   { key: 'android', label: 'Settings', summary: 'This device', connectorId: 'android' },
   { key: 'telegram-user', label: 'Telegram', summary: 'Personal account', connectorId: 'telegram-user' },
-  { key: 'google', label: 'Google', summary: 'Calendar and Drive', connectorId: 'google' },
+  { key: 'google', label: 'Google', summary: 'Calendar, Gmail, Drive', connectorId: 'google' },
 ];

@@ -1,5 +1,5 @@
 import React, { useEffect } from 'react';
-import { AppState, ScrollView, StyleSheet, View } from 'react-native';
+import { AppState, Pressable, ScrollView, StyleSheet, View } from 'react-native';
 import { router } from 'expo-router';
 
 import { Button } from '@/components/Button';
@@ -15,14 +15,25 @@ import {
   requestOverlayPermission,
   requestWriteSystemSettingsPermission,
 } from '@/connections/android/device-access';
-import { gutter, palette, radius, spacing } from '@/theme/tokens';
+import {
+  MIN_TOUCH_TARGET,
+  gutter,
+  palette,
+  radius,
+  spacing,
+} from '@/theme/tokens';
 
 /**
  * Production Account UI for the on-device Android connector.
  *
  * Connect/disconnect here only; Android system permissions are never toggled
- * automatically — the "Allow"/"Manage" buttons open the relevant Android
- * Settings screen and the state re-reads live on return to foreground.
+ * automatically — tapping a permission opens the relevant Android Settings
+ * screen and the state re-reads live on return to foreground.
+ *
+ * Each permission is one tappable row rather than a card with a button stacked
+ * underneath it. Three stacked buttons made the screen read as a form to fill
+ * in, when it is really a status list where acting is the exception; the row
+ * idiom is also what the Android settings screens these rows lead to use.
  */
 export default function AndroidConnectScreen() {
   const { connection } = useConnection('android');
@@ -43,6 +54,9 @@ export default function AndroidConnectScreen() {
 
   const connected = connection?.status === 'connected';
   const state = access.data;
+  const deviceName = state?.device
+    ? `${state.device.manufacturer} ${state.device.model}`
+    : null;
 
   const error =
     connect.error instanceof Error
@@ -59,14 +73,16 @@ export default function AndroidConnectScreen() {
       >
         <Text variant="display">This device</Text>
         <Text variant="bodyLarge" tone="secondary">
-          Allow Creepy to read and control supported Android settings on this
-          device.
+          Read and control supported Android settings on this device.
         </Text>
 
-        <View style={styles.card}>
-          <Row label="Device" value={state?.device ? `${state.device.manufacturer} ${state.device.model}` : '—'} />
-          <Row label="Connector" value={connected ? 'Connected' : 'Not connected'} highlight={connected} />
-          <Row label="Native integration" value={state?.nativeAvailable ? 'Available' : 'Unavailable'} highlight={state?.nativeAvailable} danger={!state?.nativeAvailable} />
+        {/* One summary line. The device name and connection state were
+            previously repeated across two cards. */}
+        <View style={[styles.card, styles.summaryCard]}>
+          <Text variant="cardTitle">{deviceName ?? 'Android device'}</Text>
+          <Text variant="bodySmall" tone={connected ? 'brand' : 'muted'}>
+            {connected ? 'Connected' : 'Not connected'}
+          </Text>
         </View>
 
         {!state?.nativeAvailable ? (
@@ -74,80 +90,37 @@ export default function AndroidConnectScreen() {
             The native Android settings bridge is unavailable in this build.
             Rebuild the app with the native module included.
           </Text>
-        ) : connected ? (
-          <View style={styles.section}>
-            <Text variant="headline">Connection</Text>
-            <View style={styles.card}>
-              <Row label="Status" value="Connected" highlight />
-              <Row label="Device" value={connection?.displayName ?? '—'} />
-              <Row
-                label="Scopes"
-                value={connection?.scopes?.length ? connection.scopes.join(', ') : '—'}
-              />
-            </View>
-            <Button
-              label="Disconnect device connector"
-              variant="secondary"
-              loading={disconnect.isPending}
-              onPress={() => {
-                if (connection) void disconnect.mutateAsync(connection.id);
-              }}
-            />
-            <Text variant="bodySmall" tone="muted">
-              Disconnecting Creepy disables the connector but does not revoke
-              Android permissions already granted in system settings.
-            </Text>
-          </View>
         ) : (
           <View style={styles.section}>
-            <Text variant="headline">Connection</Text>
-            <Button
-              label="Connect this device"
-              loading={connect.isPending}
-              onPress={() => void connect.mutateAsync('android')}
-            />
-          </View>
-        )}
-
-        {state?.nativeAvailable ? (
-          <View style={styles.section}>
             <Text variant="headline">Device access</Text>
-            <Text variant="bodySmall" tone="muted">
-              Required access {state.writeSettings ? '1 / 1' : '0 / 1'} · Optional
-              access {state.overlay ? '1 / 1' : '0 / 1'}
-            </Text>
 
             <View style={styles.card}>
               <AccessRow
                 title="Read system settings"
-                status="Available"
-                description="Allows Creepy to read supported device settings."
+                description="Read supported device settings."
+                allowed={state.readSettings}
               />
               <AccessRow
                 title="Modify system settings"
-                status={state.writeSettings ? 'Allowed' : 'Not allowed'}
+                description="Change brightness, screen timeout and auto-rotate."
                 allowed={state.writeSettings}
-                description="Required to change brightness, screen timeout and auto-rotate."
-                actionLabel={state.writeSettings ? 'Manage' : 'Allow'}
-                onAction={() => void requestWriteSystemSettingsPermission()}
+                onPress={() => void requestWriteSystemSettingsPermission()}
               />
               <AccessRow
                 title="Display over other apps"
-                status={state.overlay ? 'Allowed' : 'Not allowed'}
+                description="Optional, for future on-screen Creepy controls."
                 allowed={state.overlay}
-                description="Optional device access for future on-screen Creepy controls."
-                actionLabel={state.overlay ? 'Manage' : 'Allow'}
-                onAction={() => void requestOverlayPermission()}
+                optional
+                onPress={() => void requestOverlayPermission()}
+                last
               />
             </View>
 
             <Text variant="bodySmall" tone="muted">
-              Overlay is optional — settings tools work without it. Permission
-              changes take effect after you return from the Android settings
-              screen.
+              Changes apply when you return from the Android settings screen.
             </Text>
           </View>
-        ) : null}
+        )}
 
         {error ? (
           <Text variant="bodySmall" tone="danger" style={styles.error}>
@@ -155,73 +128,97 @@ export default function AndroidConnectScreen() {
           </Text>
         ) : null}
 
-        <Button label="Back" variant="ghost" onPress={() => router.back()} />
+        <View style={styles.section}>
+          {connected ? (
+            <>
+              <Button
+                label="Disconnect this device"
+                variant="secondary"
+                loading={disconnect.isPending}
+                onPress={() => {
+                  if (connection) void disconnect.mutateAsync(connection.id);
+                }}
+              />
+              <Text variant="bodySmall" tone="muted">
+                Disconnecting disables the connector but does not revoke Android
+                permissions already granted in system settings.
+              </Text>
+            </>
+          ) : (
+            <Button
+              label="Connect this device"
+              loading={connect.isPending}
+              onPress={() => void connect.mutateAsync('android')}
+            />
+          )}
+          <Button label="Back" variant="ghost" onPress={() => router.back()} />
+        </View>
       </ScrollView>
     </Screen>
   );
 }
 
-function Row({
-  label,
-  value,
-  highlight,
-  danger,
-}: {
-  label: string;
-  value: string;
-  highlight?: boolean;
-  danger?: boolean;
-}) {
-  return (
-    <View style={styles.cardRow}>
-      <Text variant="bodySmall" tone="muted">
-        {label}
-      </Text>
-      <Text
-        variant="labelSmall"
-        tone={danger ? 'danger' : highlight ? 'brand' : 'secondary'}
-        style={styles.value}
-      >
-        {value}
-      </Text>
-    </View>
-  );
-}
-
+/**
+ * One permission.
+ *
+ * Rows that lead somewhere are pressable across their whole width and show a
+ * chevron; the read permission is granted by the manifest and has nowhere to
+ * go, so it is inert and carries no affordance. The status sits on the right
+ * of the title, where a list is scanned, instead of under the description.
+ */
 function AccessRow({
   title,
-  status,
   description,
   allowed,
-  actionLabel,
-  onAction,
+  optional = false,
+  onPress,
+  last = false,
 }: {
   title: string;
-  status: string;
   description: string;
   allowed?: boolean;
-  actionLabel?: string;
-  onAction?: () => void;
+  optional?: boolean;
+  onPress?: () => void;
+  last?: boolean;
 }) {
-  return (
-    <View style={styles.accessRow}>
-      <View style={styles.accessHeader}>
+  const status = allowed ? 'Allowed' : optional ? 'Optional' : 'Needed';
+
+  const body = (
+    <View style={[styles.row, last && styles.rowLast]}>
+      <View style={styles.rowText}>
         <Text variant="label">{title}</Text>
-        <Text variant="tag" tone={allowed ? 'brand' : 'secondary'} uppercase>
-          {status}
+        <Text variant="bodySmall" tone="secondary">
+          {description}
         </Text>
       </View>
-      <Text variant="bodySmall" tone="secondary">
-        {description}
-      </Text>
-      {actionLabel && onAction ? (
-        <Button
-          label={actionLabel}
-          variant={allowed ? 'ghost' : 'secondary'}
-          onPress={onAction}
-        />
-      ) : null}
+      <View style={styles.rowStatus}>
+        <Text
+          variant="tag"
+          tone={allowed ? 'brand' : optional ? 'muted' : 'secondary'}
+          uppercase
+        >
+          {status}
+        </Text>
+        {onPress ? (
+          <Text variant="label" tone="faint" style={styles.chevron}>
+            ›
+          </Text>
+        ) : null}
+      </View>
     </View>
+  );
+
+  if (!onPress) return body;
+
+  return (
+    <Pressable
+      accessibilityRole="button"
+      accessibilityLabel={`${title}. ${status}. Opens Android settings.`}
+      onPress={onPress}
+      style={({ pressed }) => (pressed ? styles.pressed : undefined)}
+    >
+      {body}
+    </Pressable>
   );
 }
 
@@ -238,22 +235,33 @@ const styles = StyleSheet.create({
     borderRadius: radius.md,
     borderWidth: 1,
     borderColor: palette.borderSoft,
-    padding: spacing.lg,
+    paddingHorizontal: spacing.lg,
+    paddingVertical: spacing.xs,
+    gap: spacing.xs,
+  },
+  row: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: spacing.md,
+    minHeight: MIN_TOUCH_TARGET,
+    paddingVertical: spacing.md,
+    // A hairline keeps three rows from reading as one paragraph, which is what
+    // the stacked-button layout relied on the buttons to do.
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: palette.borderSoft,
+  },
+  // The access card's padding is carried by its rows, so the card itself is
+  // near-flush; a card of plain text needs its own.
+  summaryCard: { paddingVertical: spacing.lg, gap: spacing.xs },
+  rowLast: { borderBottomWidth: 0 },
+  rowText: { flex: 1, gap: spacing.xs },
+  rowStatus: {
+    flexDirection: 'row',
+    alignItems: 'center',
     gap: spacing.sm,
   },
-  cardRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    gap: spacing.md,
-  },
-  value: { flexShrink: 1, textAlign: 'right' },
-  accessRow: { gap: spacing.xs },
-  accessHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    gap: spacing.md,
-  },
+  chevron: { marginTop: -2 },
+  pressed: { opacity: 0.6 },
   error: { textAlign: 'center' },
 });

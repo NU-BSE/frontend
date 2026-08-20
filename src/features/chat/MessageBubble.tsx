@@ -5,6 +5,8 @@ import type { UIMessage } from '@tanstack/ai/client';
 import { Text } from '@/components/Text';
 import { palette, radius, shadow, spacing } from '@/theme/tokens';
 
+import { InlineBold } from './RichText';
+
 export function messageText(message: UIMessage): string {
   return message.parts
     .filter((part) => part.type === 'text')
@@ -37,7 +39,9 @@ export function MessageBubble({
   return (
     <View style={[styles.bubble, isUser ? styles.user : styles.assistant]}>
       <Text variant="body" tone={isUser ? 'inverse' : 'primary'}>
-        {text}
+        {/* The user's own text is shown exactly as typed; only the model
+            emits Markdown. */}
+        {isUser ? text : <InlineBold>{text}</InlineBold>}
         {streaming ? <Text tone={isUser ? 'inverse' : 'brand'}>▍</Text> : null}
       </Text>
     </View>

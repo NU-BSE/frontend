@@ -1,216 +1,126 @@
 # creepy-android-settings
 
-Android Settings bridge for **Creepy.IM**, built on the **Expo Modules API** in
-Kotlin. It exposes `Settings.System` / `Settings.Secure` / `Settings.Global`
-reads, limited `Settings.System` writes, Settings navigation, Settings Panels,
-overlay access helpers and a `ContentObserver`-backed change stream.
+Android-only Expo native module for Creepy.IM. It exposes the ordinary public
+Android APIs used by the local MCP connectors: typed `Settings.System`
+operations, Settings navigation, app lookup, Settings Panels and a constrained
+set of outward Android intents.
 
-This module is **Android-only**. iOS and Web ship a stub that throws
-`ERR_PLATFORM_NOT_SUPPORTED`.
+On iOS and web every public method fails with the normalized
+`ERR_PLATFORM_NOT_SUPPORTED` error.
 
-## Purpose
+## Permissions and package visibility
 
-The module is the stable native API that a future **Creepy.IM Android
-Connector** (MCP tools → connector → `CreepyAndroidSettings` → Android SDK) will
-sit on top of. It deliberately exposes only what a normal Android app is
-allowed to do and never attempts to bypass the Android permission system.
+The module declares `android.permission.WRITE_SETTINGS` and
+`android.permission.SYSTEM_ALERT_WINDOW`. Both are special accesses controlled
+by the user in Android Settings; the module never grants them itself.
 
-## Installation
+Installed-app discovery does **not** request `QUERY_ALL_PACKAGES`. The manifest
+only declares the standard launcher intent query, so `findApps()` is limited to
+launchable apps visible under Android package-visibility rules.
 
-The module lives in the `modules/creepy-android-settings/` directory and is
-auto-linked by `expo-modules-autolinking`. Add it to your workspaces (already
-done in this repo) and install:
+## Settings provider
 
-```bash
-npm install
-```
+Trusted app code retains low-level reads for `Settings.System`,
+`Settings.Secure` and `Settings.Global`, and limited `Settings.System` writes.
+Ordinary Android apps cannot arbitrarily write Secure/Global settings, so no
+such write API is provided.
 
-Then rebuild the native project:
+Model-facing MCP code does not receive the generic provider-key functions; it
+uses typed capabilities instead.
 
-```bash
-npx expo run:android
-```
+## Typed high-level settings
 
-## Android requirements
+- screen brightness, raw and percent
+- manual/automatic brightness mode
+- screen timeout
+- auto-rotate
+- haptic feedback
+- system sound effects
 
-- `android.permission.WRITE_SETTINGS` is declared in the module's
-  `AndroidManifest.xml`.
-- `WRITE_SETTINGS` is a *special access*, not a runtime permission. It is
-  granted through a dedicated system screen, not `requestPermissions()`.
+Writes require live `Settings.System.canWrite(context)` permission.
 
-### WRITE_SETTINGS behavior
+## Global Settings navigation
 
-- Check current state with `canWriteSystemSettings()`.
-- Request it with `requestWriteSystemSettingsPermission()`, which opens
-  `Settings.ACTION_MANAGE_WRITE_SETTINGS` scoped to the app.
-- The promise resolves with the *current* state, not a guarantee — the user may
-  deny the toggle, so re-check `canWriteSystemSettings()` after returning.
+`canOpenSettings(screen)` and `openSettings(screen)` support the original
+Settings destinations plus public Android screens for:
 
-### Overlay behavior
+- application management, all apps, default apps and Home selection
+- Battery Saver
+- data usage, airplane mode, APNs and roaming
+- Do Not Disturb
+- storage
+- device info and system update
+- account/sync screens
+- user dictionary and hardware keyboard
+- captioning, Cast and Print
+- screensaver, auto-rotate and WebView selection
+- all-app notification settings on supported API levels
 
-- Check with `canDrawOverlays()`.
-- Request with `requestOverlayPermission()`, which opens
-  `Settings.ACTION_MANAGE_OVERLAY_PERMISSION` scoped to the app.
+Availability is checked through `PackageManager.resolveActivity()` before any
+activity is launched. No OEM private activity class names are used.
 
-## Settings namespaces
+## Per-app Settings navigation
 
-| Namespace        | Read | Write | Notes                                                              |
-| ---------------- | ---- | ----- | ------------------------------------------------------------------ |
-| `Settings.System` | yes | limited | Read + write with `WRITE_SETTINGS`.                                |
-| `Settings.Secure` | yes | no     | Read-only for ordinary apps.                                       |
-| `Settings.Global` | yes | no     | Read-only for ordinary apps.                                       |
+`canOpenAppSettings(target, packageName, channelId?)` and
+`openAppSettings(...)` target an explicit application package. Supported
+targets are:
 
-Android defines `Settings` as the provider of global system preferences.
-`Settings.Secure` holds values that ordinary apps cannot arbitrarily change;
-no generic `setSecure*` / `setGlobal*` API is exposed.
+- `appDetails`
+- `appNotifications`
+- `notificationChannel` — requires `channelId`
+- `notificationBubbles`
+- `appOpenByDefault`
+- `appLocale`
+- `appUsage`
+- `backgroundData`
 
-## API reference
+The native implementation passes the official package URI or extras required
+by each Android `Settings.ACTION_*` contract. The legacy parameterless
+`appDetails` screen remains for direct callers and points to Creepy.IM itself;
+agent code should use the package-aware API.
 
-```ts
-import { CreepyAndroidSettings } from 'creepy-android-settings';
-```
+## Installed applications
 
-### Capabilities
+- `findApps(query, limit?)` — searches launcher-visible apps by label/package
+- `getAppInfo(packageName)` — returns basic label, version, enabled/system and
+  launchability metadata when the package is visible
 
-- `getCapabilities(): AndroidSettingsCapabilities`
+## Settings Panels
 
-### Generic reads
+API 29+ panels:
 
-- `getSetting(namespace, key): string | null`
-- `getSettingInt(namespace, key, defaultValue?): number`
+- `internet`
+- `wifi`
+- `volume`
+- `nfc`
 
-### Settings.System
+## Outward intents
 
-- `getSystemInt(key, defaultValue?)`, `getSystemString(key)`,
-  `getSystemFloat(key, defaultValue?)`, `getSystemLong(key, defaultValue?)`
-- `setSystemInt(key, value)`, `setSystemString(key, value)`,
-  `setSystemFloat(key, value)`, `setSystemLong(key, value)` — **LOW LEVEL API**.
-  Prefer the high-level helpers below.
+The module backs the real `@mobile-agent/connector-intents` package with narrow
+functions rather than a generic arbitrary-Intent API:
 
-### Settings.Secure / Settings.Global (read-only)
+- open an allow-listed URI (`http`, `https`, `mailto`, `tel`, `geo`)
+- launch an installed package
+- share text
+- share a `content://` or `android.resource://` file
+- open an email composer
+- open a map query/coordinate
+- open the phone dialer
 
-- `getSecureInt/getSecureString/getSecureFloat/getSecureLong`
-- `getGlobalInt/getGlobalString/getGlobalFloat/getGlobalLong`
+These operations use public Android intents and return `false` when no
+compatible activity can be launched.
 
-### Special access
+## Observer
 
-- `canWriteSystemSettings(): boolean`
-- `requestWriteSystemSettingsPermission(): Promise<boolean>`
-- `canDrawOverlays(): boolean`
-- `requestOverlayPermission(): Promise<boolean>`
-
-### High-level settings
-
-- `getScreenBrightness(): number` (native range `0..255`)
-- `setScreenBrightness(value): boolean`
-- `getScreenBrightnessPercent(): number` (`0..100`)
-- `setScreenBrightnessPercent(percent): boolean`
-- `getScreenTimeout(): number` (milliseconds)
-- `setScreenTimeout(milliseconds): boolean` (`>= 0`)
-- `getAutoRotate(): boolean`
-- `setAutoRotate(enabled): boolean`
-
-### Navigation
-
-- `canOpenSettings(screen: SettingsScreen): boolean`
-- `openSettings(screen: SettingsScreen): Promise<boolean>`
-
-Supported screens: `settings`, `appDetails`, `wifi`, `bluetooth`, `wireless`,
-`location`, `display`, `sound`, `notifications`, `accessibility`, `usageAccess`,
-`notificationListener`, `overlay`, `writeSettings`, `batteryOptimization`,
-`unknownSources`, `security`, `privacy`, `vpn`, `nfc`, `language`, `dateTime`,
-`keyboard`, `developerOptions`.
-
-### Panels (API 29+)
-
-- `isSettingsPanelSupported(panel: SettingsPanel): boolean`
-- `openPanel(panel: SettingsPanel): Promise<boolean>`
-
-Panels: `internet`, `wifi`, `volume`, `nfc`.
-
-### Observer
-
-- `watchSetting(namespace, key): string` (returns `subscriptionId`)
-- `unwatchSetting(subscriptionId): void`
-- `unwatchAllSettings(): void`
-
-## Events
-
-```ts
-const listener = CreepyAndroidSettings.addListener('onSettingChanged', (event) => {
-  console.log(event.subscriptionId, event.namespace, event.key, event.value, event.timestamp);
-});
-
-const observerId = CreepyAndroidSettings.watchSetting('system', 'screen_brightness');
-
-// later
-CreepyAndroidSettings.unwatchSetting(observerId);
-listener.remove();
-```
-
-The `onSettingChanged` payload is:
-
-```ts
-{
-  subscriptionId: string;
-  namespace: 'system' | 'secure' | 'global';
-  key: string;
-  value: string | number | null;
-  timestamp: number;
-}
-```
-
-## Examples
-
-```ts
-import { CreepyAndroidSettings } from 'creepy-android-settings';
-
-const capabilities = CreepyAndroidSettings.getCapabilities();
-console.log(capabilities);
-
-if (!CreepyAndroidSettings.canWriteSystemSettings()) {
-  await CreepyAndroidSettings.requestWriteSystemSettingsPermission();
-}
-
-if (CreepyAndroidSettings.canWriteSystemSettings()) {
-  CreepyAndroidSettings.setScreenBrightnessPercent(50);
-}
-```
-
-## Error model
-
-All failures are normalized `ERR_*` codes surfaced on the `code` property:
-
-- `ERR_PLATFORM_NOT_SUPPORTED`
-- `ERR_INVALID_ARGUMENT`
-- `ERR_INVALID_NAMESPACE`
-- `ERR_UNKNOWN_SETTINGS_SCREEN`
-- `ERR_SETTINGS_SCREEN_UNAVAILABLE`
-- `ERR_SETTINGS_PANEL_UNAVAILABLE`
-- `ERR_WRITE_SETTINGS_PERMISSION_REQUIRED`
-- `ERR_SETTING_READ_FAILED`
-- `ERR_SETTING_WRITE_FAILED`
-- `ERR_OBSERVER_NOT_FOUND`
-- `ERR_ANDROID_CONTEXT_UNAVAILABLE`
-
-## Platform limitations
-
-- **Android-only.** iOS/Web throw `ERR_PLATFORM_NOT_SUPPORTED`.
-- **Settings Panels** require API 29+ (`isSettingsPanelSupported` returns
-  `false` below that).
-- **`notifications` / `unknownSources`** screens require API 26+.
-- **OEMs** (Samsung, Xiaomi, OnePlus, …) may alter the Settings UI. Every
-  `ACTION_*` intent is checked against the `PackageManager` before launch; an
-  unavailable screen yields `ERR_SETTINGS_SCREEN_UNAVAILABLE` instead of a
-  crash.
+`watchSetting(namespace, key)` continues to expose a `ContentObserver`-backed
+change stream via `onSettingChanged`. Call `unwatchSetting` or
+`unwatchAllSettings` when finished.
 
 ## Security limitations
 
-This module does **not** bypass the Android permission system. It never uses
-`root`, `su`, `adb shell`, Shizuku, hidden APIs, `WRITE_SECURE_SETTINGS` hacks
-or accessibility tricks. Operations that a normal app cannot perform return a
-controlled "unavailable" result. Special permissions are never toggled
-automatically — the user must grant them in the Android Settings UI.
+No root, `su`, adb, Shizuku, hidden APIs, `WRITE_SECURE_SETTINGS` tricks or
+accessibility automation are used. Special permissions are never toggled
+programmatically. Unsupported actions fail cleanly.
 
 ## Tests
 
@@ -219,12 +129,5 @@ cd modules/creepy-android-settings
 npx jest
 ```
 
-Covers brightness conversion, argument validation, screen/panel mapping, web
-stub (`ERR_PLATFORM_NOT_SUPPORTED`) and error-code normalization.
-
-## Manual test harness
-
-A development-only screen is available at `app/dev/android-settings.tsx` (route
-`/dev/android-settings`). It exercises capabilities, the `WRITE_SETTINGS` flow,
-brightness, auto-rotate, screen timeout, navigation, Settings Panels and the
-brightness observer.
+The development harness remains available at `/dev/android-settings` in native
+Android development builds.

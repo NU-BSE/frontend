@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Declares the assistant to the platform.
+
+  Both sessionService and recognitionService are required attributes: without
+  either one the service is rejected and the app never appears in the system's
+  Assist app picker, with no error anywhere to explain the absence.
+
+  supportsAssist is what makes the platform deliver AssistStructure and the
+  screenshot to the session; without it the session is shown empty.
+
+  The components are named in full rather than through a placeholder: they live
+  in a fixed package of this module's own, not under the configurable
+  application id, so there is nothing to substitute.
+-->
+<voice-interaction-service
+    xmlns:android="http://schemas.android.com/apk/res/android"
+    android:sessionService="com.creepyim.assistant.AssistantSessionService"
+    android:recognitionService="com.creepyim.assistant.AssistantRecognitionService"
+    android:supportsAssist="true"
+    android:supportsLaunchVoiceAssistFromKeyguard="false" />

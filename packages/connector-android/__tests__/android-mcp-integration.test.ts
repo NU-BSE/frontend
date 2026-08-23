@@ -1,5 +1,9 @@
 import { InMemoryConnectionStore } from '@mobile-agent/connector-core';
-import { AndroidConnector, ANDROID_CONNECTION_ID } from '../src';
+import {
+  AndroidConnector,
+  ANDROID_CONNECTION_ID,
+  type AndroidAssistantBridge,
+} from '../src';
 
 import { closeTestRuntimes, makeBridge, startRuntime } from './mcp-test-helpers';
 
@@ -7,14 +11,35 @@ afterEach(async () => {
   await closeTestRuntimes();
 });
 
+function makeAssistantBridge(
+  overrides: Partial<AndroidAssistantBridge> = {},
+): AndroidAssistantBridge {
+  return {
+    getStatus: async () => ({
+      roleAvailable: true,
+      isDefault: false,
+      serviceReady: true,
+    }),
+    requestRole: async () => true,
+    openSettings: async () => true,
+    getScreenContext: async () => null,
+    ...overrides,
+  };
+}
+
 async function connectAndStart(
   bridge = makeBridge(),
+  assistantBridge?: AndroidAssistantBridge,
 ): Promise<{
   runtime: Awaited<ReturnType<typeof startRuntime>>['runtime'];
   approvalService: Awaited<ReturnType<typeof startRuntime>>['approvalService'];
 }> {
   const store = new InMemoryConnectionStore();
-  const connector = new AndroidConnector({ store, settingsBridge: bridge });
+  const connector = new AndroidConnector({
+    store,
+    settingsBridge: bridge,
+    ...(assistantBridge ? { assistantBridge } : {}),
+  });
   await connector.connect();
   return startRuntime(connector);
 }
@@ -88,6 +113,48 @@ describe('android.settings tools through the MCP boundary', () => {
     expect(
       (capabilities.structuredContent as { status: string }).status,
     ).toBe('success');
+  });
+
+  it('assistant tools execute through MCP with their local-device scopes', async () => {
+    const openSettings = jest.fn(async () => true);
+    const { runtime, approvalService } = await connectAndStart(
+      makeBridge(),
+      makeAssistantBridge({ openSettings }),
+    );
+
+    const status = await runtime.mcp.callTool({
+      name: 'android.assistant.get_status',
+      arguments: { connectionId: ANDROID_CONNECTION_ID },
+    });
+    expect(status.structuredContent).toEqual({
+      status: 'success',
+      data: {
+        roleAvailable: true,
+        isDefault: false,
+        serviceReady: true,
+      },
+    });
+
+    const screenContext = await runtime.mcp.callTool({
+      name: 'android.assistant.get_screen_context',
+      arguments: { connectionId: ANDROID_CONNECTION_ID },
+    });
+    expect(screenContext.structuredContent).toEqual({
+      status: 'success',
+      data: { available: false },
+    });
+
+    const opened = await approveThenCall(
+      runtime,
+      approvalService,
+      'android.assistant.open_settings',
+      { connectionId: ANDROID_CONNECTION_ID },
+    );
+    expect(opened.structuredContent).toEqual({
+      status: 'success',
+      data: { opened: true },
+    });
+    expect(openSettings).toHaveBeenCalledTimes(1);
   });
 
   it('set_brightness writes through the bridge after approval', async () => {

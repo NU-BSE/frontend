@@ -19,6 +19,14 @@ import type { AgentMessage, ChatAttachment, ChatSendInput } from '@/agent/types'
 import { uploadFile } from '@/api/files';
 import { AgentMessageItem } from '@/features/chat/AgentMessageItem';
 import { Composer } from '@/features/chat/Composer';
+import { isSupported as voiceIsSupported } from '@/voice/voice';
+
+/*
+ * Resolved once at import: whether the build carries the speech module cannot
+ * change while the app is running, and re-checking per render would put a
+ * NativeModules lookup in the composer's render path.
+ */
+const VOICE_SUPPORTED = voiceIsSupported();
 import { DeepLinkBar } from '@/features/chat/DeepLinkBar';
 import { SuggestionChips } from '@/features/chat/SuggestionChips';
 import { toolActivityLabel } from '@/features/chat/toolLabels';
@@ -321,6 +329,7 @@ export default function Chat() {
             busy={isRunning}
             disabled={engineStatus === 'preparing' || awaitingApproval}
             uploadFile={uploadFileForChat}
+            {...(VOICE_SUPPORTED ? { onVoice: () => router.push('/voice') } : {})}
           />
         </View>
       </KeyboardAvoidingView>

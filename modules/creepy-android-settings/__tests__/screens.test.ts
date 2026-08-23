@@ -6,7 +6,7 @@ import {
 
 describe('SettingsScreen mapping', () => {
   it('exposes the global screen registry', () => {
-    expect(SETTINGS_SCREENS).toHaveLength(48);
+    expect(SETTINGS_SCREENS).toHaveLength(49);
 
     for (const screen of [
       'settings',
@@ -19,6 +19,7 @@ describe('SettingsScreen mapping', () => {
       'sound',
       'notifications',
       'accessibility',
+      'assistant',
       'usageAccess',
       'notificationListener',
       'overlay',

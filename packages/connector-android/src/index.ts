@@ -17,3 +17,12 @@ export { createAndroidSettingsTools } from './android-settings-tools';
 export type { AndroidSettingsToolsDeps } from './android-settings-tools';
 
 export { mapAndroidSettingsError } from './android-settings-errors';
+
+export { createAssistantTools } from './assistant-tools';
+export type { AssistantToolsDeps } from './assistant-tools';
+export type {
+  AndroidAssistantBridge,
+  AssistantScreenContext,
+  AssistantScreenNode,
+  AssistantStatus,
+} from './assistant-bridge';

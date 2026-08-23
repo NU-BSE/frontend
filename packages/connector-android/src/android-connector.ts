@@ -8,6 +8,8 @@ import { StoreBackedConnector } from '@mobile-agent/connector-core';
 import type { AndroidSettingsBridge } from './android-settings-bridge';
 import { createAndroidSettingsTools } from './android-settings-tools';
 import { mapAndroidSettingsError } from './android-settings-errors';
+import type { AndroidAssistantBridge } from './assistant-bridge';
+import { createAssistantTools } from './assistant-tools';
 
 /** Stable connection id — a device connector never spawns per-connect ids. */
 export const ANDROID_CONNECTION_ID = 'android-device';
@@ -15,6 +17,12 @@ export const ANDROID_CONNECTION_ID = 'android-device';
 export interface AndroidConnectorOptions extends StoreBackedConnectorOptions {
   /** Injected by the app layer. Never imported from Expo/RN inside this package. */
   settingsBridge: AndroidSettingsBridge;
+  /**
+   * Optional: present only in a build carrying the assistant native module.
+   * When absent the assistant tools are not registered at all, so the model
+   * cannot attempt a capability this build does not have.
+   */
+  assistantBridge?: AndroidAssistantBridge;
 }
 
 const CAPABILITIES = [
@@ -44,9 +52,12 @@ export class AndroidConnector extends StoreBackedConnector {
 
   private readonly settingsBridge: AndroidSettingsBridge;
 
+  private readonly assistantBridge: AndroidAssistantBridge | null;
+
   constructor(options: AndroidConnectorOptions) {
     super(options);
     this.settingsBridge = options.settingsBridge;
+    this.assistantBridge = options.assistantBridge ?? null;
   }
 
   /**
@@ -94,6 +105,11 @@ export class AndroidConnector extends StoreBackedConnector {
   }
 
   async getTools(_connection: ConnectionRecord): Promise<ConnectorTool<any, any>[]> {
-    return createAndroidSettingsTools({ bridge: this.settingsBridge });
+    return [
+      ...createAndroidSettingsTools({ bridge: this.settingsBridge }),
+      ...(this.assistantBridge
+        ? createAssistantTools({ bridge: this.assistantBridge })
+        : []),
+    ];
   }
 }

@@ -23,6 +23,7 @@ import type { McpRuntimeMode } from './runtime-mode';
 import { resolveTelegramAdapterMode } from './telegram-adapter-mode';
 import { getGoogleAuthorizationBridge } from '@/connections/google/native-bridge';
 import { createGoogleFileSink } from '@/connections/google/file-sink';
+import { getAndroidAssistantBridge } from '@/connections/android/assistant-native-bridge';
 import { getAndroidSettingsBridge } from '@/connections/android/settings-native-bridge';
 import { getAndroidIntentBridge } from '@/connections/android/intent-native-bridge';
 
@@ -76,6 +77,9 @@ export function createConnectorRegistry(
 
   const telegramAdapterMode = resolveTelegramAdapterMode(mode);
   const androidSettingsBridge = getAndroidSettingsBridge();
+  // Independent of the settings bridge: a build can carry one native module
+  // and not the other, so the assistant tools are gated on their own.
+  const androidAssistantBridge = getAndroidAssistantBridge();
   const androidIntentBridge = getAndroidIntentBridge();
 
   const connectors = [
@@ -84,6 +88,9 @@ export function createConnectorRegistry(
           new AndroidConnector({
             store: connectionStore,
             settingsBridge: androidSettingsBridge,
+            ...(androidAssistantBridge
+              ? { assistantBridge: androidAssistantBridge }
+              : {}),
           }),
         ]
       : []),

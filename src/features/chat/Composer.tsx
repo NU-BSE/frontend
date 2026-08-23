@@ -26,6 +26,7 @@ export function Composer({
   busy,
   disabled,
   uploadFile,
+  onVoice,
 }: {
   /** Called with the final payload after any required upload has completed. */
   onSend: (input: ChatSendInput) => void;
@@ -38,6 +39,12 @@ export function Composer({
    * upload anything to a server.
    */
   uploadFile?: (attachment: ChatAttachment) => Promise<{ id: string }>;
+  /**
+   * Opens the spoken conversation. Omitted when this build has no speech
+   * recognition, in which case no mic is shown at all — an inert mic button
+   * is worse than none.
+   */
+  onVoice?: () => void;
 }) {
   const [value, setValue] = useState('');
   const [drafts, setDrafts] = useState<DraftAttachment[]>([]);
@@ -194,6 +201,23 @@ export function Composer({
       ) : null}
 
       <View style={styles.row}>
+        {onVoice ? (
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel="Speak to Creepy"
+            onPress={onVoice}
+            disabled={disabled || sending}
+            style={({ pressed }) => [
+              styles.attach,
+              (disabled || sending) && styles.actionDisabled,
+              pressed && styles.pressed,
+            ]}
+          >
+            <Text variant="headline" tone="brand">
+              ◉
+            </Text>
+          </Pressable>
+        ) : null}
         <Pressable
           accessibilityRole="button"
           accessibilityLabel="Attach files"

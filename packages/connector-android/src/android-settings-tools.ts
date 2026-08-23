@@ -24,6 +24,7 @@ const OPEN_SCREENS = [
   'sound',
   'notifications',
   'accessibility',
+  'assistant',
   'usageAccess',
   'notificationListener',
   'security',

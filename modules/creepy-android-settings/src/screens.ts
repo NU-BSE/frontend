@@ -16,6 +16,7 @@ export const SETTINGS_SCREENS: readonly SettingsScreen[] = [
   'sound',
   'notifications',
   'accessibility',
+  'assistant',
   'usageAccess',
   'notificationListener',
   'overlay',

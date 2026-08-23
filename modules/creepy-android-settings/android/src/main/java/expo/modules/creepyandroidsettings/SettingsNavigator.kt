@@ -53,6 +53,7 @@ class SettingsNavigator(private val context: Context) {
             "sound",
             "notifications",
             "accessibility",
+            "assistant",
             "usageAccess",
             "notificationListener",
             "overlay",
@@ -289,6 +290,15 @@ class SettingsNavigator(private val context: Context) {
         // Top-level notification settings. Per-app notifications use APP_TARGETS.
         "notifications" -> ACTION_NOTIFICATION_SETTINGS
         "accessibility" -> Settings.ACTION_ACCESSIBILITY_SETTINGS
+        /*
+         * The screen holding "Default digital assistant app", plus the two
+         * toggles that decide whether an assist session receives screen text
+         * and a screenshot at all. Named "assistant" rather than after the
+         * action because that is what a caller asks for; without it the
+         * nearest match was "apps", which opens the all-apps list and looks
+         * like the request simply went to the wrong place.
+         */
+        "assistant" -> Settings.ACTION_VOICE_INPUT_SETTINGS
         "usageAccess" -> Settings.ACTION_USAGE_ACCESS_SETTINGS
         "notificationListener" -> Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS
         "overlay" -> Settings.ACTION_MANAGE_OVERLAY_PERMISSION

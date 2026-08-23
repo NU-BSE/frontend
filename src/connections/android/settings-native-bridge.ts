@@ -9,9 +9,11 @@ import type {
   SettingsScreen,
 } from '@mobile-agent/connector-android';
 
+const DEV_LOG = typeof __DEV__ === 'boolean' && __DEV__;
+
 /**
  * Raw surface of the `CreepyAndroidSettings` Expo native module (Kotlin).
- * Reached through requireNativeModule so this adapter remains import-safe in
+ * Reached through requireOptionalNativeModule so this adapter remains import-safe in
  * Node verification bundles.
  */
 type NativeAndroidSettingsModule = {
@@ -65,14 +67,22 @@ export function getAndroidSettingsBridge(): AndroidSettingsBridge | null {
     if (Platform.OS !== 'android') return null;
 
     // eslint-disable-next-line @typescript-eslint/no-require-imports
-    const { requireNativeModule } = require('expo-modules-core') as {
-      requireNativeModule: <T>(name: string) => T | null;
+    const { requireOptionalNativeModule } = require('expo-modules-core') as {
+      requireOptionalNativeModule: <T>(name: string) => T | null;
     };
 
-    const native = requireNativeModule<NativeAndroidSettingsModule>(
+    const native = requireOptionalNativeModule<NativeAndroidSettingsModule>(
       'CreepyAndroidSettings',
     );
-    if (!native) return null;
+    if (!native) {
+      if (DEV_LOG) {
+        console.warn(
+          '[android-settings] CreepyAndroidSettings native module is not linked; ' +
+            'Android Settings tools will not be registered.',
+        );
+      }
+      return null;
+    }
 
     return {
       getCapabilities: (): AndroidSettingsCapabilities => {
@@ -147,7 +157,14 @@ export function getAndroidSettingsBridge(): AndroidSettingsBridge | null {
         native.findApps(query, limit ?? 20),
       getAppInfo: (packageName: string) => native.getAppInfo(packageName),
     };
-  } catch {
+  } catch (error) {
+    if (DEV_LOG) {
+      console.warn(
+        '[android-settings] Failed to initialize the native Settings bridge; ' +
+          'Android Settings tools will not be registered.',
+        error,
+      );
+    }
     return null;
   }
 }

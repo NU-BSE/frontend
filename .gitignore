@@ -25,6 +25,26 @@ ios/
 !modules/*/android/
 !modules/*/ios/
 !src/connections/android/
+
+# The root Android project is committed so the native build is reproducible
+# from the repository alone, rather than only from running the config plugins.
+#
+# Consequence worth knowing before changing this: EAS runs `expo prebuild` only
+# when android/ is absent. With it committed the build is bare — the plugins in
+# plugins/ no longer run on the builder, and this directory becomes the source
+# of truth. Anything added by a plugin must be re-generated and committed, or
+# it ships in neither place.
+!/android/
+
+# …but not its build output, caches, or machine-specific paths. local.properties
+# holds the SDK location of whoever last built, which is wrong for everyone else.
+/android/.gradle/
+/android/build/
+/android/app/build/
+/android/app/.cxx/
+/android/local.properties
+/android/.idea/
+/android/.kotlin/
 *.log
 .env
 .DS_Store

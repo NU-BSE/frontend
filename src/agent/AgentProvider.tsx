@@ -2,7 +2,7 @@ import React, { createContext, useContext, useMemo } from 'react';
 
 import { useAi } from '@/ai/AiProvider';
 import type { LlmCapabilities } from '@/ai/types';
-import { baseUrl, getToken } from '@/api/client';
+import { baseUrl, getToken, refreshAccessTokenOnce } from '@/api/client';
 import { createDeterministicPlanner } from './models/deterministicPlanner';
 import { createStructuredPlanner } from './models/structuredPlanner';
 import { createRemoteAgentModel } from './models/remoteAgentModel';
@@ -48,6 +48,7 @@ export function AgentProvider({ children }: { children: React.ReactNode }) {
       const model = createRemoteAgentModel({
         baseUrl: baseUrl(),
         getAccessToken: () => getToken(),
+        refreshAccessToken: () => refreshAccessTokenOnce(),
       });
 
       return {

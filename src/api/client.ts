@@ -43,10 +43,16 @@ async function writeAccessToken(token: string): Promise<void> {
  *
  * Single-flight, because a screen that fires three requests at once would
  * otherwise start three refreshes and race to store the results.
+ *
+ * Exported so callers that do not go through `request` can share the same
+ * flight rather than opening their own. The agent posts to /agent/step with a
+ * bare `fetch`, and having it refresh independently would mean two refreshes
+ * racing on every expiry — and would break outright if the server ever starts
+ * rotating refresh tokens.
  */
 let refreshInFlight: Promise<string | null> | null = null;
 
-async function refreshAccessTokenOnce(): Promise<string | null> {
+export async function refreshAccessTokenOnce(): Promise<string | null> {
   if (!refreshInFlight) {
     refreshInFlight = (async () => {
       try {

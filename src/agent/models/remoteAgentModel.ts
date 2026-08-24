@@ -139,6 +139,16 @@ function serializeMessages(messages: AgentMessage[]): unknown[] {
 interface RemoteAgentModelOptions {
   baseUrl: string;
   getAccessToken?: () => Promise<string | null>;
+  /**
+   * Exchanges the refresh token for a fresh access token, or resolves null
+   * when the session is genuinely over.
+   *
+   * Supplied rather than imported so this module keeps no dependency on the
+   * api client, and so the caller can hand in the *same* single-flight
+   * refresh the rest of the app uses. Two independent refreshes racing on
+   * every expiry is the failure this avoids.
+   */
+  refreshAccessToken?: () => Promise<string | null>;
 }
 
 export function createRemoteAgentModel(
@@ -168,13 +178,6 @@ export function createRemoteAgentModel(
 
       const token = await options.getAccessToken?.();
 
-      const headers: Record<string, string> = {
-        'Content-Type': 'application/json',
-      };
-      if (token) {
-        headers['Authorization'] = `Bearer ${token}`;
-      }
-
       const controller = new AbortController();
       let timedOut = false;
 
@@ -193,24 +196,51 @@ export function createRemoteAgentModel(
         { once: true },
       );
 
+      const body = JSON.stringify({
+        requestId,
+        runId: input.runId,
+        routing: input.routing,
+        messages: serializeMessages(input.messages),
+        tools: input.tools,
+        connections: input.connections,
+      });
+
+      const post = (bearer: string | null | undefined): Promise<Response> => {
+        const headers: Record<string, string> = {
+          'Content-Type': 'application/json',
+        };
+        if (bearer) headers['Authorization'] = `Bearer ${bearer}`;
+        return fetch(endpoint, {
+          method: 'POST',
+          headers,
+          body,
+          signal: controller.signal,
+        });
+      };
+
       try {
         if (DEV_LOG) console.log('[chat] POST /agent/step started');
-        const response = await fetch(
-          endpoint,
-          {
-            method: 'POST',
-            headers,
-            body: JSON.stringify({
-              requestId,
-              runId: input.runId,
-              routing: input.routing,
-              messages: serializeMessages(input.messages),
-              tools: input.tools,
-              connections: input.connections,
-            }),
-            signal: controller.signal,
-          },
-        );
+        let response = await post(token);
+
+        /*
+         * The access token lives about fifteen minutes, so a conversation left
+         * open past that expires mid-use. Without this the run failed with the
+         * server's "Token is invalid or expired" while a perfectly good refresh
+         * token sat in storage — the same defect the api client already fixed
+         * for its own requests, reproduced here because this transport does not
+         * go through it.
+         *
+         * One retry, and only when the refresh actually produced a token: a 401
+         * from a request that carried no token, or after a refresh that failed,
+         * is a real sign-out and must surface.
+         */
+        if (response.status === 401 && token && options.refreshAccessToken) {
+          const refreshed = await options.refreshAccessToken();
+          if (refreshed) {
+            if (DEV_LOG) console.log('[chat] refreshed token, retrying');
+            response = await post(refreshed);
+          }
+        }
 
         if (DEV_LOG) {
           console.log(`[chat] POST /agent/step status=${response.status}`);

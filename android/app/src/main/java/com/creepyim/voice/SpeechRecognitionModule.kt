@@ -55,11 +55,13 @@ class SpeechRecognitionModule(
      */
     @ReactMethod
     fun isOnDeviceRecognitionAvailable(promise: Promise) {
-        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.S) {
-            promise.resolve(false)
-            return
-        }
-        promise.resolve(SpeechRecognizer.isOnDeviceRecognitionAvailable(reactContext))
+        promise.resolve(onDeviceAvailable())
+    }
+
+    private fun onDeviceAvailable(): Boolean {
+        // No on-device recogniser API before 31.
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.S) return false
+        return SpeechRecognizer.isOnDeviceRecognitionAvailable(reactContext)
     }
 
     @ReactMethod
@@ -99,9 +101,9 @@ class SpeechRecognitionModule(
     /**
      * Begin listening for one utterance.
      *
-     * `preferOffline` is a request, not a guarantee: the platform falls back to
-     * network recognition when it has no local model for the language, and
-     * gives no signal that it did.
+     * `preferOffline` is honoured only when the device actually has on-device
+     * recognition; otherwise it is dropped and the request goes to the network.
+     * Passing it blindly is not safe — see the note at the call site.
      */
     @ReactMethod
     fun startListening(language: String?, preferOffline: Boolean, promise: Promise) {
@@ -139,7 +141,17 @@ class SpeechRecognitionModule(
                     putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, true)
                     putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, MAX_RESULTS)
                     language?.let { putExtra(RecognizerIntent.EXTRA_LANGUAGE, it) }
-                    if (preferOffline && Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+                    /*
+                     * Only ask for offline recognition when the device has it.
+                     *
+                     * EXTRA_PREFER_OFFLINE is documented as a preference, but on
+                     * some vendor stacks — Xiaomi's among them — asking for it
+                     * without a downloaded model is a hard failure rather than a
+                     * fallback: the recogniser answers ERROR_LANGUAGE_UNAVAILABLE
+                     * and never listens. Checking first turns that into the
+                     * network recognition the caller would have got anyway.
+                     */
+                    if (preferOffline && onDeviceAvailable()) {
                         putExtra(RecognizerIntent.EXTRA_PREFER_OFFLINE, true)
                     }
                 }
@@ -263,6 +275,12 @@ class SpeechRecognitionModule(
      * which a caller should handle as "try again", not as a broken recogniser.
      */
     private fun errorCode(error: Int): String = when (error) {
+        SpeechRecognizer.ERROR_TOO_MANY_REQUESTS -> "TOO_MANY_REQUESTS"
+        SpeechRecognizer.ERROR_SERVER_DISCONNECTED -> "SERVER_DISCONNECTED"
+        SpeechRecognizer.ERROR_LANGUAGE_NOT_SUPPORTED -> "LANGUAGE_NOT_SUPPORTED"
+        SpeechRecognizer.ERROR_LANGUAGE_UNAVAILABLE -> "LANGUAGE_UNAVAILABLE"
+        SpeechRecognizer.ERROR_CANNOT_CHECK_SUPPORT -> "CANNOT_CHECK_SUPPORT"
+        SpeechRecognizer.ERROR_CANNOT_LISTEN_TO_DOWNLOAD_EVENTS -> "CANNOT_LISTEN_TO_DOWNLOADS"
         SpeechRecognizer.ERROR_AUDIO -> "AUDIO"
         SpeechRecognizer.ERROR_CLIENT -> "CLIENT"
         SpeechRecognizer.ERROR_INSUFFICIENT_PERMISSIONS -> "PERMISSION"
@@ -276,6 +294,18 @@ class SpeechRecognitionModule(
     }
 
     private fun errorMessage(error: Int): String = when (error) {
+        SpeechRecognizer.ERROR_TOO_MANY_REQUESTS ->
+            "The recogniser is rate limited. Try again in a moment."
+        SpeechRecognizer.ERROR_SERVER_DISCONNECTED ->
+            "The recognition service disconnected."
+        SpeechRecognizer.ERROR_LANGUAGE_NOT_SUPPORTED ->
+            "This language is not supported by the recogniser."
+        SpeechRecognizer.ERROR_LANGUAGE_UNAVAILABLE ->
+            "The language pack is not downloaded on this device."
+        SpeechRecognizer.ERROR_CANNOT_CHECK_SUPPORT ->
+            "The recogniser could not report which languages it supports."
+        SpeechRecognizer.ERROR_CANNOT_LISTEN_TO_DOWNLOAD_EVENTS ->
+            "The recogniser could not report its download progress."
         SpeechRecognizer.ERROR_AUDIO -> "The microphone could not be read."
         SpeechRecognizer.ERROR_CLIENT -> "The recogniser rejected the request."
         SpeechRecognizer.ERROR_INSUFFICIENT_PERMISSIONS -> "Microphone permission is missing."
@@ -285,7 +315,7 @@ class SpeechRecognitionModule(
         SpeechRecognizer.ERROR_RECOGNIZER_BUSY -> "The recogniser is busy."
         SpeechRecognizer.ERROR_SERVER -> "The recognition server returned an error."
         SpeechRecognizer.ERROR_SPEECH_TIMEOUT -> "No speech was heard."
-        else -> "Recognition failed."
+        else -> "Recognition failed (code $error)."
     }
 
     companion object {

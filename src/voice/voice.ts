@@ -27,6 +27,12 @@ export type VoiceErrorCode =
   | 'BUSY'
   | 'SERVER'
   | 'SPEECH_TIMEOUT'
+  | 'TOO_MANY_REQUESTS'
+  | 'SERVER_DISCONNECTED'
+  | 'LANGUAGE_NOT_SUPPORTED'
+  | 'LANGUAGE_UNAVAILABLE'
+  | 'CANNOT_CHECK_SUPPORT'
+  | 'CANNOT_LISTEN_TO_DOWNLOADS'
   | 'UNKNOWN';
 
 export interface VoiceError {
@@ -90,8 +96,10 @@ export interface ListenOptions {
   /**
    * Ask for on-device recognition.
    *
-   * A request, not a guarantee — the platform silently falls back to network
-   * recognition when it has no local model for the language.
+   * Applied only when the device actually has an on-device recogniser. On some
+   * vendor stacks requesting it without a downloaded model fails the whole
+   * utterance instead of falling back, so the native side drops the request
+   * rather than passing it through.
    */
   preferOffline?: boolean;
 }

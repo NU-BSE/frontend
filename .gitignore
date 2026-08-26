@@ -45,6 +45,10 @@ ios/
 /android/local.properties
 /android/.idea/
 /android/.kotlin/
+# Copied out of node_modules by a gradle task on every build — llama.rn's
+# Hexagon NPU kernels, 2.7M of prebuilt .so. Verified regenerated: deleting the
+# directory and building recreates it, and the APK still carries all four.
+/android/app/src/main/assets/
 *.log
 .env
 .DS_Store

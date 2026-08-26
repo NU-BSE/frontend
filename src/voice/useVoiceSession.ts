@@ -183,6 +183,13 @@ export function useVoiceSession(): VoiceSession {
         return;
       }
       try {
+        /*
+         * Offline is preferred but never demanded: the native side drops the
+         * request on a device without an on-device recogniser, because asking
+         * for it there fails the utterance rather than falling back. Sending
+         * it unconditionally is what produced "Recognition failed" on a Xiaomi
+         * that transcribes over the network perfectly well.
+         */
         await startListening({ preferOffline: true });
         setPhase('listening');
       } catch (failure) {

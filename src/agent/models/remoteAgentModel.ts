@@ -255,7 +255,18 @@ export function createRemoteAgentModel(
 
           switch (response.status) {
             case 401:
-              throw new AgentError('AUTH_REQUIRED', detail);
+              /*
+               * Reaching here means the refresh above did not help, so the
+               * session is genuinely over. The server's own wording — "Token
+               * is invalid or expired" — describes a JWT, not anything the
+               * user did or can act on, so it is replaced. `detail` is still
+               * attached as the cause for logs.
+               */
+              throw new AgentError(
+                'AUTH_REQUIRED',
+                'Your session has ended. Sign in again to keep chatting.',
+                new Error(detail),
+              );
             case 429:
               throw new AgentError('RATE_LIMITED', detail);
             case 422:

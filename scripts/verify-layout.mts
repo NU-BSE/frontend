@@ -414,4 +414,123 @@ assert(
   `beside-the-text is shorter than stacked (${beside.toFixed(0)}pt vs ${stacked}pt) — three of these fit without scrolling`,
 );
 
+/*
+ * The chat composer.
+ *
+ * The claims are positional, so they are measured rather than read off the
+ * styles: the clip must sit on the FIRST line of the field and at its right
+ * edge, and the two controls flanking it must be circles, not the rounded
+ * rectangles they replaced.
+ */
+console.log('\ncomposer:');
+
+const TOUCH = 48;
+const BODY_LINE_HEIGHT = 20;
+const FIRST_LINE_PADDING = (TOUCH - BODY_LINE_HEIGHT) / 2;
+const CLIP_WIDTH = 36;
+const ROW_GAP_C = 8;
+
+function layoutComposer(windowWidth: number, lines: number) {
+  const root = Yoga.Node.create();
+  root.setWidth(windowWidth);
+  root.setPadding(Edge.Horizontal, 16);
+
+  const row = Yoga.Node.create();
+  row.setFlexDirection(FlexDirection.Row);
+  row.setAlignItems(Align.FlexEnd);
+  row.setGap(Gutter.All, ROW_GAP_C);
+  root.insertChild(row, 0);
+
+  const mic = Yoga.Node.create();
+  mic.setWidth(TOUCH);
+  mic.setHeight(TOUCH);
+  row.insertChild(mic, 0);
+
+  const field = Yoga.Node.create();
+  field.setFlexGrow(1);
+  field.setFlexShrink(1);
+  field.setFlexBasis(0);
+  field.setMinWidth(0);
+  field.setFlexDirection(FlexDirection.Row);
+  // Pinned to the top: this is what keeps the clip on the first line.
+  field.setAlignItems(Align.FlexStart);
+  field.setMinHeight(TOUCH);
+  field.setPadding(Edge.Left, 12);
+  row.insertChild(field, 1);
+
+  const input = Yoga.Node.create();
+  input.setFlexGrow(1);
+  input.setFlexShrink(1);
+  input.setFlexBasis(0);
+  input.setMinWidth(0);
+  input.setPadding(Edge.Vertical, FIRST_LINE_PADDING);
+  input.setHeight(FIRST_LINE_PADDING * 2 + BODY_LINE_HEIGHT * lines);
+  field.insertChild(input, 0);
+
+  const clip = Yoga.Node.create();
+  clip.setWidth(CLIP_WIDTH);
+  clip.setHeight(TOUCH);
+  field.insertChild(clip, 1);
+
+  const send = Yoga.Node.create();
+  send.setWidth(TOUCH);
+  send.setHeight(TOUCH);
+  row.insertChild(send, 2);
+
+  root.calculateLayout(windowWidth, undefined, Direction.LTR);
+  const frameOf = (node: ReturnType<typeof Yoga.Node.create>): Frame => {
+    const c = node.getComputedLayout();
+    return { left: c.left, top: c.top, width: c.width, height: c.height };
+  };
+  return {
+    row: frameOf(row),
+    mic: frameOf(mic),
+    field: frameOf(field),
+    input: frameOf(input),
+    clip: frameOf(clip),
+    send: frameOf(send),
+  };
+}
+
+for (const windowWidth of [360, 390, 412]) {
+  const one = layoutComposer(windowWidth, 1);
+
+  assert(
+    one.field.height === TOUCH,
+    `${windowWidth}pt: a single-line field is exactly one touch target tall (${one.field.height})`,
+  );
+  // The clip's centre and the first line's centre must coincide, or the glyph
+  // sits visibly above or below the text it belongs to.
+  const firstLineCentre = one.input.top + FIRST_LINE_PADDING + BODY_LINE_HEIGHT / 2;
+  const clipCentre = one.clip.top + one.clip.height / 2;
+  assert(
+    Math.abs(firstLineCentre - clipCentre) < 0.01,
+    `${windowWidth}pt: the clip is centred on the first line (${clipCentre} vs ${firstLineCentre})`,
+  );
+  assert(
+    one.clip.left >= one.input.left + one.input.width - 0.01,
+    `${windowWidth}pt: the clip sits to the right of the text`,
+  );
+  assert(
+    one.mic.left < one.field.left && one.send.left > one.field.left + one.field.width - 0.01,
+    `${windowWidth}pt: the field sits between the two controls`,
+  );
+  assert(
+    one.mic.width === one.mic.height && one.send.width === one.send.height,
+    `${windowWidth}pt: both controls are square, so a half-width radius makes them circles`,
+  );
+
+  // The clip must not drift down as the field grows.
+  const four = layoutComposer(windowWidth, 4);
+  const grownClipCentre = four.clip.top + four.clip.height / 2;
+  assert(
+    Math.abs(grownClipCentre - clipCentre) < 0.01,
+    `${windowWidth}pt: the clip stays on the first line when the field grows`,
+  );
+  assert(
+    four.field.height > one.field.height,
+    `${windowWidth}pt: the field does grow with the text`,
+  );
+}
+
 console.log('\nlayout verified.');

@@ -130,7 +130,7 @@
     "verify:prediction": "esbuild scripts/verify-prediction.mts --bundle --platform=node --format=cjs --external:react-native --outfile=node_modules/.cache/verify-prediction.cjs --log-level=error && node node_modules/.cache/verify-prediction.cjs",
     "verify:ignored": "esbuild scripts/verify-ignored-sources.mts --bundle --platform=node --format=cjs --outfile=node_modules/.cache/verify-ignored.cjs --log-level=error && node node_modules/.cache/verify-ignored.cjs",
     "verify:markdown": "esbuild scripts/verify-inline-markdown.mts --bundle --platform=node --format=cjs --outfile=node_modules/.cache/verify-markdown.cjs --log-level=error && node node_modules/.cache/verify-markdown.cjs",
-    "verify:formats": "esbuild scripts/verify-format-adapters.mts --bundle --platform=node --format=cjs --outfile=node_modules/.cache/verify-formats.cjs --log-level=error && node node_modules/.cache/verify-formats.cjs"
+    "verify:formats": "esbuild scripts/verify-format-adapters.mts --bundle --platform=node --format=cjs --external:react-native --external:expo-file-system --outfile=node_modules/.cache/verify-formats.cjs --log-level=error && node node_modules/.cache/verify-formats.cjs"
   },
   "private": true
 }

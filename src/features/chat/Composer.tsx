@@ -25,7 +25,6 @@ export function Composer({
   onStop,
   busy,
   disabled,
-  uploadFile,
   onVoice,
 }: {
   /** Called with the final payload after any required upload has completed. */
@@ -33,12 +32,6 @@ export function Composer({
   onStop: () => void;
   busy: boolean;
   disabled?: boolean;
-  /**
-   * Uploads a local attachment and returns the backend file id. Provided only
-   * in remote mode — local/text-only modes leave it undefined and never
-   * upload anything to a server.
-   */
-  uploadFile?: (attachment: ChatAttachment) => Promise<{ id: string }>;
   /**
    * Opens the spoken conversation. Omitted when this build has no speech
    * recognition, in which case no mic is shown at all — an inert mic button
@@ -49,11 +42,10 @@ export function Composer({
   const [value, setValue] = useState('');
   const [drafts, setDrafts] = useState<DraftAttachment[]>([]);
   const [notice, setNotice] = useState<string | null>(null);
-  const [sending, setSending] = useState(false);
 
   const trimmed = value.trim();
   const canSend =
-    (trimmed.length > 0 || drafts.length > 0) && !busy && !disabled && !sending;
+    (trimmed.length > 0 || drafts.length > 0) && !busy && !disabled;
 
   const pick = useCallback(async () => {
     setNotice(null);
@@ -86,93 +78,21 @@ export function Composer({
     setDrafts((current) => current.filter((d) => d.attachment.id !== id));
   }, []);
 
-  const uploadDraft = useCallback(
-    async (draft: DraftAttachment): Promise<DraftAttachment> => {
-      if (!uploadFile || draft.attachment.remoteId) return draft;
-      setDrafts((current) =>
-        current.map((d) =>
-          d.attachment.id === draft.attachment.id
-            ? { ...d, status: 'uploading' }
-            : d,
-        ),
-      );
-      // Privacy: dev logs carry name + size only — never file content, base64
-      // or an authorization token.
-      if (typeof __DEV__ === 'boolean' && __DEV__) {
-        console.log(
-          `[attachments] uploading name=${draft.attachment.name} size=${draft.attachment.size}`,
-        );
-      }
-      try {
-        const uploaded = await uploadFile(draft.attachment);
-        if (typeof __DEV__ === 'boolean' && __DEV__) {
-          console.log(`[attachments] uploaded id=${uploaded.id}`);
-        }
-        return {
-          attachment: { ...draft.attachment, remoteId: uploaded.id },
-          status: 'uploaded',
-        };
-      } catch {
-        return { ...draft, status: 'failed' };
-      }
-    },
-    [uploadFile],
-  );
-
-  const retry = useCallback(
-    async (id: string) => {
-      if (!uploadFile) return;
-      const target = drafts.find((d) => d.attachment.id === id);
-      if (!target) return;
-      const next = await uploadDraft({ ...target, status: 'ready' });
-      setDrafts((current) =>
-        current.map((d) => (d.attachment.id === id ? next : d)),
-      );
-    },
-    [drafts, uploadDraft, uploadFile],
-  );
-
-  const send = useCallback(async () => {
+  /**
+   * Hands the typed text and the local attachments to the chat layer.
+   *
+   * Nothing is uploaded. The chat layer reads each file on the device and
+   * folds its text into the message, so there is no upload to await, fail or
+   * retry here — which is why this is synchronous where it used to have an
+   * upload phase, a failure notice and a per-file Retry.
+   */
+  const send = useCallback(() => {
     if (!canSend) return;
     setNotice(null);
-
-    if (drafts.length === 0) {
-      onSend({ text: trimmed, attachments: [] });
-      setValue('');
-      return;
-    }
-
-    if (!uploadFile) {
-      // Local/text-only runtime: hand over the local attachments unchanged.
-      // The agent layer decides whether the model can actually read them and
-      // surfaces a clear error when it cannot — it never silently drops them.
-      onSend({
-        text: trimmed,
-        attachments: drafts.map((d) => d.attachment),
-      });
-      setValue('');
-      setDrafts([]);
-      return;
-    }
-
-    setSending(true);
-    const uploaded: DraftAttachment[] = [];
-    for (const draft of drafts) {
-      uploaded.push(await uploadDraft(draft));
-    }
-    setDrafts(uploaded);
-    setSending(false);
-
-    const failed = uploaded.some((d) => d.status === 'failed');
-    if (failed) {
-      setNotice('Some files could not be uploaded. Retry or remove them.');
-      return;
-    }
-
-    onSend({ text: trimmed, attachments: uploaded.map((d) => d.attachment) });
+    onSend({ text: trimmed, attachments: drafts.map((d) => d.attachment) });
     setValue('');
     setDrafts([]);
-  }, [canSend, drafts, onSend, trimmed, uploadDraft, uploadFile]);
+  }, [canSend, drafts, onSend, trimmed]);
 
   return (
     <View style={styles.root}>
@@ -184,11 +104,6 @@ export function Composer({
               attachment={draft.attachment}
               status={draft.status}
               onRemove={() => remove(draft.attachment.id)}
-              onRetry={
-                uploadFile && draft.status === 'failed'
-                  ? () => void retry(draft.attachment.id)
-                  : undefined
-              }
             />
           ))}
         </View>
@@ -206,10 +121,10 @@ export function Composer({
             accessibilityRole="button"
             accessibilityLabel="Speak to Creepy"
             onPress={onVoice}
-            disabled={disabled || sending}
+            disabled={disabled}
             style={({ pressed }) => [
               styles.attach,
-              (disabled || sending) && styles.actionDisabled,
+              disabled && styles.actionDisabled,
               pressed && styles.pressed,
             ]}
           >
@@ -222,10 +137,10 @@ export function Composer({
           accessibilityRole="button"
           accessibilityLabel="Attach files"
           onPress={() => void pick()}
-          disabled={disabled || sending}
+          disabled={disabled}
           style={({ pressed }) => [
             styles.attach,
-            (disabled || sending) && styles.actionDisabled,
+            disabled && styles.actionDisabled,
             pressed && styles.pressed,
           ]}
         >

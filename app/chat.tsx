@@ -15,10 +15,13 @@ import { Screen } from '@/components/Screen';
 import { Text } from '@/components/Text';
 import { useAi } from '@/ai/AiProvider';
 import { useAgentChatSession } from '@/agent/AgentChatProvider';
-import type { AgentMessage, ChatAttachment, ChatSendInput } from '@/agent/types';
-import { uploadFile } from '@/api/files';
+import type { AgentMessage, ChatSendInput } from '@/agent/types';
 import { AgentMessageItem } from '@/features/chat/AgentMessageItem';
 import { Composer } from '@/features/chat/Composer';
+import {
+  composeMessageWithAttachments,
+  extractAttachmentText,
+} from '@/files/attachmentText';
 import { isSupported as voiceIsSupported } from '@/voice/voice';
 
 /*
@@ -113,10 +116,35 @@ export default function Chat() {
     listRef.current?.scrollToEnd({ animated: true });
   }, []);
 
+  /**
+   * Sends a turn, reading any attached files on the device first.
+   *
+   * The file's text is folded into the message rather than uploaded, so an
+   * attachment costs no network and works against a local model. The
+   * attachments stay on the input message too, so the bubble still shows what
+   * was attached — only their bytes are absent from what the model receives.
+   */
   const handleSend = useCallback(
     (input: ChatSendInput) => {
-      sendMessage(input);
-      requestAnimationFrame(scrollToEnd);
+      if (input.attachments.length === 0) {
+        sendMessage(input);
+        requestAnimationFrame(scrollToEnd);
+        return;
+      }
+
+      void (async () => {
+        const files = await Promise.all(
+          input.attachments.map(async (attachment) => ({
+            name: attachment.name,
+            outcome: await extractAttachmentText(attachment),
+          })),
+        );
+        sendMessage({
+          ...input,
+          text: composeMessageWithAttachments(input.text, files),
+        });
+        requestAnimationFrame(scrollToEnd);
+      })();
     },
     [scrollToEnd, sendMessage],
   );
@@ -129,26 +157,6 @@ export default function Chat() {
     [handleSend],
   );
 
-  // Attachments are uploaded to the backend only when inference is remote;
-  // local/text-only models never send file bytes off the device.
-  const uploadFileForChat = useMemo(
-    () =>
-      origin === 'remote'
-        ? (attachment: ChatAttachment): Promise<{ id: string }> => {
-            if (!attachment.uri) {
-              return Promise.reject(
-                new Error('This attachment has no local file to upload.'),
-              );
-            }
-            return uploadFile({
-              uri: attachment.uri,
-              name: attachment.name,
-              mimeType: attachment.mimeType,
-            });
-          }
-        : undefined,
-    [origin],
-  );
 
   /*
    * A guide tapped in the Settings feed arrives as `?prompt=`. It is sent once,
@@ -328,7 +336,6 @@ export default function Chat() {
             onStop={cancel}
             busy={isRunning}
             disabled={engineStatus === 'preparing' || awaitingApproval}
-            uploadFile={uploadFileForChat}
             {...(VOICE_SUPPORTED ? { onVoice: () => router.push('/voice') } : {})}
           />
         </View>

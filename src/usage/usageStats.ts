@@ -1,4 +1,4 @@
-import { NativeModules, Platform } from 'react-native';
+import { getNativeModule } from '@/native/lazyNativeModule';
 
 import type { UsageEvent } from '@/prediction/schedule';
 
@@ -21,10 +21,10 @@ type NativeUsage = {
   queryEvents(sinceMs: number, untilMs: number): Promise<UsageEvent[]>;
 };
 
-const native = (NativeModules.UsageStats as NativeUsage | undefined) ?? null;
+const native = getNativeModule<NativeUsage>('UsageStats');
 
 export function isSupported(): boolean {
-  return Platform.OS === 'android' && native != null;
+  return native != null;
 }
 
 export async function hasPermission(): Promise<boolean> {

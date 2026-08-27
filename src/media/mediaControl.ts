@@ -1,4 +1,4 @@
-import { NativeModules, Platform } from 'react-native';
+import { getNativeModule } from '@/native/lazyNativeModule';
 
 /**
  * Media transport and volume.
@@ -33,10 +33,10 @@ type NativeMedia = {
   setVolume(fraction: number): Promise<boolean>;
 };
 
-const native = (NativeModules.MediaControl as NativeMedia | undefined) ?? null;
+const native = getNativeModule<NativeMedia>('MediaControl');
 
 export function isSupported(): boolean {
-  return Platform.OS === 'android' && native != null;
+  return native != null;
 }
 
 /** What is playing, or null when nothing is. */

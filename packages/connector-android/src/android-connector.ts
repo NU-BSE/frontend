@@ -10,6 +10,8 @@ import { createAndroidSettingsTools } from './android-settings-tools';
 import { mapAndroidSettingsError } from './android-settings-errors';
 import type { AndroidAssistantBridge } from './assistant-bridge';
 import { createAssistantTools } from './assistant-tools';
+import type { DeviceSignalBridge } from './device-signal-tools';
+import { createDeviceSignalTools } from './device-signal-tools';
 
 /** Stable connection id — a device connector never spawns per-connect ids. */
 export const ANDROID_CONNECTION_ID = 'android-device';
@@ -23,6 +25,12 @@ export interface AndroidConnectorOptions extends StoreBackedConnectorOptions {
    * cannot attempt a capability this build does not have.
    */
   assistantBridge?: AndroidAssistantBridge;
+  /**
+   * Optional: usage history, the notification shade and media control.
+   * Absent in a build without those native modules, in which case the tools
+   * are not registered and the model cannot attempt them.
+   */
+  signalBridge?: DeviceSignalBridge;
 }
 
 const CAPABILITIES = [
@@ -54,10 +62,13 @@ export class AndroidConnector extends StoreBackedConnector {
 
   private readonly assistantBridge: AndroidAssistantBridge | null;
 
+  private readonly signalBridge: DeviceSignalBridge | null;
+
   constructor(options: AndroidConnectorOptions) {
     super(options);
     this.settingsBridge = options.settingsBridge;
     this.assistantBridge = options.assistantBridge ?? null;
+    this.signalBridge = options.signalBridge ?? null;
   }
 
   /**
@@ -109,6 +120,9 @@ export class AndroidConnector extends StoreBackedConnector {
       ...createAndroidSettingsTools({ bridge: this.settingsBridge }),
       ...(this.assistantBridge
         ? createAssistantTools({ bridge: this.assistantBridge })
+        : []),
+      ...(this.signalBridge
+        ? createDeviceSignalTools({ bridge: this.signalBridge })
         : []),
     ];
   }

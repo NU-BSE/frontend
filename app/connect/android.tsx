@@ -15,6 +15,7 @@ import {
   requestOverlayPermission,
   requestWriteSystemSettingsPermission,
 } from '@/connections/android/device-access';
+import { useDeviceSignalAccess } from '@/connections/android/useDeviceSignalAccess';
 import {
   MIN_TOUCH_TARGET,
   gutter,
@@ -40,6 +41,7 @@ export default function AndroidConnectScreen() {
   const connect = useConnectConnector();
   const disconnect = useDisconnectConnection();
   const access = useAndroidDeviceAccess();
+  const signals = useDeviceSignalAccess();
 
   // When the app returns to the foreground, re-sync the connection record so
   // `scopes` reflect any permission the user just granted/revoked. `connect()`
@@ -114,6 +116,44 @@ export default function AndroidConnectScreen() {
                 onPress={() => void requestOverlayPermission()}
                 last
               />
+            </View>
+
+            <Text variant="headline">Device signals</Text>
+            {/*
+              Separate from the rows above because these are granted on their
+              own system screens rather than by a dialog, and neither reports
+              back — the state below re-reads when the app returns.
+            */}
+            <View style={styles.card}>
+              <AccessRow
+                title="App usage history"
+                description="Lets Creepy notice when you usually open things."
+                allowed={signals.usageGranted}
+                optional
+                onPress={signals.openUsageSettings}
+              />
+              <AccessRow
+                title="Read notifications"
+                description="Summarise and reply to messages without opening the app."
+                allowed={signals.notificationsGranted}
+                optional
+                onPress={signals.openNotificationSettings}
+                last={!signals.notificationsGranted}
+              />
+              {/*
+                Only shown once access exists: "granted but not yet bound" is a
+                real transient state, and surfacing it before the grant would
+                just be a second row saying no.
+              */}
+              {signals.notificationsGranted ? (
+                <AccessRow
+                  title="Listener running"
+                  description="Android binds the listener a moment after you allow it."
+                  allowed={signals.notificationsConnected}
+                  optional
+                  last
+                />
+              ) : null}
             </View>
 
             <Text variant="bodySmall" tone="muted">

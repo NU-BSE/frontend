@@ -26,3 +26,9 @@ export type {
   AssistantScreenNode,
   AssistantStatus,
 } from './assistant-bridge';
+
+export { createDeviceSignalTools } from './device-signal-tools';
+export type {
+  DeviceSignalBridge,
+  DeviceSignalToolsDeps,
+} from './device-signal-tools';

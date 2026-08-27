@@ -1,4 +1,4 @@
-import { NativeModules, Platform } from 'react-native';
+import { getNativeModule } from '@/native/lazyNativeModule';
 
 /**
  * The notification shade.
@@ -34,10 +34,10 @@ type NativeReader = {
   reply(key: string, message: string): Promise<boolean>;
 };
 
-const native = (NativeModules.NotificationReader as NativeReader | undefined) ?? null;
+const native = getNativeModule<NativeReader>('NotificationReader');
 
 export function isSupported(): boolean {
-  return Platform.OS === 'android' && native != null;
+  return native != null;
 }
 
 export async function hasPermission(): Promise<boolean> {

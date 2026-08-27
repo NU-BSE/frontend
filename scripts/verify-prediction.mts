@@ -172,6 +172,29 @@ console.log('\nnotifications are derived, never hardcoded:');
   // A prediction beyond the horizon is not worth interrupting for.
   const distant = dueCategories(bundle, events, now - HORIZON_SECONDS * 10);
   assert(distant.length === 0, 'a category far in the future is not due');
+
+  /*
+   * The unit contract with UsageStatsModule.
+   *
+   * The native side reports `at` in Unix SECONDS, converted from the
+   * platform's milliseconds. Getting that wrong does not throw: milliseconds
+   * read as seconds place every event fifty thousand years in the future, and
+   * the predictor answers confidently about gaps that never happened. The
+   * failure would be a silently useless notification, not an error, so the
+   * unit is asserted rather than assumed.
+   */
+  const asMilliseconds = events.map((event) => ({
+    packageName: event.packageName,
+    at: event.at * 1000,
+  }));
+  assert(
+    dueCategories(bundle, asMilliseconds, now).length === 0,
+    'millisecond timestamps produce nothing — the seconds contract is load-bearing',
+  );
+  assert(
+    events.every((event) => event.at < 4_000_000_000),
+    'the fixture itself is in seconds, matching what the native module emits',
+  );
 }
 
 console.log('\nprediction verified.');

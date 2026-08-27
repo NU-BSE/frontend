@@ -35,6 +35,7 @@
       "expo-secure-store",
       "./plugins/with-assistant",
       "./plugins/with-voice",
+      "./plugins/with-device-signals",
       "./plugins/with-smart-cards",
       "./plugins/with-attestation-native-probes",
       "./plugins/with-google-authorization",

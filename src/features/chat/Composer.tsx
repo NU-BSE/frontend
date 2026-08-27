@@ -3,12 +3,9 @@ import { Pressable, StyleSheet, TextInput, View } from 'react-native';
 
 import { Icon } from '@/components/Icon';
 import { Text } from '@/components/Text';
-/*
- * The three arrow-right exports are byte-identical; the colour in each name is
- * historical, since every one paints with `currentColor`.
- */
-import ArrowRight from '@assets/icons/arrow-right-gray.svg';
 import Paperclip from '@assets/icons/paperclip.svg';
+import Record from '@assets/icons/record.svg';
+import Send from '@assets/icons/send.svg';
 import type { AttachmentStatus, ChatAttachment, ChatSendInput } from '@/agent/types';
 import { MAX_ATTACHMENTS_PER_MESSAGE } from '@/files/attachmentPolicy';
 import { pickAttachments } from '@/files/attachments';
@@ -17,7 +14,6 @@ import {
   MIN_TOUCH_TARGET,
   palette,
   radius,
-  shadow,
   spacing,
   typography,
 } from '@/theme/tokens';
@@ -130,15 +126,12 @@ export function Composer({
             onPress={onVoice}
             disabled={disabled}
             style={({ pressed }) => [
-              styles.circle,
-              styles.filled,
+              styles.control,
               disabled && styles.actionDisabled,
               pressed && styles.pressed,
             ]}
           >
-            <Text variant="headline" tone="inverse">
-              ◉
-            </Text>
+            <Icon source={Record} size={26} color={palette.brand} />
           </Pressable>
         ) : null}
 
@@ -189,18 +182,16 @@ export function Composer({
           onPress={busy ? onStop : () => void send()}
           disabled={!busy && !canSend}
           style={({ pressed }) => [
-            styles.circle,
-            busy ? styles.stop : styles.filled,
+            styles.control,
             !busy && !canSend && styles.actionDisabled,
             pressed && styles.pressed,
           ]}
         >
           {busy ? (
-            <Text variant="headline" tone="inverse">
-              ■
-            </Text>
+            // A square reads as "stop" at this size where a glyph would not.
+            <View style={styles.stopMark} />
           ) : (
-            <Icon source={ArrowRight} size={18} color={palette.onBrand} />
+            <Icon source={Send} size={24} color={palette.brand} />
           )}
         </Pressable>
       </View>
@@ -242,23 +233,25 @@ const styles = StyleSheet.create({
     backgroundColor: palette.surface,
   },
   /**
-   * Both round controls.
+   * The two controls beside the field.
    *
-   * A circle rather than a rounded rectangle so the two actions read as
-   * controls attached to the field, not as a third and fourth box competing
-   * with it. The radius is half the touch target, which is what makes it a
-   * circle at any future size rather than a pill.
+   * No background and no shadow: the icons are the controls. A disc behind
+   * them added a second shape competing with the field for attention, and at
+   * this size the icon alone is unambiguous. The box stays a full touch
+   * target so the tappable area does not shrink to the size of the glyph.
    */
-  circle: {
+  control: {
     width: MIN_TOUCH_TARGET,
     height: MIN_TOUCH_TARGET,
-    borderRadius: MIN_TOUCH_TARGET / 2,
     alignItems: 'center',
     justifyContent: 'center',
-    ...shadow.card,
   },
-  filled: { backgroundColor: palette.brand },
-  stop: { backgroundColor: palette.textSecondary },
+  stopMark: {
+    width: 18,
+    height: 18,
+    borderRadius: radius.xs,
+    backgroundColor: palette.brand,
+  },
   /** The bordered box that holds "+" and the text together. */
   field: {
     flex: 1,

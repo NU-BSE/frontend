@@ -515,9 +515,18 @@ for (const windowWidth of [360, 390, 412]) {
     one.mic.left < one.field.left && one.send.left > one.field.left + one.field.width - 0.01,
     `${windowWidth}pt: the field sits between the two controls`,
   );
+  /*
+   * The controls carry no background, so what matters is that the tappable
+   * box stays a full touch target — the icon inside is only ~24pt, and
+   * letting the box shrink to the glyph would make them hard to hit.
+   */
   assert(
-    one.mic.width === one.mic.height && one.send.width === one.send.height,
-    `${windowWidth}pt: both controls are square, so a half-width radius makes them circles`,
+    one.mic.width === TOUCH && one.mic.height === TOUCH,
+    `${windowWidth}pt: the mic keeps a full touch target behind its icon`,
+  );
+  assert(
+    one.send.width === TOUCH && one.send.height === TOUCH,
+    `${windowWidth}pt: the send control keeps a full touch target behind its icon`,
   );
 
   // The clip must not drift down as the field grows.

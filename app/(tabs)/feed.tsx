@@ -1,5 +1,7 @@
 import React, { useCallback, useMemo, useState } from 'react';
 import { useRouter } from 'expo-router';
+
+import { withInternalPromptToken } from '@/agent/promptIntent';
 import { FlatList, StyleSheet, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
@@ -74,7 +76,11 @@ export default function Feed() {
   const openGuide = useCallback(
     (prompt: string) =>
       router.push(
-        `/chat?scenario=settings&prompt=${encodeURIComponent(prompt)}`,
+        // Marked as in-app so the chat may send it without a further tap;
+        // an external link carrying the same prompt cannot.
+        withInternalPromptToken(
+          `/chat?scenario=settings&prompt=${encodeURIComponent(prompt)}`,
+        ),
       ),
     [router],
   );

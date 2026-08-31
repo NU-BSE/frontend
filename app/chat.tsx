@@ -17,6 +17,7 @@ import { useAi } from '@/ai/AiProvider';
 import { useAgentChatSession } from '@/agent/AgentChatProvider';
 import type { AgentMessage, ChatSendInput } from '@/agent/types';
 import { AgentMessageItem } from '@/features/chat/AgentMessageItem';
+import { isInternalPrompt } from '@/agent/promptIntent';
 import { Composer } from '@/features/chat/Composer';
 import {
   composeMessageWithAttachments,
@@ -55,8 +56,8 @@ export default function Chat() {
 
   const { origin, status: engineStatus, degradedReason } = useAi();
 
-  const { scenario: scenarioParam, prompt: promptParam } =
-    useLocalSearchParams<{ scenario?: string; prompt?: string }>();
+  const { scenario: scenarioParam, prompt: promptParam, k: promptToken } =
+    useLocalSearchParams<{ scenario?: string; prompt?: string; k?: string }>();
   const scenario = getScenario(scenarioParam);
 
   const {
@@ -159,23 +160,39 @@ export default function Chat() {
 
 
   /*
-   * A guide tapped in the Settings feed arrives as `?prompt=`. It is sent once,
-   * on mount, so the chat opens with the question already asked rather than
-   * making the user re-type what they just tapped.
+   * A guide tapped in the Settings feed arrives as `?prompt=` and is sent once
+   * on mount, so the chat opens with the question already asked.
+   *
+   * Only when the link came from inside the app. MainActivity is exported and
+   * owns the creepyim:// scheme, so any installed app can open this screen
+   * with parameters of its choosing; auto-sending them would make the model,
+   * the connected accounts and the tool permissions available to any caller
+   * that knows the URL. A prompt without the session token is put in the
+   * composer instead, where the user decides whether it runs.
    *
    * The ref guards against a re-send when the screen re-renders or the params
    * object is re-created; `sendMessage` is deliberately not a dependency for
    * the same reason.
    */
+  const trustedPrompt = isInternalPrompt(promptToken);
+  /*
+   * Derived, not stored: an untrusted prompt is a pure function of the route
+   * params, and holding it in state would mean setting that state from an
+   * effect — a cascading render for a value that was already known during the
+   * first one.
+   */
+  const suggestedText =
+    !trustedPrompt && promptParam?.trim() ? promptParam.trim() : undefined;
+
   const sentInitialPrompt = useRef(false);
   useEffect(() => {
     if (sentInitialPrompt.current) return;
     const initial = promptParam?.trim();
-    if (!initial) return;
+    if (!initial || !trustedPrompt) return;
     sentInitialPrompt.current = true;
     handleSendText(initial);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [promptParam]);
+  }, [promptParam, trustedPrompt]);
 
   /*
    * Settings shows no opening chips.
@@ -337,6 +354,10 @@ export default function Chat() {
             busy={isRunning}
             disabled={engineStatus === 'preparing' || awaitingApproval}
             {...(VOICE_SUPPORTED ? { onVoice: () => router.push('/voice') } : {})}
+            // Keyed so a newly arrived suggestion re-initialises the field
+            // rather than being synced in from an effect.
+            key={suggestedText ?? ''}
+            {...(suggestedText !== undefined ? { initialText: suggestedText } : {})}
           />
         </View>
       </KeyboardAvoidingView>

@@ -29,6 +29,7 @@ export function Composer({
   busy,
   disabled,
   onVoice,
+  initialText,
 }: {
   /** Called with the final payload after any required upload has completed. */
   onSend: (input: ChatSendInput) => void;
@@ -41,8 +42,21 @@ export function Composer({
    * is worse than none.
    */
   onVoice?: () => void;
+  /**
+   * Text to place in the field without sending it.
+   *
+   * Used for a prompt that arrived from outside the app: it is offered for the
+   * user to review and send, never executed on their behalf.
+   */
+  initialText?: string;
 }) {
-  const [value, setValue] = useState('');
+  /*
+   * Seeded once. The caller keys this component on the suggestion, so a new
+   * one arrives as a fresh mount rather than as state synced in from an
+   * effect — which is both simpler and what React actually recommends for a
+   * field whose initial value can change.
+   */
+  const [value, setValue] = useState(initialText ?? '');
   const [drafts, setDrafts] = useState<DraftAttachment[]>([]);
   const [notice, setNotice] = useState<string | null>(null);
 

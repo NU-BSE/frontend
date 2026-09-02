@@ -1,23 +1,28 @@
 import type { MemoryProfile } from '@/storage/prefs';
 
-import { ON_DEVICE_MODEL_PATH } from './config';
-
 export type LocalMemoryProfile = Exclude<MemoryProfile, 'cloud'>;
 
+/**
+ * Where the on-device weights live.
+ *
+ * One entry, because there is one local model: the 2B GUI-Owl teacher. The
+ * three size tiers this replaced each pointed at a different student
+ * (0.5B/1B/1.5B), and those are retired.
+ */
 export const LOCAL_MODEL_PATHS: Record<LocalMemoryProfile, string> = {
-  efficient:
-    process.env.EXPO_PUBLIC_LLM_MODEL_EFFICIENT_PATH?.trim() || ON_DEVICE_MODEL_PATH,
-  balanced:
-    process.env.EXPO_PUBLIC_LLM_MODEL_BALANCED_PATH?.trim() || ON_DEVICE_MODEL_PATH,
-  performance:
-    process.env.EXPO_PUBLIC_LLM_MODEL_PERFORMANCE_PATH?.trim() || ON_DEVICE_MODEL_PATH,
+  'on-device': process.env.EXPO_PUBLIC_LLM_MODEL_PATH?.trim() || '',
 };
 
+/**
+ * Runtime limits for the local model.
+ *
+ * Sized for the 2B teacher rather than inherited from the old top tier: a
+ * larger model needs proportionally more KV cache per token of context, and
+ * the context that fit a 1.5B student in the same RAM does not fit this one.
+ */
 export const LOCAL_MODEL_RUNTIME: Record<
   LocalMemoryProfile,
   { contextSize: number; maxTokens: number }
 > = {
-  efficient: { contextSize: 1024, maxTokens: 192 },
-  balanced: { contextSize: 2048, maxTokens: 320 },
-  performance: { contextSize: 3072, maxTokens: 480 },
+  'on-device': { contextSize: 3072, maxTokens: 480 },
 };

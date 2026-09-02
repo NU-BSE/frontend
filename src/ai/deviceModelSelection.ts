@@ -11,33 +11,28 @@ export type ModelOptionSupport = {
 const GIB = 1024 ** 3;
 
 /**
- * Per-profile floor for the three capacities that decide whether a model can
- * run locally: RAM, free storage for the weights, and CPU parallelism.
+ * Floor for the three capacities that decide whether the model can run
+ * locally: RAM, free storage for the weights, and CPU parallelism.
+ *
+ * Set for the 2B teacher, which is larger than every student it replaced —
+ * roughly 1.3 GB of Q4 text weights plus an f16 vision projector — so these
+ * are at or above what the old top tier asked for. Lowering them would let the
+ * app promise local inference on a phone that then OOMs mid-generation, which
+ * is worse than saying cloud up front.
  *
  * `minCpuCores` gates generation speed rather than whether the model loads.
  * Weights that fit in RAM on a 4-core device still produce tokens too slowly
- * to feel like a conversation at the larger profiles, so each step up asks for
- * more parallelism. Core count is the only processor capacity Android exposes
- * portably — there is no reliable clock-speed or big.LITTLE breakdown — so it
- * stands in for the whole dimension.
- *
- * These are the tuning knobs: adjust here, and both the recommendation and the
- * per-option reasons follow.
+ * to feel like a conversation. Core count is the only processor capacity
+ * Android exposes portably — there is no reliable clock-speed or big.LITTLE
+ * breakdown — so it stands in for the whole dimension.
  */
-const REQUIREMENTS: Record<
-  Exclude<MemoryProfile, 'cloud'>,
-  { minMemoryBytes: number; minStorageBytes: number; minCpuCores: number }
-> = {
-  efficient: { minMemoryBytes: 3 * GIB, minStorageBytes: 1 * GIB, minCpuCores: 4 },
-  balanced: { minMemoryBytes: 4 * GIB, minStorageBytes: 2 * GIB, minCpuCores: 6 },
-  performance: { minMemoryBytes: 6 * GIB, minStorageBytes: 3 * GIB, minCpuCores: 8 },
-};
+const REQUIREMENTS: {
+  minMemoryBytes: number;
+  minStorageBytes: number;
+  minCpuCores: number;
+} = { minMemoryBytes: 6 * GIB, minStorageBytes: 3 * GIB, minCpuCores: 8 };
 
-const LOCAL_PROFILES: Exclude<MemoryProfile, 'cloud'>[] = [
-  'efficient',
-  'balanced',
-  'performance',
-];
+const LOCAL_PROFILES: Exclude<MemoryProfile, 'cloud'>[] = ['on-device'];
 
 const formatRequirement = (bytes: number): string =>
   `${Math.round(bytes / GIB)} GB`;
@@ -91,7 +86,7 @@ export function getModelOptionSupport(
             : null;
 
   const local = LOCAL_PROFILES.map((profile): ModelOptionSupport => {
-    const requirement = REQUIREMENTS[profile];
+    const requirement = REQUIREMENTS;
     if (localBlockReason) {
       return {
         profile,
@@ -162,13 +157,15 @@ export function getModelOptionSupport(
     };
   });
 
-  const highestSupported = [...local]
-    .reverse()
-    .find((option) => option.supported)?.profile;
+  /*
+   * One local option, so the recommendation is simply whether it is usable.
+   * This was a search for the largest supported tier when there were three.
+   */
+  const localSupported = local.some((option) => option.supported);
 
   const result = local.map((option) => ({
     ...option,
-    recommended: option.profile === highestSupported,
+    recommended: option.supported,
   }));
 
   return [
@@ -176,7 +173,7 @@ export function getModelOptionSupport(
     {
       profile: 'cloud',
       supported: true,
-      recommended: !highestSupported,
+      recommended: !localSupported,
       reason: 'Does not load model weights on this device.',
     },
   ];

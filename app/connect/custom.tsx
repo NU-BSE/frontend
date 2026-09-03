@@ -13,6 +13,7 @@ import { router } from 'expo-router';
 import { Text } from '@/components/Text';
 import { Button } from '@/components/Button';
 import { DetectionSummary } from '@/features/connections/customMcp/DetectionSummary';
+import { ServerRunner } from '@/features/connections/customMcp/ServerRunner';
 import { CustomMcpError, hasResolverHost } from '@/mcp/custom/resolverClient';
 import {
   missingEnvironment,
@@ -244,6 +245,8 @@ function ServerRow({
       {expanded ? (
         <View style={styles.rowBody}>
           {server.detected ? <DetectionSummary detected={server.detected} /> : null}
+
+          {server.detected ? <ServerRunner server={server} /> : null}
 
           {(server.detected?.requiredEnvironmentVariables ?? []).map((variable) => (
             <EnvironmentField

@@ -16,6 +16,8 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 
 import { getCredentialVault } from '@/mcp/runtime-singleton';
 
+import { deleteBundle } from './bundleStore';
+
 import {
   defaultLabel,
   type CustomMcpServer,
@@ -224,6 +226,8 @@ export async function removeCustomServer(id: string): Promise<void> {
     for (const name of server.configuredEnvironment) {
       await vault.remove(variableReference(id, name));
     }
+    // The bundle is a megabyte of executable code with nothing left to run it.
+    if (server.detected) deleteBundle(server.detected.bundleId);
   }
 
   await writeAll(servers.filter((item) => item.id !== id));

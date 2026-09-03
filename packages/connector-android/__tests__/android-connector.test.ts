@@ -9,6 +9,7 @@ import {
   AndroidConnector,
   createAndroidSettingsTools,
   mapAndroidSettingsError,
+  type AndroidAssistantBridge,
   type AndroidSettingsBridge,
 } from '../src';
 
@@ -73,11 +74,32 @@ function makeBridge(
   };
 }
 
+function makeAssistantBridge(
+  overrides: Partial<AndroidAssistantBridge> = {},
+): AndroidAssistantBridge {
+  return {
+    getStatus: async () => ({
+      roleAvailable: true,
+      isDefault: false,
+      serviceReady: false,
+    }),
+    requestRole: async () => true,
+    openSettings: async () => true,
+    getScreenContext: async () => null,
+    ...overrides,
+  };
+}
+
 function makeConnector(
   bridge: AndroidSettingsBridge,
   store = new InMemoryConnectionStore(),
+  assistantBridge?: AndroidAssistantBridge,
 ): AndroidConnector {
-  return new AndroidConnector({ store, settingsBridge: bridge });
+  return new AndroidConnector({
+    store,
+    settingsBridge: bridge,
+    ...(assistantBridge ? { assistantBridge } : {}),
+  });
 }
 
 function executeTool(
@@ -119,6 +141,33 @@ describe('AndroidConnector.connect', () => {
     expect(record.scopes).toContain('android.settings.write');
     expect(record.capabilities).toContain('android.apps.read');
     expect(record.capabilities).toContain('android.settings.app_navigation');
+  });
+
+  it('grants assistant scopes only when the assistant bridge is present', async () => {
+    const settingsOnly = await makeConnector(makeBridge()).connect();
+    expect(settingsOnly.scopes).not.toContain('android.assistant.read');
+    expect(settingsOnly.capabilities).not.toContain('android.assistant.manage');
+
+    const withAssistant = await makeConnector(
+      makeBridge(),
+      new InMemoryConnectionStore(),
+      makeAssistantBridge(),
+    ).connect();
+
+    expect(withAssistant.scopes).toEqual(
+      expect.arrayContaining([
+        'android.assistant.read',
+        'android.assistant.manage',
+        'android.assistant.screen_context',
+      ]),
+    );
+    expect(withAssistant.capabilities).toEqual(
+      expect.arrayContaining([
+        'android.assistant.read',
+        'android.assistant.manage',
+        'android.assistant.screen_context',
+      ]),
+    );
   });
 
   it('is idempotent and preserves createdAt', async () => {
@@ -280,6 +329,7 @@ describe('AndroidConnector tools', () => {
     if (!tool) throw new Error('tool not found');
 
     expect(tool.inputSchema.safeParse({ connectionId: 'x', screen: 'batterySaver' }).success).toBe(true);
+    expect(tool.inputSchema.safeParse({ connectionId: 'x', screen: 'assistant' }).success).toBe(true);
     expect(tool.inputSchema.safeParse({ connectionId: 'x', screen: 'writeSettings' }).success).toBe(false);
     expect(tool.inputSchema.safeParse({ connectionId: 'x', screen: 'overlay' }).success).toBe(false);
     expect(tool.inputSchema.safeParse({ connectionId: 'x', screen: 'unknownSources' }).success).toBe(false);

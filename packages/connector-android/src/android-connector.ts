@@ -46,6 +46,12 @@ const CAPABILITIES = [
   'android.apps.read',
 ];
 
+const ASSISTANT_CAPABILITIES = [
+  'android.assistant.read',
+  'android.assistant.manage',
+  'android.assistant.screen_context',
+];
+
 /**
  * Real on-device Android Settings connector.
  *
@@ -85,8 +91,18 @@ export class AndroidConnector extends StoreBackedConnector {
       const now = Date.now();
       const existing = await this.store.get(ANDROID_CONNECTION_ID);
 
+      /*
+       * Assistant tools are registered only when their native bridge exists.
+       * Grant the matching local-device scopes in the same condition; without
+       * them MCP advertises the tools but rejects every call before execution.
+       */
+      const assistantCapabilities = this.assistantBridge
+        ? ASSISTANT_CAPABILITIES
+        : [];
+
       const scopes = [
         'android.settings.read',
+        ...assistantCapabilities,
         ...(canWrite ? ['android.settings.write'] : []),
         ...(canOverlay ? ['android.overlay'] : []),
       ];
@@ -103,7 +119,7 @@ export class AndroidConnector extends StoreBackedConnector {
         displayName,
         status: 'connected',
         scopes,
-        capabilities: CAPABILITIES,
+        capabilities: [...CAPABILITIES, ...assistantCapabilities],
         createdAt: existing?.createdAt ?? now,
         updatedAt: now,
       };

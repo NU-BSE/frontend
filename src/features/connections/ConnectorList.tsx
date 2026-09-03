@@ -4,9 +4,10 @@ import { router } from 'expo-router';
 
 import { Text } from '@/components/Text';
 import {
-  CONNECTOR_CATALOG,
+  buildConnectorCatalog,
   type ConnectorCatalogEntry,
 } from '@/features/connections/catalog';
+import { hasResolverHost } from '@/mcp/custom/resolverClient';
 import { chunkRows } from '@/features/scenarios/chunkRows';
 import {
   useConnectConnector,
@@ -40,7 +41,15 @@ export function ConnectorList() {
   const connect = useConnectConnector();
   const disconnect = useDisconnectConnection();
 
-  const rows = useMemo(() => chunkRows(CONNECTOR_CATALOG, COLUMNS), []);
+  /*
+   * Host availability is a build-time constant, so this is computed once. It
+   * is read through the catalogue builder rather than by appending a tile here
+   * so that `verify:layout` measures the same two shapes this renders.
+   */
+  const rows = useMemo(
+    () => chunkRows(buildConnectorCatalog({ customServers: hasResolverHost() }), COLUMNS),
+    [],
+  );
 
   const failed =
     disconnect.isError
@@ -103,7 +112,11 @@ export function ConnectorList() {
               const available = entry.connectorId
                 ? registeredIds?.has(entry.connectorId) ?? false
                 : false;
-              const connectable = Boolean(entry.connectorId) && available;
+              // A route-only entry opens a screen, so it is tappable without a
+              // registered connector behind it.
+              const connectable = entry.route
+                ? true
+                : Boolean(entry.connectorId) && available;
               const busy =
                 (connect.isPending && connect.variables === entry.connectorId) ||
                 (disconnect.isPending && disconnect.variables === connection?.id);
@@ -118,7 +131,9 @@ export function ConnectorList() {
                     selected: connected,
                   }}
                   accessibilityLabel={
-                    connectable
+                    entry.route
+                      ? `${entry.label}. ${entry.summary}`
+                      : connectable
                       ? `${entry.label}. ${
                           entry.connectorId === 'android'
                             ? connected
@@ -134,6 +149,10 @@ export function ConnectorList() {
                   }
                   disabled={!canPress || busy || isPending}
                   onPress={() => {
+                    if (entry.route) {
+                      router.push(entry.route as Parameters<typeof router.push>[0]);
+                      return;
+                    }
                     if (!entry.connectorId) return;
                     // Android is a special connector: tapping it always opens
                     // its dedicated screen (connect, permissions, disconnect),

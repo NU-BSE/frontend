@@ -21,7 +21,7 @@ import Yoga, {
 
 import { chunkRows } from '../src/features/scenarios/chunkRows.js';
 import { ONBOARDING_SCENARIOS } from '../src/features/scenarios/registry.js';
-import { CONNECTOR_CATALOG } from '../src/features/connections/catalog.js';
+import { buildConnectorCatalog } from '../src/features/connections/catalog.js';
 
 const GUTTER = 24;
 const GAP = 16;
@@ -244,10 +244,21 @@ const CONNECTOR_MIN_HEIGHT = 104;
  * Read from the catalogue, not restated. Hardcoded, this measured a synthetic
  * fourteen-cell grid and kept passing while the real screen rendered a
  * different number — the same drift already fixed for the category grid.
+ *
+ * Both shapes the screen can render are measured. The custom-server tile
+ * appears only when a resolver host is configured, which takes the grid from
+ * one full row to two — and the second shape is the riskier one, because its
+ * final row is a single real cell beside two spacers.
  */
-const CONNECTOR_COUNT = CONNECTOR_CATALOG.length;
+const CONNECTOR_SHAPES = [
+  { label: 'no resolver host', count: buildConnectorCatalog({ customServers: false }).length },
+  { label: 'with custom servers', count: buildConnectorCatalog({ customServers: true }).length },
+];
 
-console.log('\nyoga layout — connectors grid, three across:');
+for (const shape of CONNECTOR_SHAPES) {
+const CONNECTOR_COUNT = shape.count;
+
+console.log(`\nyoga layout — connectors grid, three across (${shape.label}, ${CONNECTOR_COUNT} tiles):`);
 
 for (const windowWidth of [320, 360, 390, 393, 411, 412, 480, 600]) {
   const frames = layoutGrid(
@@ -294,6 +305,7 @@ for (const windowWidth of [320, 360, 390, 393, 411, 412, 480, 600]) {
     Math.abs(lastRow[0]!.width - a!.width) <= 1.01,
     `${windowWidth}pt: padded final row keeps cell width (${lastRow[0]!.width.toFixed(1)}pt)`,
   );
+}
 }
 
 // The counter-example: percentage widths at three columns overflow far more

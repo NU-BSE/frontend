@@ -33,6 +33,14 @@ export interface ConnectorCatalogEntry {
   connectorId?: ConnectorId;
   /** Shown instead of the summary when there is nothing to connect to. */
   note?: string;
+  /**
+   * Route to open instead of running a connector's auth flow.
+   *
+   * An entry with a route is always tappable: availability for a connector is
+   * derived from the live registry, but a screen has no registry entry and
+   * would otherwise render as "Coming soon".
+   */
+  route?: string;
 }
 
 export const CONNECTOR_CATALOG: ConnectorCatalogEntry[] = [
@@ -40,3 +48,35 @@ export const CONNECTOR_CATALOG: ConnectorCatalogEntry[] = [
   { key: 'telegram-user', label: 'Telegram', summary: 'Personal account', connectorId: 'telegram-user' },
   { key: 'google', label: 'Google', summary: 'Calendar, Gmail, Drive', connectorId: 'google' },
 ];
+
+/**
+ * User-added MCP servers.
+ *
+ * Not a connector: there is no id, no registry entry and no auth flow, just a
+ * screen. It carries a `route` for that reason.
+ */
+export const CUSTOM_SERVERS_ENTRY: ConnectorCatalogEntry = {
+  key: 'custom-mcp',
+  label: 'Custom',
+  summary: 'Your own MCP servers',
+  route: '/connect/custom',
+};
+
+/**
+ * The catalogue as rendered.
+ *
+ * The custom-server tile appears only when a resolver host is configured.
+ * Without one the screen behind it can do nothing but explain why, and this
+ * catalogue's whole reason for being short is that a shipping app should not
+ * advertise what it cannot honour.
+ *
+ * Adding the tile also changes the grid from one row of three to two rows, so
+ * `verify:layout` runs Yoga over both shapes rather than only the shorter one.
+ */
+export function buildConnectorCatalog(options: {
+  customServers: boolean;
+}): ConnectorCatalogEntry[] {
+  return options.customServers
+    ? [...CONNECTOR_CATALOG, CUSTOM_SERVERS_ENTRY]
+    : [...CONNECTOR_CATALOG];
+}

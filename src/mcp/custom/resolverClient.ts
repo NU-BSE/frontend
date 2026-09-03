@@ -1,65 +1,56 @@
 /**
- * Talking to a resolver host.
+ * Asking the backend to translate a server for this device.
  *
- * The resolver clones repositories, runs package managers and spawns MCP
- * servers over stdio. That needs a filesystem, a process table and a JVM, so
- * it runs on a host and the app asks it over HTTP. `EXPO_PUBLIC_MCP_RESOLVER_URL`
- * names that host; with it unset there is no resolver and the UI says so
- * rather than pretending.
+ * The backend clones the repository, installs its dependencies and bundles it
+ * into one JavaScript file with the stdio transport replaced by a bridge into
+ * this app. That is all it does: it is a compiler, not a host. The server runs
+ * here, and once its bundle is downloaded it keeps working with the backend
+ * unreachable — which is what makes every MCP server local to the phone.
  *
- * The wire format is the resolver's own `ResolvedMcp` JSON — the same object
- * `resolver-cli` writes to stdout — so a host is a thin transport over the
- * existing CLI rather than a reimplementation of it.
+ * This module never sends environment values. The backend reports which
+ * variables a server needs; supplying them happens on-device when the server
+ * starts, so a secret has no reason to travel for a translation.
  */
 
-import * as z from 'zod/v4';
+import { BACKEND_API_URL } from '@/ai/config';
+import {
+  ApiError,
+  NETWORK_ERROR_STATUS,
+  translateMcpServer,
+  type TranslatedMcpServer,
+} from '@/api/client';
 
-import type {
-  CustomMcpSource,
-  DetectedMcp,
-} from './types';
-
-/**
- * The configured resolver host, or an empty string.
- *
- * Read through a function rather than a module constant. Metro substitutes
- * `process.env.EXPO_PUBLIC_*` at build time by matching that exact member
- * expression — which it still does inside a function body, so the literal
- * requirement is met either way — but a constant also freezes the value at
- * module evaluation, which makes the transport untestable and means the order
- * of imports decides what the app sees.
- *
- * The literal syntax is not optional: through an alias or a destructure the
- * match fails, nothing is substituted, and the value is `undefined` in a
- * release bundle while development works perfectly. That exact mistake shipped
- * a store build with no backend URL.
- */
-export function resolverHostUrl(): string {
-  return process.env.EXPO_PUBLIC_MCP_RESOLVER_URL?.trim() || '';
-}
-
-/** Resolution clones and inspects a repository; it is not a fast request. */
-const RESOLVE_TIMEOUT_MS = 120_000;
+import type { CustomMcpSource, DetectedMcp } from './types';
 
 /**
- * The resolver's error vocabulary, mirrored from
- * `@mobile-agent/mcp-resolver`'s `McpResolutionErrorType`.
+ * The backend's failure vocabulary, mirrored so a refusal renders as itself.
+ *
+ * `RuntimeNotSupported` is the one that matters most in practice: a Python MCP
+ * server is not a transient error to retry, it is a thing this device cannot
+ * run, and saying so is more useful than any generic failure.
  */
 export type CustomMcpErrorType =
   | 'UnsupportedRepository'
   | 'RepositoryFetchFailed'
   | 'NoDetectorMatched'
-  | 'RuntimeNotInstalled'
+  | 'RuntimeNotSupported'
   | 'EntrypointNotFound'
-  | 'MissingEnvironment'
   | 'PreparationFailed'
-  | 'InvalidCommand'
-  | 'StartupProbeFailed'
-  | 'McpHandshakeFailed'
-  | 'CliNotAvailable'
-  | 'ProcessSpawnFailed'
-  /** Not the resolver's — the app could not reach or read the host. */
+  | 'TranslationFailed'
+  | 'ToolchainUnavailable'
+  /** Not the backend's — the app could not reach it, or could not read it. */
   | 'HostUnavailable';
+
+const ERROR_TYPES = new Set<string>([
+  'UnsupportedRepository',
+  'RepositoryFetchFailed',
+  'NoDetectorMatched',
+  'RuntimeNotSupported',
+  'EntrypointNotFound',
+  'PreparationFailed',
+  'TranslationFailed',
+  'ToolchainUnavailable',
+]);
 
 export class CustomMcpError extends Error {
   readonly type: CustomMcpErrorType;
@@ -73,170 +64,94 @@ export class CustomMcpError extends Error {
   }
 }
 
-const environmentVariableSchema = z.object({
-  name: z.string().min(1),
-  required: z.boolean(),
-  description: z.string().optional(),
-});
-
 /**
- * The resolver's response.
+ * Whether translation is available at all.
  *
- * `environment` is accepted and then dropped: the resolver may echo values the
- * caller supplied, and nothing downstream of here should be able to write one
- * to disk. Unknown fields are ignored rather than rejected so a newer host
- * stays usable by an older build.
+ * There is nothing to configure beyond the backend the app already talks to:
+ * an earlier design had a separate resolver host, which was wrong — it put an
+ * MCP server somewhere other than the phone.
  */
-const resolvedSchema = z.object({
-  command: z.string().min(1),
-  args: z.array(z.string()),
-  workingDirectory: z.string().nullish(),
-  requiredEnvironmentVariables: z.array(environmentVariableSchema).default([]),
-  runtime: z.enum(['NODE', 'PYTHON', 'JVM', 'OTHER']).default('OTHER'),
-  confidence: z.number().min(0).max(1).default(0),
-  evidence: z.array(z.string()).default([]),
-  requiresPreparation: z.boolean().default(false),
-  launchDescription: z.string().nullish(),
-});
-
-const errorSchema = z.object({
-  error: z.object({
-    type: z.string().optional(),
-    message: z.string().optional(),
-    hints: z.array(z.string()).optional(),
-  }),
-});
-
-const ERROR_TYPES = new Set<string>([
-  'UnsupportedRepository',
-  'RepositoryFetchFailed',
-  'NoDetectorMatched',
-  'RuntimeNotInstalled',
-  'EntrypointNotFound',
-  'MissingEnvironment',
-  'PreparationFailed',
-  'InvalidCommand',
-  'StartupProbeFailed',
-  'McpHandshakeFailed',
-  'CliNotAvailable',
-  'ProcessSpawnFailed',
-]);
-
-/** Whether a resolver host is configured at all. */
 export function hasResolverHost(): boolean {
-  return resolverHostUrl().length > 0;
+  return BACKEND_API_URL.length > 0;
 }
 
-export function toDetected(parsed: z.infer<typeof resolvedSchema>): DetectedMcp {
+/** Map a backend response onto the stored shape, dropping anything else. */
+export function toDetected(response: TranslatedMcpServer): DetectedMcp {
   return {
-    runtime: parsed.runtime,
-    command: parsed.command,
-    args: parsed.args,
-    workingDirectory: parsed.workingDirectory ?? null,
-    requiredEnvironmentVariables: parsed.requiredEnvironmentVariables.map((variable) => ({
+    runtime:
+      response.runtime === 'NODE' ||
+      response.runtime === 'PYTHON' ||
+      response.runtime === 'JVM'
+        ? response.runtime
+        : 'OTHER',
+    entrypoint: response.entrypoint ?? null,
+    bundleId: response.bundleId,
+    sha256: response.sha256,
+    bytes: response.bytes,
+    requiredEnvironmentVariables: (response.requiredEnvironment ?? []).map((variable) => ({
       name: variable.name,
       required: variable.required,
-      ...(variable.description !== undefined ? { description: variable.description } : {}),
+      ...(variable.description ? { description: variable.description } : {}),
     })),
-    confidence: parsed.confidence,
-    evidence: parsed.evidence,
-    requiresPreparation: parsed.requiresPreparation,
-    launchDescription: parsed.launchDescription ?? null,
+    confidence: response.confidence ?? 0,
+    evidence: response.evidence ?? [],
   };
 }
 
-/** Turns a resolver error envelope into a typed failure. */
-export function toError(body: unknown, status: number): CustomMcpError {
-  const parsed = errorSchema.safeParse(body);
-  if (parsed.success) {
-    const { type, message, hints } = parsed.data.error;
+/** Turn a transport or API failure into a typed one. */
+export function toError(error: unknown): CustomMcpError {
+  if (error instanceof CustomMcpError) return error;
+
+  if (error instanceof ApiError) {
+    if (error.status === NETWORK_ERROR_STATUS) {
+      return new CustomMcpError('HostUnavailable', error.message, [
+        'Translation needs the backend; the server itself will run on this device.',
+      ]);
+    }
+    const code = error.code ?? '';
     return new CustomMcpError(
-      type && ERROR_TYPES.has(type) ? (type as CustomMcpErrorType) : 'HostUnavailable',
-      message?.trim() || `The resolver rejected the request (HTTP ${status}).`,
-      hints ?? [],
+      ERROR_TYPES.has(code) ? (code as CustomMcpErrorType) : 'HostUnavailable',
+      error.message,
+      error.hints,
     );
   }
+
   return new CustomMcpError(
     'HostUnavailable',
-    `The resolver returned HTTP ${status}.`,
-    ['Check that EXPO_PUBLIC_MCP_RESOLVER_URL points at a running resolver host.'],
+    error instanceof Error ? error.message : 'Something went wrong.',
   );
 }
 
 export interface ResolveOptions {
-  /** Install dependencies as part of resolving. Slow, and writes to the host. */
-  prepare?: boolean;
   signal?: AbortSignal;
 }
 
-/**
- * Ask the host to resolve a source.
- *
- * Never sends environment values. The resolver reports which variables a
- * server needs; supplying them is a separate step that happens when the server
- * is started, so a secret has no reason to travel with a detection request.
- */
 export async function resolveCustomMcp(
   source: CustomMcpSource,
-  options: ResolveOptions = {},
+  _options: ResolveOptions = {},
 ): Promise<DetectedMcp> {
-  if (!hasResolverHost()) {
+  if (source.type !== 'repository') {
     throw new CustomMcpError(
-      'HostUnavailable',
-      'No MCP resolver host is configured.',
-      [
-        'Set EXPO_PUBLIC_MCP_RESOLVER_URL to a host running the resolver CLI.',
-        'Resolution clones a repository and runs its package manager, which a phone cannot do.',
-      ],
+      'UnsupportedRepository',
+      'Only repository URLs can be translated.',
+      ['A local directory would be a path on some other machine, not on this phone.'],
     );
   }
 
-  const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), RESOLVE_TIMEOUT_MS);
-  const abort = () => controller.abort();
-  options.signal?.addEventListener('abort', abort);
+  if (!hasResolverHost()) {
+    throw new CustomMcpError('HostUnavailable', 'No backend is configured.', [
+      'Translation clones the repository and runs its package manager, which this device cannot do.',
+      'The translated server still runs on this device.',
+    ]);
+  }
 
   try {
-    const response = await fetch(`${resolverHostUrl().replace(/\/+$/u, '')}/resolve`, {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({
-        source,
-        prepare: options.prepare === true,
-        validate: true,
-      }),
-      signal: controller.signal,
+    const response = await translateMcpServer({
+      url: source.url,
+      ...(source.ref ? { ref: source.ref } : {}),
     });
-
-    const body: unknown = await response.json().catch(() => null);
-
-    if (!response.ok) throw toError(body, response.status);
-
-    const parsed = resolvedSchema.safeParse(body);
-    if (!parsed.success) {
-      throw new CustomMcpError(
-        'HostUnavailable',
-        'The resolver host returned a response this build cannot read.',
-        [parsed.error.issues[0]?.message ?? 'Unexpected response shape.'],
-      );
-    }
-
-    return toDetected(parsed.data);
+    return toDetected(response);
   } catch (error) {
-    if (error instanceof CustomMcpError) throw error;
-    if (error instanceof Error && error.name === 'AbortError') {
-      throw new CustomMcpError(
-        'HostUnavailable',
-        'The resolver did not answer in time.',
-        ['Cloning and inspecting a large repository can exceed two minutes.'],
-      );
-    }
-    throw new CustomMcpError(
-      'HostUnavailable',
-      error instanceof Error ? error.message : 'Could not reach the resolver host.',
-    );
-  } finally {
-    clearTimeout(timeout);
-    options.signal?.removeEventListener('abort', abort);
+    throw toError(error);
   }
 }

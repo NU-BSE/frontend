@@ -134,7 +134,7 @@
     "verify:prompt-intent": "esbuild scripts/verify-prompt-intent.mts --bundle --platform=node --format=cjs --external:react-native --outfile=node_modules/.cache/verify-prompt-intent.cjs --log-level=error && node node_modules/.cache/verify-prompt-intent.cjs",
     "verify:resolver": "esbuild scripts/verify-resolver.mts --bundle --platform=node --format=cjs --external:@modelcontextprotocol/client --external:@modelcontextprotocol/client/stdio --external:@modelcontextprotocol/server --external:@modelcontextprotocol/server/stdio --external:zod --outfile=node_modules/.cache/verify-resolver.cjs --log-level=error && node node_modules/.cache/verify-resolver.cjs",
     "build:resolver": "cd resolver && ./gradlew installDist fatJar",
-    "verify:custom-mcp": "esbuild scripts/verify-custom-mcp.mts --bundle --platform=node --format=cjs --alias:@react-native-async-storage/async-storage=./scripts/stubs/async-storage.mts --alias:@/mcp/runtime-singleton=./scripts/stubs/runtime-singleton.mts --outfile=node_modules/.cache/verify-custom-mcp.cjs --log-level=error && node node_modules/.cache/verify-custom-mcp.cjs"
+    "verify:custom-mcp": "esbuild scripts/verify-custom-mcp.mts --bundle --platform=node --format=cjs --alias:@react-native-async-storage/async-storage=./scripts/stubs/async-storage.mts --alias:@/mcp/runtime-singleton=./scripts/stubs/runtime-singleton.mts --alias:expo-secure-store=./scripts/stubs/expo-secure-store.mts --alias:react-native=./scripts/stubs/react-native.mts --outfile=node_modules/.cache/verify-custom-mcp.cjs --log-level=error && node node_modules/.cache/verify-custom-mcp.cjs"
   },
   "private": true
 }

@@ -65,10 +65,10 @@ export const CUSTOM_SERVERS_ENTRY: ConnectorCatalogEntry = {
 /**
  * The catalogue as rendered.
  *
- * The custom-server tile appears only when a resolver host is configured.
- * Without one the screen behind it can do nothing but explain why, and this
- * catalogue's whole reason for being short is that a shipping app should not
- * advertise what it cannot honour.
+ * The custom-server tile appears only when a backend is configured, because
+ * translating a server needs one. Without it the screen behind the tile can do
+ * nothing but explain why, and this catalogue's whole reason for being short
+ * is that a shipping app should not advertise what it cannot honour.
  *
  * Adding the tile also changes the grid from one row of three to two rows, so
  * `verify:layout` runs Yoga over both shapes rather than only the shorter one.

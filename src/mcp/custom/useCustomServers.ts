@@ -37,16 +37,16 @@ export function useCustomServer(id: string | undefined) {
 }
 
 /**
- * Resolve a source without storing anything.
+ * Translate a source without storing anything.
  *
- * Detection is separated from adding on purpose: a user who pastes a URL for a
- * repository that turns out not to be an MCP server should see that before a
- * dead entry appears in their list.
+ * Separated from adding on purpose: a user who pastes a URL for a repository
+ * that turns out not to be an MCP server — or to be a Python one, which this
+ * device cannot run — should see that before a dead entry appears in the list.
  */
 export function useResolveSource() {
   return useMutation({
-    mutationFn: (input: { source: CustomMcpSource; prepare?: boolean }): Promise<DetectedMcp> =>
-      resolveCustomMcp(input.source, { prepare: input.prepare === true }),
+    mutationFn: (input: { source: CustomMcpSource }): Promise<DetectedMcp> =>
+      resolveCustomMcp(input.source),
   });
 }
 
@@ -68,14 +68,12 @@ export function useAddCustomServer() {
   });
 }
 
-/** Re-run detection against a stored server, e.g. after the repository moved on. */
+/** Re-translate a stored server, e.g. after the repository moved on. */
 export function useReresolveServer() {
   const client = useQueryClient();
   return useMutation({
-    mutationFn: async (input: { id: string; source: CustomMcpSource; prepare?: boolean }) => {
-      const detected = await resolveCustomMcp(input.source, {
-        prepare: input.prepare === true,
-      });
+    mutationFn: async (input: { id: string; source: CustomMcpSource }) => {
+      const detected = await resolveCustomMcp(input.source);
       return updateDetection(input.id, detected);
     },
     onSuccess: () => {

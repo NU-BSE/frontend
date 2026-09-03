@@ -32,7 +32,7 @@ import {
 import { gutter, palette, radius, spacing, typography } from '@/theme/tokens';
 
 const STATUS_COPY = {
-  unresolved: 'Not detected yet',
+  unresolved: 'Not translated yet',
   'needs-configuration': 'Needs configuration',
   ready: 'Ready',
 } as const;
@@ -40,17 +40,16 @@ const STATUS_COPY = {
 /**
  * Add an MCP server the app does not ship with.
  *
- * The user pastes a repository URL; the resolver works out the runtime, the
- * entrypoint and which environment variables the server needs, and reports
- * that back before anything is saved. Detection is deliberately a separate
- * step from adding: a URL that turns out not to be an MCP server should say so
- * rather than becoming a dead row in the list.
+ * The user pastes a repository URL. The backend clones it, works out the
+ * runtime and the environment it needs, and bundles it into a single
+ * JavaScript file — the server then runs *here*, in the app's own runtime.
+ * The backend is a compiler, not a host: once a bundle is downloaded the
+ * server keeps working with the backend unreachable, and no tool call is ever
+ * proxied off the phone.
  *
- * Resolution does not and cannot happen on the phone. Cloning a repository,
- * running its package manager and spawning it over stdio needs a filesystem, a
- * process table and a JVM; Hermes has none of those. So this screen is a
- * client of a resolver host, and when none is configured it says exactly that
- * instead of failing at the first tap.
+ * Translation is a separate step from adding on purpose. A URL that turns out
+ * not to be an MCP server — or to be a Python one, which this device cannot
+ * run whatever we do — should say so before it becomes a dead row in the list.
  */
 export default function CustomMcpScreen() {
   const [url, setUrl] = useState('');
@@ -113,17 +112,17 @@ export default function CustomMcpScreen() {
       <ScrollView contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
         <Text style={styles.title}>Custom servers</Text>
         <Text style={styles.lede}>
-          Point Creepy at an MCP server repository. It works out how to run it and what
-          it needs.
+          Point Creepy at an MCP server repository. It is translated once, then runs on
+          this device.
         </Text>
 
         {!hostConfigured ? (
           <View style={styles.notice}>
-            <Text style={styles.noticeTitle}>No resolver host configured</Text>
+            <Text style={styles.noticeTitle}>No backend configured</Text>
             <Text style={styles.noticeBody}>
-              Detection clones the repository and runs its package manager, which this
-              device cannot do. Set EXPO_PUBLIC_MCP_RESOLVER_URL to a host running the
-              resolver CLI.
+              Translating a server clones its repository and runs its package manager,
+              which this device cannot do. Set EXPO_PUBLIC_API_URL. The translated
+              server still runs here.
             </Text>
           </View>
         ) : null}
@@ -157,7 +156,7 @@ export default function CustomMcpScreen() {
         </View>
 
         <Button
-          label={resolve.isPending ? 'Detecting…' : 'Detect'}
+          label={resolve.isPending ? 'Translating…' : 'Translate'}
           onPress={onDetect}
           loading={resolve.isPending}
           disabled={!source || !hostConfigured}
@@ -260,7 +259,7 @@ function ServerRow({
           ))}
 
           <Button
-            label={reresolve.isPending ? 'Detecting…' : 'Detect again'}
+            label={reresolve.isPending ? 'Translating…' : 'Translate again'}
             variant="secondary"
             loading={reresolve.isPending}
             onPress={() => reresolve.mutate({ id: server.id, source: server.source })}

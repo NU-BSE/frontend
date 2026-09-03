@@ -13,7 +13,7 @@ const RUNTIME_LABEL: Record<DetectedMcp['runtime'], string> = {
 };
 
 /**
- * What the resolver found, shown before anything is saved.
+ * What the backend found and built, shown before anything is saved.
  *
  * The evidence list is the point of this card. A detector reports *why* it
  * matched — "package.json: bin.mcp-server", "pyproject.toml: project.scripts"
@@ -22,6 +22,12 @@ const RUNTIME_LABEL: Record<DetectedMcp['runtime'], string> = {
  * too, because a low-confidence match that happens to be right and a
  * high-confidence one both look identical without it.
  */
+function formatBytes(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${Math.round(bytes / 1024)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
+
 export function DetectionSummary({ detected }: { detected: DetectedMcp }) {
   const percent = Math.round(detected.confidence * 100);
 
@@ -34,16 +40,11 @@ export function DetectionSummary({ detected }: { detected: DetectedMcp }) {
         </View>
       </View>
 
-      <Text style={styles.command} numberOfLines={3}>
-        {detected.launchDescription ?? [detected.command, ...detected.args].join(' ')}
+      <Text style={styles.command} numberOfLines={2}>
+        {detected.entrypoint ?? 'bundled'} → {formatBytes(detected.bytes)}
       </Text>
 
-      {detected.requiresPreparation ? (
-        <Text style={styles.note}>
-          Dependencies must be installed on the resolver host before this server will
-          start.
-        </Text>
-      ) : null}
+      <Text style={styles.note}>Translated to run on this device.</Text>
 
       {detected.evidence.length > 0 ? (
         <View style={styles.section}>
@@ -102,7 +103,7 @@ const styles = StyleSheet.create({
     borderRadius: radius.md,
     padding: spacing.md,
   },
-  note: { ...typography.bodySmall, color: palette.gold },
+  note: { ...typography.bodySmall, color: palette.textMuted },
   section: { gap: spacing.xs },
   sectionLabel: { ...typography.labelSmall, color: palette.textMuted },
   evidence: { ...typography.bodySmall, color: palette.textSecondary },

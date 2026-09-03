@@ -74,7 +74,9 @@ export async function createLocalMcpRuntime(
 ): Promise<LocalMcpRuntime> {
   const server =
     createMobileAgentMcpServer(dependencies, {
-      builtInCalendar: options.builtInCalendar,
+      ...(options.builtInCalendar !== undefined
+        ? { builtInCalendar: options.builtInCalendar }
+        : {}),
     });
 
   /*

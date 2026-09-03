@@ -9,7 +9,8 @@ import { DEFAULT_APPROVAL_POLICY } from '@mobile-agent/policy-core';
 import type { ApprovalService } from '@mobile-agent/approval-core';
 import { hashArgs } from '@mobile-agent/approval-core';
 
-const DEV_LOG = typeof __DEV__ === 'boolean' && __DEV__;
+const DEV_LOG = typeof globalThis !== 'undefined' &&
+  (globalThis as Record<string, unknown>).__DEV__ === true;
 
 const approvalIdField = z
   .string()
@@ -180,7 +181,9 @@ export async function registerConnectorTools(
     // The published schema comes from the first entry; entries from the same
     // connector always agree, and cross-connector name collisions are
     // resolved at execution time below.
-    const primary = entries[0].tool;
+    const first = entries[0];
+    if (!first) continue;
+    const primary = first.tool;
 
     // Fail closed on conflicting duplicate definitions: MCP groups tools
     // globally by name, so an incompatible second definition must never be

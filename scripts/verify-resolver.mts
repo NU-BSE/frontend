@@ -16,7 +16,7 @@
  */
 import {
   createMcpToolset,
-  locateCli,
+  isCliAvailable,
   McpResolutionError,
   resolveMcp,
 } from '@mobile-agent/mcp-resolver';
@@ -63,7 +63,7 @@ function textOf(result: unknown): string {
 }
 
 async function main(): Promise<void> {
-  if (locateCli() === null) {
+  if (!isCliAvailable()) {
     console.log(
       'SKIP — resolver-cli is not built. Build it with:\n' +
         '  cd resolver && ./gradlew installDist fatJar',

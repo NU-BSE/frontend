@@ -65,6 +65,32 @@ export function locateCli(): CliInvocation | null {
 }
 
 /**
+ * True when the resolver CLI is actually runnable from this checkout:
+ * an explicit `MCP_RESOLVER_CLI`, the Gradle `installDist` launcher, or the
+ * fat jar. A bare `resolver-cli` on PATH is not treated as proof.
+ */
+export function isCliAvailable(): boolean {
+  if (process.env.MCP_RESOLVER_CLI) return true;
+  const repoRoot = findRepoRoot();
+  if (repoRoot) {
+    const isWindows = process.platform === 'win32';
+    const launcher = path.join(
+      repoRoot,
+      'resolver',
+      'build',
+      'install',
+      'resolver-cli',
+      'bin',
+      isWindows ? 'resolver-cli.bat' : 'resolver-cli',
+    );
+    if (existsSync(launcher)) return true;
+    const fatJar = path.join(repoRoot, 'resolver', 'build', 'libs', 'mcp-resolver-0.1.0-fat.jar');
+    if (existsSync(fatJar)) return true;
+  }
+  return false;
+}
+
+/**
  * Ordered candidates for starting the resolver CLI:
  *  1. `MCP_RESOLVER_CLI` (explicit);
  *  2. the Gradle `installDist` launcher in this monorepo;

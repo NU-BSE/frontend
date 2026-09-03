@@ -14,6 +14,7 @@
 
 export {
   KotlinCliResolver,
+  isCliAvailable,
   listCliCandidates,
   locateCli,
 } from './kotlinCli';

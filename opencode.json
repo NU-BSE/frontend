@@ -1,0 +1,12 @@
+{
+  "$schema": "https://opencode.ai/config.json",
+  "provider": {
+    "my-custom-provider": {
+      "npm": "@ai-sdk/openai-compatible",
+      "name": "CustomProvider",
+      "options": {
+        "baseURL": "https://llm.alem.ai/v1/chat/completions"
+      }
+    }
+  }
+}

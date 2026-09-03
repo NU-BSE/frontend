@@ -63,3 +63,6 @@ bundletool-all.jar
 kotleta552-release.jks
 app.apks
 application.aab
+# Kotlin MCP resolver
+/resolver/.gradle/
+/resolver/build/

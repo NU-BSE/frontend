@@ -5,8 +5,11 @@ import { router } from 'expo-router';
 import { Text } from '@/components/Text';
 import {
   buildConnectorCatalog,
+  customServersLabel,
+  CUSTOM_SERVERS_ENTRY,
   type ConnectorCatalogEntry,
 } from '@/features/connections/catalog';
+import { useCustomServers } from '@/mcp/custom/useCustomServers';
 import { hasResolverHost } from '@/mcp/custom/resolverClient';
 import { chunkRows } from '@/features/scenarios/chunkRows';
 import {
@@ -40,6 +43,15 @@ export function ConnectorList() {
   const { data: registeredIds } = useRegisteredConnectorIds();
   const connect = useConnectConnector();
   const disconnect = useDisconnectConnection();
+  const { data: customServers } = useCustomServers();
+
+  /*
+   * Shown as a count rather than a dot or a badge: "Custom" alone gives no
+   * hint whether anything is behind it, and the number is the one fact worth
+   * carrying on a tile this small. Pending reads as 0 rather than blank, so
+   * the label does not change width as the query settles.
+   */
+  const customLabel = customServersLabel(customServers?.length ?? 0);
 
   /*
    * Host availability is a build-time constant, so this is computed once. It
@@ -139,7 +151,7 @@ export function ConnectorList() {
                   }}
                   accessibilityLabel={
                     entry.route
-                      ? `${entry.label}. ${entry.summary}`
+                      ? `${entry.key === CUSTOM_SERVERS_ENTRY.key ? customLabel : entry.label}. ${entry.summary}`
                       : connectable
                       ? `${entry.label}. ${
                           entry.connectorId === 'android'
@@ -198,7 +210,7 @@ export function ConnectorList() {
                     style={styles.cellText}
                     numberOfLines={2}
                   >
-                    {entry.label}
+                    {entry.key === CUSTOM_SERVERS_ENTRY.key ? customLabel : entry.label}
                   </Text>
                   <Text
                     variant="bodySmall"

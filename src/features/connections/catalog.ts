@@ -65,6 +65,16 @@ export const CONNECTOR_CATALOG: ConnectorCatalogEntry[] = [
  * Not a connector: there is no id, no registry entry and no auth flow, just a
  * screen. It carries a `route` for that reason.
  */
+/**
+ * The custom tile's label, which carries its count.
+ *
+ * Lives here with the entry rather than in the grid, so the copy for a tile
+ * and the tile itself stay in one place.
+ */
+export function customServersLabel(count: number): string {
+  return `Custom (${count} added)`;
+}
+
 export const CUSTOM_SERVERS_ENTRY: ConnectorCatalogEntry = {
   key: 'custom-mcp',
   label: 'Custom',

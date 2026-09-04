@@ -7,16 +7,28 @@
  * fetches them from the backend when someone actually picks on-device.
  *
  * That makes this a *long* download over a mobile connection, which decides
- * the design:
+ * the design: it streams to disk natively, reports progress, and resumes.
  *
- * * **Chunked, with Range.** The backend supports Range because of this. A
- *   dropped connection at 900 MB resumes from 900 MB rather than starting
- *   again, and the progress a chunked loop reports is real rather than
- *   inferred.
- * * **Bytes, not base64.** `File.write` takes a Uint8Array, so a chunk goes
- *   from the socket to the file without a 33% base64 detour through a string.
- * * **Cancellable.** A user who started this on mobile data must be able to
- *   stop it, and stopping must leave the partial file resumable.
+ * The bytes never enter the JavaScript heap. An earlier version fetched 8 MB
+ * ranges and wrote each `arrayBuffer()` to the file, which died with
+ *
+ *     OutOfMemoryError: Failed to allocate a 8388627 byte allocation with
+ *     6475008 free bytes ... growth limit 268435456
+ *
+ * — the chunk, allocated as a direct ByteBuffer against a 256 MB heap, while
+ * expo's fetch still held its own copy of the previous one. No chunk size
+ * fixes that honestly: a JS-mediated download of 1.8 GB is a stream of large
+ * allocations through a heap that is not sized for it, and shrinking the
+ * chunks only lowers the odds.
+ *
+ * `createDownloadResumable` writes to the file from native code and reports
+ * bytes written, so the peak JS allocation is a progress number. It comes from
+ * `expo-file-system/legacy` because the current API has no progress callback
+ * at all, and a gigabyte with no visible progress is indistinguishable from a
+ * hang.
+ *
+ * Pausing yields opaque `resumeData` which is persisted, so a download stopped
+ * — by the user, or by leaving the screen — resumes rather than restarting.
  *
  * Integrity is checked by size, not by hash — see `verifyInstalled`.
  */
@@ -27,13 +39,29 @@ import { getToken } from '@/api/client';
 const INSTALL_KEY = 'creepyim.model.install.v1';
 const DIRECTORY = 'models';
 
-/** 8 MB: large enough that per-chunk overhead is noise, small enough that a
- * dropped connection loses little and progress moves visibly. */
-const CHUNK_BYTES = 8 * 1024 * 1024;
+/** Where a paused download's opaque resume token lives, keyed by file name. */
+const RESUME_KEY_PREFIX = 'creepyim.model.resume.';
 
 function fileSystem(): typeof import('expo-file-system') {
   // eslint-disable-next-line @typescript-eslint/no-require-imports
   return require('expo-file-system') as typeof import('expo-file-system');
+}
+
+/**
+ * The legacy module, for `createDownloadResumable`.
+ *
+ * The current API streams to disk but reports no progress, and a 1.8 GB
+ * download with no visible progress is indistinguishable from a hang. This one
+ * reports bytes written and can be paused and resumed, which is what a
+ * download this size on a phone needs.
+ */
+function legacyFileSystem(): typeof import('expo-file-system/legacy') {
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  return require('expo-file-system/legacy') as typeof import('expo-file-system/legacy');
+}
+
+async function asyncStorage() {
+  return (await import('@react-native-async-storage/async-storage')).default;
 }
 
 export interface InstalledModel {
@@ -88,10 +116,7 @@ function fileFor(name: string) {
 
 export async function getInstalledModel(): Promise<InstalledModel | null> {
   try {
-    const AsyncStorage = (
-      await import('@react-native-async-storage/async-storage')
-    ).default;
-    const raw = await AsyncStorage.getItem(INSTALL_KEY);
+    const raw = await (await asyncStorage()).getItem(INSTALL_KEY);
     if (!raw) return null;
     const parsed = JSON.parse(raw) as InstalledModel;
     if (typeof parsed?.path !== 'string') return null;
@@ -125,8 +150,7 @@ export async function verifyInstalled(install: InstalledModel): Promise<boolean>
 }
 
 async function persist(install: InstalledModel): Promise<void> {
-  const AsyncStorage = (await import('@react-native-async-storage/async-storage')).default;
-  await AsyncStorage.setItem(INSTALL_KEY, JSON.stringify(install));
+  await (await asyncStorage()).setItem(INSTALL_KEY, JSON.stringify(install));
 }
 
 export async function removeInstalledModel(): Promise<void> {
@@ -143,71 +167,96 @@ export async function removeInstalledModel(): Promise<void> {
       }
     }
   }
-  const AsyncStorage = (await import('@react-native-async-storage/async-storage')).default;
-  await AsyncStorage.removeItem(INSTALL_KEY);
+  const storage = await asyncStorage();
+  await storage.removeItem(INSTALL_KEY);
+  // Resume tokens too: they point at partial files that are now gone, and a
+  // later download resuming against one would continue into nothing.
+  const keys = await storage.getAllKeys();
+  const stale = keys.filter((key) => key.startsWith(RESUME_KEY_PREFIX));
+  if (stale.length > 0) await storage.multiRemove(stale);
 }
 
-/** Download one file, resuming from whatever is already on disk. */
+/**
+ * Download one file to disk, resuming a previous attempt when there is one.
+ *
+ * Nothing here reads the body: the native task writes it, and this only
+ * watches the byte count. That is the whole point — see the note at the top of
+ * this module about the heap.
+ */
 async function downloadFile(
   entry: ModelFileEntry,
   options: {
-    onBytes: (delta: number) => void;
+    onBytes: (receivedForThisFile: number) => void;
     signal: AbortSignal;
     token: string | null;
+    registerTask: (task: { pause: () => Promise<void> }) => void;
   },
 ): Promise<string> {
+  const { File } = fileSystem();
   const file = fileFor(entry.name);
+
   if (file.exists && file.size === entry.bytes) {
     // Already complete from an earlier run.
     options.onBytes(entry.bytes);
     return file.uri.replace(/^file:\/\//u, '');
   }
 
-  if (file.exists && file.size > entry.bytes) {
-    // Longer than it should be: the server's file changed under a partial
-    // download. Resuming would splice two different models together.
-    file.delete();
-  }
-  if (!file.exists) file.create();
+  const storage = await asyncStorage();
+  const resumeKey = RESUME_KEY_PREFIX + entry.name;
+  const savedResumeData = (await storage.getItem(resumeKey)) ?? undefined;
 
-  let received = file.size;
-  options.onBytes(received);
+  // A partial file with no resume token cannot be continued — the token is
+  // what the platform matches against the server's validator. Starting over is
+  // the only correct option; keeping the fragment would splice two responses.
+  if (file.exists && !savedResumeData) file.delete();
 
   const headers: Record<string, string> = {};
   if (options.token) headers['Authorization'] = `Bearer ${options.token}`;
 
-  while (received < entry.bytes) {
-    if (options.signal.aborted) throw new DownloadCancelledError();
+  const legacy = legacyFileSystem();
+  const task = legacy.createDownloadResumable(
+    modelFileUrl(entry.url),
+    file.uri,
+    { headers },
+    (progress) => options.onBytes(progress.totalBytesWritten),
+    savedResumeData,
+  );
 
-    const end = Math.min(received + CHUNK_BYTES, entry.bytes) - 1;
-    const response = await fetch(modelFileUrl(entry.url), {
-      headers: { ...headers, Range: `bytes=${received}-${end}` },
-      signal: options.signal,
-    });
+  let paused = false;
+  options.registerTask({
+    pause: async () => {
+      paused = true;
+      const state = await task.pauseAsync();
+      // Persisted immediately: the token is the only way back to a partial
+      // file, and losing it costs the whole download.
+      if (state?.resumeData) await storage.setItem(resumeKey, state.resumeData);
+    },
+  });
 
-    if (response.status === 402) throw new SubscriptionRequiredError();
-    if (response.status !== 206 && response.status !== 200) {
-      throw new Error(`The server returned ${response.status} for ${entry.name}.`);
-    }
+  const result = savedResumeData
+    ? await task.resumeAsync()
+    : await task.downloadAsync();
 
-    const bytes = new Uint8Array(await response.arrayBuffer());
-    if (bytes.length === 0) {
-      throw new Error(`The server sent no data for ${entry.name} at ${received} bytes.`);
-    }
+  if (paused || options.signal.aborted) throw new DownloadCancelledError();
 
-    file.write(bytes, { append: true });
-    received += bytes.length;
-    options.onBytes(bytes.length);
+  if (!result) throw new DownloadCancelledError();
+  if (result.status === 402) throw new SubscriptionRequiredError();
+  if (result.status >= 300) {
+    throw new Error(`The server returned ${result.status} for ${entry.name}.`);
   }
 
-  if (file.size !== entry.bytes) {
-    file.delete();
+  // The download completed, so any resume token is spent.
+  await storage.removeItem(resumeKey);
+
+  const finished = new File(file.uri);
+  if (finished.size !== entry.bytes) {
+    finished.delete();
     throw new Error(
-      `${entry.name} finished at ${file.size} bytes but should be ${entry.bytes}.`,
+      `${entry.name} finished at ${finished.size} bytes but should be ${entry.bytes}.`,
     );
   }
 
-  return file.uri.replace(/^file:\/\//u, '');
+  return finished.uri.replace(/^file:\/\//u, '');
 }
 
 /**
@@ -228,24 +277,42 @@ export async function installModel(options: {
   if (!catalog.downloadAllowed) throw new SubscriptionRequiredError();
 
   const token = await getToken();
-  let received = 0;
+
+  // Progress is per file from the native task, so completed files are carried
+  // separately; adding deltas would drift as soon as one file resumed.
+  let completedBytes = 0;
+  let active: { pause: () => Promise<void> } | null = null;
+
+  const onAbort = () => {
+    void active?.pause();
+  };
+  options.signal.addEventListener('abort', onAbort);
 
   const paths: Record<string, string> = {};
-  for (const entry of bundle.files) {
-    const path = await downloadFile(entry, {
-      token,
-      signal: options.signal,
-      onBytes: (delta) => {
-        received += delta;
-        options.onProgress({
-          receivedBytes: received,
-          totalBytes: bundle.totalBytes,
-          currentFile: entry.name,
-          fraction: bundle.totalBytes > 0 ? received / bundle.totalBytes : 0,
-        });
-      },
-    });
-    paths[entry.role] = path;
+  try {
+    for (const entry of bundle.files) {
+      const path = await downloadFile(entry, {
+        token,
+        signal: options.signal,
+        registerTask: (task) => {
+          active = task;
+        },
+        onBytes: (receivedForThisFile) => {
+          const received = completedBytes + receivedForThisFile;
+          options.onProgress({
+            receivedBytes: received,
+            totalBytes: bundle.totalBytes,
+            currentFile: entry.name,
+            fraction: bundle.totalBytes > 0 ? received / bundle.totalBytes : 0,
+          });
+        },
+      });
+      completedBytes += entry.bytes;
+      active = null;
+      paths[entry.role] = path;
+    }
+  } finally {
+    options.signal.removeEventListener('abort', onAbort);
   }
 
   const weights = paths.weights;

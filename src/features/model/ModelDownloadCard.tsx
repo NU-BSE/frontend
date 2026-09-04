@@ -122,7 +122,7 @@ export function ModelDownloadCard({ profile }: { profile: string }) {
             </Text>
           )}
           <Button
-            label={state.progress ? 'Resume download' : 'Download'}
+            label={state.progress ? 'Resume' : 'Download'}
             onPress={start}
             disabled={state.blocker.kind !== 'none'}
           />

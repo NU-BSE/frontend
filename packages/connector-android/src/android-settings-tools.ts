@@ -545,14 +545,11 @@ export function createAndroidSettingsTools(
        * *can* do will keep hunting for one that does the rest.
        */
       description:
-        'Open a package-scoped Android Settings destination for one app. ' +
-        'Targets: "appDetails" is App info — the page where the USER can ' +
-        'disable, uninstall, force stop, or clear the data of that app; use ' +
-        'it for any request to turn an app off, remove it, or stop it. Also ' +
-        '"appNotifications", "notificationChannel", "notificationBubbles", ' +
-        '"appOpenByDefault" and the other targets in the schema. This opens ' +
-        'the screen only: no app is permitted to disable, uninstall or force ' +
-        'stop another one, so after opening it, tell the user what to tap.',
+        'Open one app\'s Settings page. "appDetails" is App info, where the ' +
+        'USER can disable, uninstall, force stop or clear data — use it for ' +
+        'any request to turn an app off, remove it or stop it. Opens the ' +
+        'screen only: no app may disable or uninstall another, so say what ' +
+        'to tap afterwards.',
       inputSchema: APP_TARGET_INPUT,
       outputSchema: z.object({
         opened: z.literal(true),

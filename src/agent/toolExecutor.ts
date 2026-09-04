@@ -52,10 +52,30 @@ export function classifyToolError(message: string): AgentErrorCode {
   return 'TOOL_EXECUTION_ERROR';
 }
 
+/**
+ * Trims a long error from the middle, not the end.
+ *
+ * A validation error puts the fix at the end:
+ *
+ *   Invalid arguments for tool android.settings.open_app: target: Invalid
+ *   option: expected one of "appDetails"|"appNotifications"|…
+ *
+ * Cutting the tail threw away the list of valid options and left the model
+ * holding "target: Invalid option…(truncated)" — told it was wrong and not
+ * what would be right, which is the one thing that could have produced a
+ * correct retry. Keeping both ends costs nothing and preserves the answer
+ * wherever the message happens to carry it.
+ */
 function sanitizeForModel(message: string): string {
   const trimmed = message.trim();
   if (trimmed.length <= MAX_ERROR_CHARS) return trimmed;
-  return `${trimmed.slice(0, MAX_ERROR_CHARS)}…`;
+
+  const ELLIPSIS = ' … ';
+  const budget = MAX_ERROR_CHARS - ELLIPSIS.length;
+  const head = Math.ceil(budget / 2);
+  return (
+    trimmed.slice(0, head) + ELLIPSIS + trimmed.slice(trimmed.length - (budget - head))
+  );
 }
 
 /**
@@ -235,10 +255,17 @@ async function callMcpTool(
       ? classifyToolError(message)
       : 'TOOL_EXECUTION_ERROR';
     if (DEV_LOG) {
+      /*
+       * The arguments too. Diagnosing "target: Invalid option" from a log that
+       * named only the tool meant guessing what the model had actually sent;
+       * the offending value is the whole story. Truncated, since an argument
+       * can carry a whole message body.
+       */
       console.error('[tool] call failed', {
         tool: name,
         errorCode,
         message,
+        args: JSON.stringify(args).slice(0, 300),
       });
     }
     return {

@@ -72,21 +72,57 @@ const plannerResponseSchema =
 
 const MAX_TOOL_RESULT_CHARS = 2000;
 
+/**
+ * The most values an enum may spell out in the prompt.
+ *
+ * The largest today is `android.settings.open`'s 47 screens, about 570
+ * characters — worth every one of them, because a screen name is copied
+ * verbatim or the call fails. The cap exists so a future enum of hundreds
+ * cannot quietly eat the window; when it bites, the prompt says so rather
+ * than presenting a truncated list as if it were the whole set.
+ */
+const MAX_ENUM_VALUES = 60;
+
+/**
+ * How one argument is described to the model.
+ *
+ * An enum is rendered as its values, not as `string`. Dropping them was the
+ * same mistake as making the model transcribe a connectionId: it was asked for
+ * one of eight exact strings — `appDetails`, `appNotifications`, … — while the
+ * prompt said only `target: string`. It guessed, and MCP rejected the call
+ * with "target: Invalid option", a validation error for a choice it had no way
+ * to make. The values are in `inputSchema` already; this stops throwing them
+ * away.
+ */
+function describeArgument(name: string, property: unknown): string {
+  const spec = property as {
+    description?: string;
+    type?: string;
+    enum?: unknown[];
+  };
+
+  const values = Array.isArray(spec?.enum) ? spec.enum : null;
+  let type: string;
+  if (values && values.length > 0) {
+    const shown = values.slice(0, MAX_ENUM_VALUES).map((v) => JSON.stringify(v));
+    type =
+      values.length > MAX_ENUM_VALUES
+        ? `one of ${shown.join('|')} (and ${values.length - MAX_ENUM_VALUES} more not listed)`
+        : `one of ${shown.join('|')}`;
+  } else {
+    type = spec?.type ?? 'value';
+  }
+
+  return `${name}: ${type}${spec?.description ? ` — ${spec.description}` : ''}`;
+}
+
 function protocolInstructions(input: AgentModelInput): string {
   const toolLines = input.tools.map((tool) => {
     const properties =
       (tool.inputSchema.properties as Record<string, unknown> | undefined) ??
       {};
     const args = Object.keys(properties)
-      .map((name) => {
-        const property = properties[name] as {
-          description?: string;
-          type?: string;
-        };
-        return `${name}: ${property?.type ?? 'value'}${
-          property?.description ? ` — ${property.description}` : ''
-        }`;
-      })
+      .map((name) => describeArgument(name, properties[name]))
       .join('; ');
     return `- ${tool.name}: ${tool.description} Arguments: { ${args} }`;
   });

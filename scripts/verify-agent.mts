@@ -1307,6 +1307,64 @@ console.log('\nthe planner never shows protocol output as an answer:');
     );
   }
 
+  /*
+   * An enum argument is shown as its values, not as `string`.
+   *
+   * `android.settings.open_app` failed with "target: Invalid option" because
+   * the prompt said `target: string` while the schema listed eight exact names
+   * it never surfaced. The model was asked for a value it had never been
+   * shown — the same mistake as making it transcribe a connectionId.
+   */
+  {
+    const prompts: string[] = [];
+    const recording: LlmEngine = {
+      id: 'recording-enum',
+      label: 'recording',
+      isReady: () => true,
+      prepare: () => Promise.resolve(),
+      // eslint-disable-next-line @typescript-eslint/require-await
+      async *generate(turns: readonly { content: string }[]) {
+        prompts.push(turns[0]?.content ?? '');
+        yield '{"type":"final","content":"ok"}';
+      },
+    } as unknown as LlmEngine;
+
+    await createStructuredPlanner(recording).run({
+      messages: [{ id: 'm1', role: 'user', content: 'turn off the Gemini app' }],
+      tools: [
+        {
+          name: 'android.settings.open_app',
+          description: 'Open app settings.',
+          inputSchema: {
+            properties: {
+              connectionId: { type: 'string' },
+              target: {
+                type: 'string',
+                enum: ['appDetails', 'appNotifications', 'appUsage'],
+              },
+              packageName: { type: 'string' },
+            },
+          },
+        },
+      ],
+      connections: [],
+    } as never);
+
+    const system = prompts[0] ?? '';
+    assert(
+      system.includes('target: one of "appDetails"|"appNotifications"|"appUsage"'),
+      'an enum argument is spelled out so the model can copy a valid value',
+    );
+    assert(
+      !system.includes('target: string'),
+      'and is not flattened to "string", which is what made it guess',
+    );
+    assert(
+      system.includes('packageName: string'),
+      'a non-enum argument is still described by its type',
+    );
+  }
+
   const plain = await plan(
     '{"type":"final","content":"Telegram is not connected."}',
   );
@@ -1594,6 +1652,44 @@ console.log('\na scope failure tells the model how to fix it:');
     (result.error?.length ?? 0) <= 600,
     'and still fits the budget the model is given for an error',
   );
+
+  /*
+   * A long validation error keeps both ends. The fix lives at the tail —
+   * "expected one of …" — and cutting it left the model told it was wrong and
+   * not what would be right.
+   */
+  {
+    const options = Array.from(
+      { length: 60 },
+      (_unused, index) => `"appTarget${index}"`,
+    ).join('|');
+    const long = {
+      callTool: () => {
+        const error = new Error(
+          'Input validation error: Invalid arguments for tool ' +
+            `android.settings.open_app: target: Invalid option: expected one of ${options}`,
+        );
+        error.name = 'ToolExecutionError';
+        return Promise.reject(error);
+      },
+    } as never;
+
+    const trimmed = await executeToolCall(
+      long,
+      { id: 'c2', toolName: 'android.settings.open_app', args: {} } as never,
+    );
+    const text = trimmed.error ?? '';
+
+    assert(text.length <= 600, 'the message still fits the budget');
+    assert(
+      text.includes('android.settings.open_app: target'),
+      'the head says which argument was wrong',
+    );
+    assert(
+      text.includes('"appTarget59"'),
+      'and the tail still carries the valid options, which is the fix',
+    );
+  }
 
   /*
    * The invariant that actually broke. The remedy named `writeSettings`; the

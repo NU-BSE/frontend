@@ -141,7 +141,7 @@ async function main(): Promise<void> {
       'built-in system.health is available',
     );
     assert(
-      !names.some((name) => /^(telegram|google|android|slack)\./u.test(name)),
+      !names.some((name) => /^(telegram|google|android)\./u.test(name)),
       'no external account tools are exposed on a fresh install',
     );
     assert(
@@ -516,6 +516,39 @@ async function main(): Promise<void> {
     assert(
       active.some(({ tool }) => tool.name === 'google.calendar.list_events'),
       'the partial Google connector exposes real read-only tools',
+    );
+  }
+
+  /**
+   * The mock connectors are gone in *both* modes, not just production.
+   *
+   * The `!development` guard in the registry factory was doing its job and was
+   * still not enough: a development build is what runs on a phone during a
+   * demo, and there Microsoft, Slack, Notion, Todoist, GitHub, Dropbox,
+   * Discord, Spotify and the Telegram bot registered and answered from
+   * fixtures. They also dominated the planner's prompt — most of 103 tools and
+   * ~7,000 tokens, more than a local 2B's whole context window.
+   *
+   * A regex over tool names would be a list to forget to update, so this asks
+   * the connectors what they are. Anything self-declaring as a mock fails,
+   * whichever mode registered it.
+   */
+  console.log('no mock connector registers in either mode:');
+  for (const mode of ['development', 'production'] as const) {
+    const registry = createConnectorRegistry({
+      mode,
+      connectionStore: new InMemoryConnectionStore(),
+      credentialVault: new InMemoryCredentialVault(),
+    });
+
+    const mocks = registry
+      .listConnectors()
+      .filter((connector) => connector.implementationStatus === 'mock')
+      .map((connector) => connector.id);
+
+    assert(
+      mocks.length === 0,
+      `${mode} registers no mock connector${mocks.length ? ` (found ${mocks.join(', ')})` : ''}`,
     );
   }
 

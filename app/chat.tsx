@@ -369,7 +369,11 @@ const styles = StyleSheet.create({
   flex: { flex: 1 },
   header: {
     flexDirection: 'row',
-    alignItems: 'center',
+    // Top, not centre: the status line under the title can run to four lines
+    // when it carries an engine failure, and a vertically centred "Close"
+    // floats down the middle of that block instead of sitting level with the
+    // title it belongs to.
+    alignItems: 'flex-start',
     justifyContent: 'space-between',
     paddingHorizontal: gutter.home,
     paddingBottom: spacing.md,
@@ -377,11 +381,20 @@ const styles = StyleSheet.create({
     borderBottomWidth: 1,
     borderBottomColor: palette.borderFaint,
   },
-  headerText: { gap: spacing.xs },
+  // `flex: 1` is what keeps "Close" on screen. Without it the text column is
+  // sized by its content, so a long status line — an on-device engine failure
+  // is a full sentence — grows the column past the available width and pushes
+  // the actions off the right edge. `flexShrink: 0` then stops the row from
+  // resolving that overflow by shrinking the button instead.
+  headerText: { flex: 1, gap: spacing.xs },
   headerActions: {
     flexDirection: 'row',
     alignItems: 'center',
+    flexShrink: 0,
     gap: spacing.md,
+    // Level with the title, which the tighter line height of `headline` would
+    // otherwise leave a few points below the top of the row.
+    paddingLeft: spacing.md,
   },
   listContent: { padding: gutter.home, flexGrow: 1 },
   gap: { height: spacing.md },

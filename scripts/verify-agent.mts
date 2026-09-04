@@ -1023,12 +1023,18 @@ async function main(): Promise<void> {
 /*
  * Only tools that could run reach the prompt.
  *
- * The registry holds 103 tools across every connector; rendered into the
- * planner's system prompt that is about 7,000 tokens, and a local 2B with a
- * 4,096-token window cannot load it at all — llama.cpp refuses the prompt with
- * "Context is full" and the run ends having produced nothing. That is the bug
- * this filter exists for, and it is invisible until someone tries it on a
+ * The registry used to hold 103 tools across every connector; rendered into
+ * the planner's system prompt that was about 7,000 tokens, and a local 2B with
+ * a 4,096-token window cannot load it at all — llama.cpp refuses the prompt
+ * with "Context is full" and the run ends having produced nothing. That is the
+ * bug this filter exists for, and it is invisible until someone tries it on a
  * phone.
+ *
+ * Deleting the eight mock connectors since then took the registry to 22 tools
+ * and ~900 tokens, which does most of the same work — but only for the
+ * connectors that happen to be registered today. This filter is the part that
+ * keeps holding as connectors are added back, because a tool for an account
+ * that is not connected cannot succeed whatever the budget is.
  */
 console.log('\ntools are limited to connected accounts:');
 {

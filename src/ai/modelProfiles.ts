@@ -27,11 +27,13 @@ export const LOCAL_MODEL_RUNTIME: Record<
   /*
    * 4096, sized against a measured prompt rather than guessed.
    *
-   * The planner's system prompt is dominated by the tool list. Unfiltered that
-   * is 103 tools and roughly 7,000 tokens, which no plausible window on a
-   * phone accommodates; `toolsForConnections` cuts it to the connected
-   * accounts, which for three connectors measures around 2,000 tokens. 4096
-   * leaves the conversation about half the window.
+   * The planner's system prompt is dominated by the tool list. It was 103
+   * tools and roughly 7,000 tokens, which no plausible window on a phone
+   * accommodates. Deleting the mock connectors took the registry to 22 tools —
+   * measured at 3,159 characters, about 900 tokens, with Google and Telegram
+   * connected — and `toolsForConnections` trims that again to the accounts a
+   * given user has actually connected. 4096 leaves the conversation the great
+   * majority of the window.
    *
    * Raising it further is not free: the KV cache is roughly 56 KB per token
    * for this model, so every 1,000 tokens of context costs about 56 MB of

@@ -6,17 +6,8 @@ import { GoogleConnector } from '@mobile-agent/connector-google';
 import {
   MockTdlibAdapter,
   NativeTdlibAdapter,
-  TelegramBotConnector,
   TelegramUserConnector,
 } from '@mobile-agent/connector-telegram';
-import { MicrosoftConnector } from '@mobile-agent/connector-microsoft';
-import { SlackConnector } from '@mobile-agent/connector-slack';
-import { NotionConnector } from '@mobile-agent/connector-notion';
-import { TodoistConnector } from '@mobile-agent/connector-todoist';
-import { GithubConnector } from '@mobile-agent/connector-github';
-import { DropboxConnector } from '@mobile-agent/connector-dropbox';
-import { DiscordConnector } from '@mobile-agent/connector-discord';
-import { SpotifyConnector } from '@mobile-agent/connector-spotify';
 import { IntentConnector } from '@mobile-agent/connector-intents';
 
 import type { McpRuntimeMode } from './runtime-mode';
@@ -38,9 +29,32 @@ export interface AppRegistryOptions {
  * Registry factory with explicit dependencies: connector packages stay
  * platform-neutral and native app bridges are injected here.
  *
- * Development may register mock connectors; production rejects mocks. Local
- * Android Settings/Intent connectors register only when their native bridge is
- * actually present, so no fixture success can leak into a production build.
+ * RELEASE BUILD: four connectors, all of which reach something real.
+ *
+ * `main` also constructs Microsoft, Slack, Notion, Todoist, GitHub, Dropbox,
+ * Discord, Spotify and the Telegram *bot* connector. Every one of those
+ * reports `implementationStatus: 'mock'`: they answer from fixtures. The
+ * `!development` guard below kept them out of a production bundle, but a
+ * development build is what runs on a phone during a demo, and there they were
+ * not merely useless — they were expensive. The registry hands the planner
+ * every registered connector's tools, so the mocks contributed most of a
+ * 103-tool, ~7,000-token prompt that a local 2B with a 4,096-token window
+ * cannot even load; llama.cpp refuses it outright with "Context is full".
+ * `toolsForConnections` in AgentRuntime already drops tools for accounts that
+ * are not connected, but nothing stops a curious user from "connecting" a mock
+ * and getting invented answers.
+ *
+ * So on this branch they are gone in both modes, matching
+ * `features/connections/catalog.ts`, which was cut to the same set and for the
+ * same reason. The packages themselves are untouched under `packages/` and the
+ * removed lines are intact on `main`; restoring an entry is a copy back.
+ *
+ * The `!development` guard stays: it is what stops a restored mock from
+ * reaching a release by accident.
+ *
+ * Local Android Settings/Intent connectors register only when their native
+ * bridge is actually present, so no fixture success can leak into a production
+ * build.
  */
 function googleAuthOptions(
   connectionStore: ConnectionStore,
@@ -70,7 +84,6 @@ export function createConnectorRegistry(
 ): ConnectorRegistry {
   const { mode, connectionStore, credentialVault } = options;
   const development = mode === 'development';
-  const store = { store: connectionStore };
 
   const registry = new ConnectorRegistry({
     allowDevelopmentMocks: development,
@@ -114,15 +127,6 @@ export function createConnectorRegistry(
           ? () => new MockTdlibAdapter()
           : () => new NativeTdlibAdapter(),
     }),
-    new TelegramBotConnector(store),
-    new MicrosoftConnector(store),
-    new SlackConnector(store),
-    new NotionConnector(store),
-    new TodoistConnector(store),
-    new GithubConnector(store),
-    new DropboxConnector(store),
-    new DiscordConnector(store),
-    new SpotifyConnector(store),
   ];
 
   for (const connector of connectors) {

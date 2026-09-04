@@ -583,4 +583,157 @@ for (const windowWidth of [360, 390, 412]) {
   );
 }
 
+console.log('\nchat header:');
+
+/*
+ * The chat header is a row: a text column (title + status line, and sometimes
+ * a "Retry tools" button) and, at the right, "Close".
+ *
+ * It shipped with the text column unsized — no `flex`, no `flexShrink` — so
+ * Yoga sized it by content. A one-word status line ("ON THIS DEVICE") fits and
+ * the bug is invisible. An engine failure does not: "On-device inference
+ * unavailable: the prompt is larger than the model's context window — too many
+ * tools or too long a conversation for on-device inference" wraps to four
+ * lines, and the column claiming that intrinsic width pushed "Close" past the
+ * right edge of the screen. `alignItems: 'center'` then floated the half-
+ * visible button down the middle of the block.
+ *
+ * Both symptoms are geometry, so both are checkable here. The long line is the
+ * real string from onDeviceEngine's describeCompletionFailure, uppercased as
+ * the `tag` variant renders it.
+ */
+const HEADER_GUTTER = 16; // gutter.home
+const HEADER_GAP = 12; // spacing.md — headerActions' paddingLeft
+const HEADLINE_LINE_HEIGHT = 26; // typography.headline
+const TAG_LINE_HEIGHT = 14; // typography.tag
+const HEADER_TEXT_GAP = 4; // spacing.xs
+const CLOSE_WIDTH = 44; // "Close" at typography.label
+const CLOSE_HEIGHT = 20; // typography.label lineHeight
+
+function layoutChatHeader(
+  windowWidth: number,
+  statusLines: number,
+  variant: 'fixed' | 'broken' = 'fixed',
+) {
+  const broken = variant === 'broken';
+
+  const root = Yoga.Node.create();
+  root.setWidth(windowWidth);
+
+  const header = Yoga.Node.create();
+  header.setFlexDirection(FlexDirection.Row);
+  header.setAlignItems(broken ? Align.Center : Align.FlexStart);
+  header.setJustifyContent(Justify.SpaceBetween);
+  header.setPadding(Edge.Horizontal, HEADER_GUTTER);
+  root.insertChild(header, 0);
+
+  const text = Yoga.Node.create();
+  if (!broken) {
+    // The whole fix: an unsized column takes its intrinsic width.
+    text.setFlexGrow(1);
+    text.setFlexShrink(1);
+    text.setFlexBasis(0);
+    text.setMinWidth(0);
+  }
+  text.setGap(Gutter.All, HEADER_TEXT_GAP);
+  header.insertChild(text, 0);
+
+  const title = Yoga.Node.create();
+  title.setHeight(HEADLINE_LINE_HEIGHT);
+  // A title is a single line and never widens the column past what is offered.
+  title.setWidth(120);
+  text.insertChild(title, 0);
+
+  const status = Yoga.Node.create();
+  status.setHeight(TAG_LINE_HEIGHT * statusLines);
+  // What an unsized column measures: the status line's *unwrapped* width. Four
+  // wrapped lines at 360pt is roughly 1,100pt of text laid end to end.
+  if (broken) status.setWidth(TAG_LINE_HEIGHT * statusLines * 20);
+  text.insertChild(status, 1);
+
+  const actions = Yoga.Node.create();
+  actions.setFlexDirection(FlexDirection.Row);
+  actions.setAlignItems(Align.Center);
+  if (!broken) {
+    actions.setFlexShrink(0);
+    actions.setPadding(Edge.Left, HEADER_GAP);
+  }
+  header.insertChild(actions, 1);
+
+  const close = Yoga.Node.create();
+  close.setWidth(CLOSE_WIDTH);
+  close.setHeight(CLOSE_HEIGHT);
+  actions.insertChild(close, 0);
+
+  header.calculateLayout(windowWidth, undefined, Direction.LTR);
+  const frameOf = (node: ReturnType<typeof Yoga.Node.create>): Frame => {
+    const c = node.getComputedLayout();
+    return { left: c.left, top: c.top, width: c.width, height: c.height };
+  };
+  // Frames are relative to the header, whose own left edge is 0.
+  return {
+    header: frameOf(header),
+    text: frameOf(text),
+    title: frameOf(title),
+    actions: frameOf(actions),
+    close: frameOf(close),
+  };
+}
+
+for (const windowWidth of [360, 390, 412]) {
+  // Four lines is what the on-device context-window failure wraps to at 360pt.
+  for (const statusLines of [1, 4]) {
+    const frames = layoutChatHeader(windowWidth, statusLines);
+    const closeRight =
+      frames.actions.left + frames.close.left + frames.close.width;
+
+    assert(
+      closeRight <= windowWidth - HEADER_GUTTER + 0.01,
+      `${windowWidth}pt/${statusLines}-line status: Close stays inside the gutter (right edge ${closeRight})`,
+    );
+    assert(
+      frames.close.width === CLOSE_WIDTH,
+      `${windowWidth}pt/${statusLines}-line status: Close is not shrunk to fit (${frames.close.width})`,
+    );
+    assert(
+      frames.actions.left >= frames.text.left + frames.text.width - 0.01,
+      `${windowWidth}pt/${statusLines}-line status: Close does not overlap the text column`,
+    );
+  }
+
+  // Vertical: the button belongs to the title, not to the middle of a tall
+  // error block. Their centres coincide however long the status line grows.
+  const tall = layoutChatHeader(windowWidth, 4);
+  const titleCentre = tall.text.top + tall.title.top + tall.title.height / 2;
+  const closeCentre = tall.actions.top + tall.close.top + tall.close.height / 2;
+  assert(
+    Math.abs(titleCentre - closeCentre) <= HEADLINE_LINE_HEIGHT / 2,
+    `${windowWidth}pt: Close sits level with the title, not the middle of the error (${closeCentre} vs ${titleCentre})`,
+  );
+}
+
+console.log('\ncontrol — the header that shipped broken:');
+{
+  const brokenFrames = layoutChatHeader(360, 4, 'broken');
+  const closeRight =
+    brokenFrames.actions.left +
+    brokenFrames.close.left +
+    brokenFrames.close.width;
+  assert(
+    closeRight > 360 - HEADER_GUTTER,
+    `an unsized text column really does push Close past the screen edge (right edge ${closeRight.toFixed(0)} of 360)`,
+  );
+
+  const titleCentre =
+    brokenFrames.text.top + brokenFrames.title.top + brokenFrames.title.height / 2;
+  const closeCentre =
+    brokenFrames.actions.top +
+    brokenFrames.close.top +
+    brokenFrames.close.height / 2;
+  assert(
+    closeCentre - titleCentre > HEADLINE_LINE_HEIGHT / 2,
+    `centre alignment really does drop Close below the title (${closeCentre} vs ${titleCentre})`,
+  );
+}
+
 console.log('\nlayout verified.');

@@ -31,8 +31,43 @@ interface LlamaContext {
     params: Record<string, unknown>,
     onToken?: (data: { token: string }) => void,
   ): Promise<{ text: string }>;
-  stopCompletion(): Promise<void>;
+  /**
+   * Declared `Promise<void>` by llama.rn, and it is not one.
+   *
+   * The JSI host function sets an interrupt flag and returns
+   * `jsi::Value::undefined()` synchronously (RNLlamaJSI.cpp), and it reaches
+   * that flag through `getContextOrThrow`, which *throws* — also
+   * synchronously — once the context has been released. So this call can
+   * return undefined or raise, and can never be awaited or `.catch()`ed.
+   * Typed here for what it does rather than what it claims.
+   */
+  stopCompletion(): void | Promise<void>;
   release(): Promise<void>;
+}
+
+/**
+ * Interrupt any decode in flight, and never fail doing it.
+ *
+ * `active.stopCompletion().catch(() => undefined)` looks like defensive code
+ * and is the opposite: `stopCompletion` returns undefined, so the `.catch`
+ * threw `TypeError: Cannot read property 'catch' of undefined` on every call.
+ *
+ * In `dispose()` that TypeError escaped an unawaited effect cleanup as an
+ * unhandled rejection — visible as a red box on any hot reload — and, worse,
+ * it aborted `dispose()` before `release()`, leaking a native context holding
+ * roughly a gigabyte of weights. The visible symptom was a console error; the
+ * cost was that every reload loaded another copy of the model.
+ *
+ * Stopping is advisory in both callers — the context is about to be released,
+ * or the caller has already abandoned the stream — so a failure here is
+ * genuinely nothing to report.
+ */
+function stopQuietly(context: LlamaContext): void {
+  try {
+    void Promise.resolve(context.stopCompletion()).catch(() => undefined);
+  } catch {
+    // Context already released: getContextOrThrow threw "Context not found".
+  }
 }
 
 type InitLlama = (options: Record<string, unknown>) => Promise<LlamaContext>;
@@ -173,7 +208,7 @@ export function createOnDeviceEngine(config: OnDeviceEngineConfig): LlmEngine {
       const queue = new AsyncQueue<string>();
 
       const onAbort = () => {
-        void active.stopCompletion().catch(() => undefined);
+        stopQuietly(active);
         queue.close();
       };
       options.signal?.addEventListener('abort', onAbort);
@@ -209,8 +244,10 @@ export function createOnDeviceEngine(config: OnDeviceEngineConfig): LlmEngine {
       const active = context;
       context = null;
       if (active) {
-        // Best-effort: stop any in-flight decode before releasing the context.
-        await active.stopCompletion().catch(() => undefined);
+        // Best-effort: interrupt any in-flight decode, then release. `release`
+        // is a real promise (it waits for outstanding tasks on the context
+        // before deleting it); `stopCompletion` is not — see stopQuietly.
+        stopQuietly(active);
         await active.release().catch(() => undefined);
       }
     },

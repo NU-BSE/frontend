@@ -197,6 +197,27 @@ async function checkTheGuestHasNoAmbientAuthority(): Promise<void> {
   );
 }
 
+async function checkConsoleIsCaptured(): Promise<void> {
+  const probe = [
+    "console.error('boxed status line');",
+    "console.log('plain', { a: 1 });",
+    'globalThis.__creepyMcpHost.ready({ deliver: () => {} });',
+  ].join('\n');
+
+  const { posted } = loadSandbox(probe, {});
+  await tick();
+
+  const logs = posted.filter((message) => message.t === 'log');
+  assert(
+    logs.some((message) => String(message.text) === 'boxed status line'),
+    'console.error is captured — most servers log through it, not process.stderr',
+  );
+  assert(
+    logs.some((message) => String(message.text) === 'plain {"a":1}'),
+    'non-string console arguments are rendered rather than dropped',
+  );
+}
+
 async function checkAFailingBundleIsReported(): Promise<void> {
   const { posted } = loadSandbox('throw new Error("this server is broken");', {});
   await tick();
@@ -310,6 +331,9 @@ async function main(): Promise<void> {
 
   console.log('\nno ambient authority:');
   await checkTheGuestHasNoAmbientAuthority();
+
+  console.log('\nconsole capture:');
+  await checkConsoleIsCaptured();
 
   console.log('\nfailure reporting:');
   await checkAFailingBundleIsReported();

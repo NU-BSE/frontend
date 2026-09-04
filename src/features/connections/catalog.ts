@@ -41,6 +41,16 @@ export interface ConnectorCatalogEntry {
    * would otherwise render as "Coming soon".
    */
   route?: string;
+  /**
+   * Give this entry a row to itself, spanning the full content width.
+   *
+   * The grid is three columns and a short final row is padded with spacers so
+   * its cells keep the width they have in a full row. That is right for a
+   * connector — a lone tile stretched across the screen reads as a different
+   * kind of thing from the ones above it — and wrong for an entry that *is* a
+   * different kind of thing.
+   */
+  fullWidth?: boolean;
 }
 
 export const CONNECTOR_CATALOG: ConnectorCatalogEntry[] = [
@@ -60,6 +70,7 @@ export const CUSTOM_SERVERS_ENTRY: ConnectorCatalogEntry = {
   label: 'Custom',
   summary: 'Your own MCP servers',
   route: '/connect/custom',
+  fullWidth: true,
 };
 
 /**

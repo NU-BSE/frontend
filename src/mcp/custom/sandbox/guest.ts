@@ -135,6 +135,29 @@ const PREAMBLE = String.raw`
     });
   };
 
+  // Capture console as well as process.stderr. Real servers overwhelmingly log
+  // through console — the official sequential-thinking server draws its whole
+  // status box with console.error — and in a WebView that output goes nowhere
+  // a user or a developer can see it. The original is still called so a
+  // browser devtools session shows it too.
+  ['log', 'info', 'warn', 'error', 'debug'].forEach(function (level) {
+    var original = console[level];
+    console[level] = function () {
+      var text = Array.prototype.map
+        .call(arguments, function (argument) {
+          if (typeof argument === 'string') return argument;
+          try {
+            return JSON.stringify(argument);
+          } catch (error) {
+            return String(argument);
+          }
+        })
+        .join(' ');
+      post({ t: 'log', stream: 'console.' + level, text: text });
+      if (original) original.apply(console, arguments);
+    };
+  });
+
   // The contract the translated bundle's shims expect. See
   // app/services/mcp_host/ in the backend: the stdio transport was aliased to
   // something that calls ready(), and process was injected to read env.

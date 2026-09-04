@@ -250,9 +250,20 @@ const CONNECTOR_MIN_HEIGHT = 104;
  * one full row to two — and the second shape is the riskier one, because its
  * final row is a single real cell beside two spacers.
  */
+/*
+ * Only the tiles are laid out three across. A full-width entry gets an
+ * unpadded row of its own, checked separately below — counting it here would
+ * assert the very padding that stops it spanning the width.
+ */
 const CONNECTOR_SHAPES = [
-  { label: 'no resolver host', count: buildConnectorCatalog({ customServers: false }).length },
-  { label: 'with custom servers', count: buildConnectorCatalog({ customServers: true }).length },
+  {
+    label: 'no resolver host',
+    count: buildConnectorCatalog({ customServers: false }).filter((e) => !e.fullWidth).length,
+  },
+  {
+    label: 'with custom servers',
+    count: buildConnectorCatalog({ customServers: true }).filter((e) => !e.fullWidth).length,
+  },
 ];
 
 for (const shape of CONNECTOR_SHAPES) {
@@ -306,6 +317,24 @@ for (const windowWidth of [320, 360, 390, 393, 411, 412, 480, 600]) {
     `${windowWidth}pt: padded final row keeps cell width (${lastRow[0]!.width.toFixed(1)}pt)`,
   );
 }
+}
+
+
+/*
+ * The full-width row. A single cell in an unpadded row must reach the whole
+ * content box: if a spacer ever crept back in, the tile would sit at a third
+ * of the width and look like a connector that failed to load.
+ */
+console.log('\nyoga layout — full-width connector row:');
+
+for (const windowWidth of [320, 360, 390, 393, 411, 412, 480, 600]) {
+  const [row] = layoutGrid(windowWidth, 1, 1, CONNECTOR_GAP, CONNECTOR_MIN_HEIGHT);
+  const cell = row![0]!;
+  const contentWidth = windowWidth - GUTTER * 2;
+  assert(
+    Math.abs(cell.width - contentWidth) <= 0.01,
+    `${windowWidth}pt: the row spans the full ${contentWidth}pt (got ${cell.width.toFixed(1)}pt)`,
+  );
 }
 
 // The counter-example: percentage widths at three columns overflow far more

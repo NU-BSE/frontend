@@ -46,10 +46,17 @@ export function ConnectorList() {
    * is read through the catalogue builder rather than by appending a tile here
    * so that `verify:layout` measures the same two shapes this renders.
    */
-  const rows = useMemo(
-    () => chunkRows(buildConnectorCatalog({ customServers: hasResolverHost() }), COLUMNS),
-    [],
-  );
+  const rows = useMemo(() => {
+    const entries = buildConnectorCatalog({ customServers: hasResolverHost() });
+    const tiles = entries.filter((entry) => !entry.fullWidth);
+    const banners = entries.filter((entry) => entry.fullWidth);
+    /*
+     * Full-width entries get their own unpadded row. Padding is what keeps a
+     * short final row's cells the same width as a full one, so *not* padding
+     * is what lets a single cell span the content width.
+     */
+    return [...chunkRows(tiles, COLUMNS), ...banners.map((entry) => [entry])];
+  }, []);
 
   const failed =
     disconnect.isError

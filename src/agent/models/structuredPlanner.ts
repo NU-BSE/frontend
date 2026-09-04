@@ -225,6 +225,41 @@ function extractJsonObject(text: string): string | null {
   return null;
 }
 
+/**
+ * A `final` whose whole content is JSON is a protocol failure, not an answer.
+ *
+ * The schema only asks that `content` be a non-empty string, and a small model
+ * asked to emit JSON will sometimes emit JSON there too. This reached a user:
+ * "Open Digital Assistant App setting and change it to Creepy" was answered
+ * with the literal text
+ *
+ *     {"connectionId":"android-device"}
+ *
+ * — the arguments of the tool call it meant to make, wrapped in a `final` the
+ * parser accepted and the chat rendered as a reply. The tool it wanted
+ * (`android.assistant.open_settings`) existed and was never called.
+ *
+ * Only a content that is *entirely* a JSON object or array counts. Text that
+ * merely quotes some JSON is a legitimate answer — explaining a tool result
+ * is exactly the kind of thing the assistant should be able to do — so the
+ * check is anchored at both ends and parses before rejecting.
+ */
+function isRawProtocolFragment(content: string): boolean {
+  const trimmed = content.trim();
+  const looksStructural =
+    (trimmed.startsWith('{') && trimmed.endsWith('}')) ||
+    (trimmed.startsWith('[') && trimmed.endsWith(']'));
+  if (!looksStructural) return false;
+
+  try {
+    const value: unknown = JSON.parse(trimmed);
+    return typeof value === 'object' && value !== null;
+  } catch {
+    // Not actually JSON — prose that happens to be wrapped in braces.
+    return false;
+  }
+}
+
 function parsePlannerResponse(
   text: string,
 ): z.infer<typeof plannerResponseSchema> | null {
@@ -232,11 +267,20 @@ function parsePlannerResponse(
   const candidate = extractJsonObject(cleaned);
   if (!candidate) return null;
 
+  let parsed: z.infer<typeof plannerResponseSchema>;
   try {
-    return plannerResponseSchema.parse(JSON.parse(candidate));
+    parsed = plannerResponseSchema.parse(JSON.parse(candidate));
   } catch {
     return null;
   }
+
+  // Treated as unparseable, so the caller's correction retry gets a chance
+  // and, failing that, the honest degradation message is what the user sees.
+  if (parsed.type === 'final' && isRawProtocolFragment(parsed.content)) {
+    return null;
+  }
+
+  return parsed;
 }
 
 export function createStructuredPlanner(engine: LlmEngine): AgentModel {
@@ -297,13 +341,25 @@ export function createStructuredPlanner(engine: LlmEngine): AgentModel {
       }
 
       if (!parsed) {
-        // Never fabricate a tool call from prose. The raw completion (if any
-        // readable text exists) becomes the answer; otherwise admit failure.
-        const fallback = completion.trim();
+        /*
+         * Never fabricate a tool call from prose. Whatever readable text the
+         * model produced becomes the answer; otherwise admit failure.
+         *
+         * "Readable" excludes protocol leftovers. A completion like
+         * `Sure. {"connectionId":"android-device"}` has a real sentence and a
+         * fragment of a tool call stuck to it, and only the sentence is for
+         * the user. Nothing that parses reaches here, so trimming a trailing
+         * JSON object can only remove debris.
+         */
+        const fallback = completion
+          .trim()
+          .replace(/\s*(\{[\s\S]*\}|\[[\s\S]*\])\s*$/u, '')
+          .trim();
+
         return {
           kind: 'final',
           text:
-            fallback.length > 0 && !fallback.startsWith('{')
+            fallback.length > 0
               ? fallback
               : 'I could not form a valid plan for that request. Please rephrase.',
         };

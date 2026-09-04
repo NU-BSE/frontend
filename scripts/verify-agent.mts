@@ -32,6 +32,8 @@ import {
 
 import { AgentRuntime, toolsForConnections } from '../src/agent/AgentRuntime.js';
 import { mapMcpTools } from '../src/agent/toolMapper.js';
+import { createStructuredPlanner } from '../src/agent/models/structuredPlanner.js';
+import type { LlmEngine } from '../src/ai/types.js';
 import {
   createDeterministicPlanner,
   createScriptedPlanner,
@@ -1073,6 +1075,118 @@ console.log('\ntools are limited to connected accounts:');
     toolsForConnections(tools, []).map((t) => t.name).join(',') ===
       'calendar.create_event,system.health',
     'with nothing connected, only the built-ins remain',
+  );
+}
+
+/*
+ * The structured planner's protocol, against the outputs a 2B actually
+ * produces.
+ *
+ * The schema asks only that a `final`'s content be a non-empty string, and
+ * that was enough to put a raw tool-call fragment in front of a user: "Open
+ * Digital Assistant App setting and change it to Creepy" was answered with the
+ * literal text `{"connectionId":"android-device"}`. The run reported
+ * completedSuccessfully with zero tool calls, and the tool it needed
+ * (android.assistant.open_settings) was available the whole time.
+ *
+ * The line to hold is between a model failing the protocol and a model
+ * answering — including answering *about* JSON, which is legitimate.
+ */
+console.log('\nthe planner never shows protocol output as an answer:');
+{
+  function engineReturning(...replies: string[]): LlmEngine {
+    let index = 0;
+    return {
+      id: 'stub-engine',
+      label: 'stub',
+      isReady: () => true,
+      prepare: () => Promise.resolve(),
+      // eslint-disable-next-line @typescript-eslint/require-await
+      async *generate() {
+        yield replies[Math.min(index, replies.length - 1)] ?? '';
+        index += 1;
+      },
+    } as unknown as LlmEngine;
+  }
+
+  const plannerInput = {
+    messages: [
+      {
+        id: 'm1',
+        role: 'user',
+        content: 'Open Digital Assistant App setting and change it to Creepy',
+      },
+    ],
+    tools: [
+      {
+        name: 'android.assistant.open_settings',
+        description: 'Open the assistant settings screen.',
+        inputSchema: { properties: { connectionId: { type: 'string' } } },
+      },
+    ],
+    connections: [
+      {
+        id: 'android-device',
+        provider: 'android',
+        displayName: 'This device',
+        capabilities: [],
+      },
+    ],
+  } as never;
+
+  async function plan(...replies: string[]) {
+    return createStructuredPlanner(engineReturning(...replies)).run(plannerInput);
+  }
+
+  const DEGRADED = 'I could not form a valid plan for that request. Please rephrase.';
+
+  // The exact completion behind the reported bug.
+  const reported = await plan(
+    '{"type":"final","content":"{\\"connectionId\\":\\"android-device\\"}"}',
+  );
+  assert(
+    reported.kind === 'final' && reported.text === DEGRADED,
+    'a final whose content is a bare JSON object is refused, not rendered',
+  );
+
+  const bare = await plan('{"connectionId":"android-device"}');
+  assert(
+    bare.kind === 'final' && bare.text === DEGRADED,
+    'a bare arguments object is not mistaken for an answer',
+  );
+
+  const prose = await plan('Sure. {"connectionId":"android-device"}');
+  assert(
+    prose.kind === 'final' && prose.text === 'Sure.',
+    'protocol debris is trimmed off the readable text beside it',
+  );
+
+  // Rejecting it as unparseable is what lets the correction retry work.
+  const recovered = await plan(
+    '{"type":"final","content":"{\\"connectionId\\":\\"android-device\\"}"}',
+    '{"type":"tool_call","tool":"android.assistant.open_settings","arguments":{"connectionId":"android-device"}}',
+  );
+  assert(
+    recovered.kind === 'tool_calls' &&
+      recovered.toolCalls[0]?.toolName === 'android.assistant.open_settings',
+    'the retry can still recover the tool call the model meant to make',
+  );
+
+  const quoting = await plan(
+    '{"type":"final","content":"The tool returned {\\"ok\\":true}, so it worked."}',
+  );
+  assert(
+    quoting.kind === 'final' &&
+      quoting.text === 'The tool returned {"ok":true}, so it worked.',
+    'an answer that merely quotes JSON is left alone',
+  );
+
+  const plain = await plan(
+    '{"type":"final","content":"Telegram is not connected."}',
+  );
+  assert(
+    plain.kind === 'final' && plain.text === 'Telegram is not connected.',
+    'an ordinary answer is unaffected',
   );
 }
 

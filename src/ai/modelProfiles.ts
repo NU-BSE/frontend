@@ -24,5 +24,18 @@ export const LOCAL_MODEL_RUNTIME: Record<
   LocalMemoryProfile,
   { contextSize: number; maxTokens: number }
 > = {
-  'on-device': { contextSize: 3072, maxTokens: 480 },
+  /*
+   * 4096, sized against a measured prompt rather than guessed.
+   *
+   * The planner's system prompt is dominated by the tool list. Unfiltered that
+   * is 103 tools and roughly 7,000 tokens, which no plausible window on a
+   * phone accommodates; `toolsForConnections` cuts it to the connected
+   * accounts, which for three connectors measures around 2,000 tokens. 4096
+   * leaves the conversation about half the window.
+   *
+   * Raising it further is not free: the KV cache is roughly 56 KB per token
+   * for this model, so every 1,000 tokens of context costs about 56 MB of
+   * native memory on a device that also has to hold 1.1 GB of weights.
+   */
+  'on-device': { contextSize: 4096, maxTokens: 480 },
 };

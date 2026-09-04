@@ -61,6 +61,26 @@ export class OnDeviceUnavailableError extends Error {
   }
 }
 
+/**
+ * Turn llama.cpp's terser failures into something a user can act on.
+ *
+ * "Context is full" is what it throws when the prompt alone exceeds `n_ctx`,
+ * and it reached the chat verbatim — as an assistant message reading
+ * "Context is full", which says nothing about whose context, why, or what to
+ * do. The prompt is dominated by the tool list, so the actionable fact is that
+ * there is too much to describe, not that something went wrong mid-answer.
+ */
+function describeCompletionFailure(error: unknown): Error {
+  const message = error instanceof Error ? error.message : String(error);
+  if (/context is full/iu.test(message)) {
+    return new OnDeviceUnavailableError(
+      'the prompt is larger than the model\'s context window — too many tools ' +
+        'or too long a conversation for on-device inference',
+    );
+  }
+  return error instanceof Error ? error : new Error(message);
+}
+
 export function createOnDeviceEngine(config: OnDeviceEngineConfig): LlmEngine {
   const {
     modelPath,
@@ -172,7 +192,7 @@ export function createOnDeviceEngine(config: OnDeviceEngineConfig): LlmEngine {
           },
         )
         .then(() => queue.close())
-        .catch((error) => queue.fail(error));
+        .catch((error: unknown) => queue.fail(describeCompletionFailure(error)));
 
       try {
         yield* queue.drain();

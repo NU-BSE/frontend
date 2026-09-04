@@ -30,7 +30,7 @@ import {
   TELEGRAM_USER_SCOPES,
 } from '@mobile-agent/connector-telegram';
 
-import { AgentRuntime } from '../src/agent/AgentRuntime.js';
+import { AgentRuntime, toolsForConnections } from '../src/agent/AgentRuntime.js';
 import { mapMcpTools } from '../src/agent/toolMapper.js';
 import {
   createDeterministicPlanner,
@@ -1019,7 +1019,58 @@ async function main(): Promise<void> {
     await runtime.close();
   }
 
-  console.log('verify:agent — all checks passed');
+  
+/*
+ * Only tools that could run reach the prompt.
+ *
+ * The registry holds 103 tools across every connector; rendered into the
+ * planner's system prompt that is about 7,000 tokens, and a local 2B with a
+ * 4,096-token window cannot load it at all — llama.cpp refuses the prompt with
+ * "Context is full" and the run ends having produced nothing. That is the bug
+ * this filter exists for, and it is invisible until someone tries it on a
+ * phone.
+ */
+console.log('\ntools are limited to connected accounts:');
+{
+  const tools = [
+    { name: 'google.gmail.send_draft', description: '', inputSchema: {} },
+    { name: 'telegram.user.search_chats', description: '', inputSchema: {} },
+    { name: 'microsoft.outlook.send_mail', description: '', inputSchema: {} },
+    { name: 'calendar.create_event', description: '', inputSchema: {} },
+    { name: 'system.health', description: '', inputSchema: {} },
+  ] as never[];
+
+  const connections = [
+    { id: 'c1', provider: 'google', displayName: 'Google', capabilities: [] },
+    // The suffix a connector may carry: this one serves the `telegram.*` tools.
+    { id: 'c2', provider: 'telegram-user', displayName: 'Telegram', capabilities: [] },
+  ];
+
+  const kept = toolsForConnections(tools, connections).map((tool) => tool.name);
+
+  assert(kept.includes('google.gmail.send_draft'), 'a connected account keeps its tools');
+  assert(
+    kept.includes('telegram.user.search_chats'),
+    'a connector id with a suffix still matches its namespace',
+  );
+  assert(
+    !kept.includes('microsoft.outlook.send_mail'),
+    'an unconnected account contributes nothing — it could not run anyway',
+  );
+  assert(
+    kept.includes('calendar.create_event'),
+    'the built-in calendar survives, having no connection behind it',
+  );
+  assert(kept.includes('system.health'), 'and so does system.health');
+
+  assert(
+    toolsForConnections(tools, []).map((t) => t.name).join(',') ===
+      'calendar.create_event,system.health',
+    'with nothing connected, only the built-ins remain',
+  );
+}
+
+console.log('verify:agent — all checks passed');
 }
 
 main().catch((error) => {

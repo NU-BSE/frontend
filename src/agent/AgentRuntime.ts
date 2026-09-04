@@ -92,6 +92,48 @@ function truncateStrings(value: unknown, max = 200): unknown {
  * never talk to MCP directly — they go through this class (via
  * `useAgentChat`).
  */
+/**
+ * Namespaces that exist without an account behind them.
+ *
+ * `system.health` is the runtime's own, and `calendar.*` is the built-in
+ * calendar (`builtInCalendar` in create-server), not a connector.
+ */
+const ALWAYS_AVAILABLE_NAMESPACES = new Set(['system', 'calendar']);
+
+/**
+ * Offer only the tools that could actually run.
+ *
+ * The registry holds every connector's tools whether or not the account is
+ * connected — 103 of them, about 24,000 characters once rendered into the
+ * planner's prompt. That is roughly 7,000 tokens spent before the user has
+ * said anything, and on a local 2B with a 3,072-token window it does not
+ * merely crowd the conversation out, it makes the prompt impossible to load
+ * at all: llama.cpp refuses it with "Context is full" and the run ends having
+ * produced nothing.
+ *
+ * Filtering by connection is not a workaround for that budget. A tool for an
+ * account that is not connected cannot succeed — the executor has no
+ * connectionId to give it — so listing it only invites the model to try. The
+ * prompt still names the connected accounts, so "Telegram is not connected"
+ * remains an answer it can give.
+ *
+ * Matched on the tool's namespace against the connector id, tolerating the
+ * suffix a connector may carry: `telegram-user` serves the `telegram.*` tools.
+ */
+export function toolsForConnections(
+  tools: AgentToolDefinition[],
+  connections: readonly ConnectionSummary[],
+): AgentToolDefinition[] {
+  const connected = connections.map((connection) => connection.provider);
+  return tools.filter((tool) => {
+    const namespace = tool.name.split('.')[0] ?? '';
+    if (ALWAYS_AVAILABLE_NAMESPACES.has(namespace)) return true;
+    return connected.some(
+      (id) => id === namespace || id.startsWith(`${namespace}-`),
+    );
+  });
+}
+
 export class AgentRuntime {
   private readonly maxSteps: number;
   private readonly messages: AgentMessage[] = [];
@@ -280,7 +322,10 @@ export class AgentRuntime {
       if (this.mcp) {
         try {
           const mcpTools = await this.mcp.listTools();
-          tools = mapMcpTools(mcpTools);
+          tools = toolsForConnections(
+            mapMcpTools(mcpTools),
+            this.options.connections,
+          );
         } catch (error) {
           if (typeof __DEV__ === 'boolean' && __DEV__) {
             console.log(

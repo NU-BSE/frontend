@@ -4,8 +4,10 @@ import { mapMcpTools } from './toolMapper';
 import {
   executeApprovedToolCall,
   executeToolCall,
+  resolveConnectionIds,
   sanitizeModelArgs,
 } from './toolExecutor';
+import { alwaysActive, type ForegroundGate } from './foregroundGate';
 import { ToolExecutionLedger } from './toolExecutionLedger';
 import type { ToolExecutionRecord } from './toolExecutionLedger';
 import { detectStepProgress } from './routing/progressTracker';
@@ -54,6 +56,11 @@ export interface AgentRuntimeOptions {
   connections: ConnectionSummary[];
   maxSteps?: number;
   /**
+   * Whether the app is in front of the user. Defaults to always active, which
+   * is right for remote runs and for Node, where there is no AppState.
+   */
+  foreground?: ForegroundGate;
+  /**
    * UI-only gate: marks an approval confirmed in the approval service.
    * The model has no way to call this — approvals can only come from the
    * human through the approval sheet.
@@ -92,6 +99,48 @@ function truncateStrings(value: unknown, max = 200): unknown {
  * never talk to MCP directly — they go through this class (via
  * `useAgentChat`).
  */
+/**
+ * Namespaces that exist without an account behind them.
+ *
+ * `system.health` is the runtime's own, and `calendar.*` is the built-in
+ * calendar (`builtInCalendar` in create-server), not a connector.
+ */
+const ALWAYS_AVAILABLE_NAMESPACES = new Set(['system', 'calendar']);
+
+/**
+ * Offer only the tools that could actually run.
+ *
+ * The registry holds every connector's tools whether or not the account is
+ * connected — 103 of them, about 24,000 characters once rendered into the
+ * planner's prompt. That is roughly 7,000 tokens spent before the user has
+ * said anything, and on a local 2B with a 3,072-token window it does not
+ * merely crowd the conversation out, it makes the prompt impossible to load
+ * at all: llama.cpp refuses it with "Context is full" and the run ends having
+ * produced nothing.
+ *
+ * Filtering by connection is not a workaround for that budget. A tool for an
+ * account that is not connected cannot succeed — the executor has no
+ * connectionId to give it — so listing it only invites the model to try. The
+ * prompt still names the connected accounts, so "Telegram is not connected"
+ * remains an answer it can give.
+ *
+ * Matched on the tool's namespace against the connector id, tolerating the
+ * suffix a connector may carry: `telegram-user` serves the `telegram.*` tools.
+ */
+export function toolsForConnections(
+  tools: AgentToolDefinition[],
+  connections: readonly ConnectionSummary[],
+): AgentToolDefinition[] {
+  const connected = connections.map((connection) => connection.provider);
+  return tools.filter((tool) => {
+    const namespace = tool.name.split('.')[0] ?? '';
+    if (ALWAYS_AVAILABLE_NAMESPACES.has(namespace)) return true;
+    return connected.some(
+      (id) => id === namespace || id.startsWith(`${namespace}-`),
+    );
+  });
+}
+
 export class AgentRuntime {
   private readonly maxSteps: number;
   private readonly messages: AgentMessage[] = [];
@@ -125,9 +174,30 @@ export class AgentRuntime {
    */
   private mcp: AgentMcpClient | undefined;
 
+  private readonly foreground: ForegroundGate;
+
   constructor(private readonly options: AgentRuntimeOptions) {
     this.maxSteps = options.maxSteps ?? MAX_AGENT_STEPS;
     this.mcp = options.mcp;
+    this.foreground = options.foreground ?? alwaysActive;
+  }
+
+  /**
+   * Holds until the app is in front of the user again.
+   *
+   * The state is reported so the status line reads "Paused…" rather than
+   * leaving "Thinking…" on screen for a minute while nothing runs. Whatever
+   * state the caller had set is restored, since the gate is a pause and not a
+   * transition.
+   */
+  private async awaitForeground(signal: AbortSignal): Promise<void> {
+    if (this.foreground.isActive()) return;
+
+    const resumeState = this.runState;
+    this.setState({ type: 'paused' });
+    await this.foreground.waitUntilActive(signal);
+    this.throwIfAborted(signal);
+    this.setState(resumeState);
   }
 
   /** Updates the local MCP client without rebuilding the runtime. */
@@ -280,7 +350,10 @@ export class AgentRuntime {
       if (this.mcp) {
         try {
           const mcpTools = await this.mcp.listTools();
-          tools = mapMcpTools(mcpTools);
+          tools = toolsForConnections(
+            mapMcpTools(mcpTools),
+            this.options.connections,
+          );
         } catch (error) {
           if (typeof __DEV__ === 'boolean' && __DEV__) {
             console.log(
@@ -297,6 +370,13 @@ export class AgentRuntime {
       while (step < this.maxSteps) {
         step += 1;
         this.throwIfAborted(controller.signal);
+
+        /*
+         * Do not plan behind the user's back. A step taken while they are on a
+         * system screen reads a device state they are in the middle of
+         * changing, and queues approval sheets they cannot see.
+         */
+        await this.awaitForeground(controller.signal);
 
         this.routingMonitor.recordStep();
 
@@ -381,17 +461,29 @@ export class AgentRuntime {
           return;
         }
 
+        /*
+         * Before anything else sees them, so the approval sheet, the
+         * transcript the model reads back, and the call that runs all agree.
+         */
+        const toolCalls = resolveConnectionIds(
+          result.toolCalls,
+          this.options.connections,
+        );
+
         this.pushMessage({
           id: this.nextId('msg'),
           role: 'assistant',
           content: result.text ?? '',
-          toolCalls: result.toolCalls,
+          toolCalls,
         });
 
         const stepToolResults: StepToolResult[] = [];
 
-        for (const call of result.toolCalls) {
+        for (const call of toolCalls) {
           this.throwIfAborted(controller.signal);
+          // One step can carry several calls, and the first is often the one
+          // that sent the user out of the app.
+          await this.awaitForeground(controller.signal);
           this.setState({ type: 'calling_tool', toolName: call.toolName });
           steps.push({
             type: 'tool_call',

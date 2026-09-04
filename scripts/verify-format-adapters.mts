@@ -19,6 +19,7 @@ import { CsvAdapter, parseDelimited, sniffDelimiter } from '../packages/content-
 import { JsonAdapter } from '../packages/content-engine/src/adapters/formats/json.js';
 import { HtmlAdapter } from '../packages/content-engine/src/adapters/formats/html.js';
 import { decodeText, looksLikeText } from '../packages/content-engine/src/adapters/formats/shared/decode-text.js';
+import { composeMessageWithAttachments } from '../src/files/attachmentText.js';
 import type { DocumentRef } from '../packages/content-engine/src/contracts/document-ref.js';
 import type { BinaryDocument } from '../packages/content-engine/src/contracts/binary-document.js';
 
@@ -256,6 +257,44 @@ async function main(): Promise<void> {
     hits.hits[0]!.location.headingPath?.includes('Section B') === true,
     'a hit carries the location that produced it',
   );
+
+  console.log('\nattachment message composition:');
+  {
+    /*
+     * The end the user actually sees: a .md attachment has to reach the model
+     * as text. The upload path this replaced 404ed on every file, because the
+     * backend has no /files endpoint — so this is the behaviour that has to
+     * hold, not the upload.
+     */
+    const composed = composeMessageWithAttachments("What's written in the file?", [
+      { name: 'CLAUDE.md', outcome: { kind: 'text', text: '# Title\n\nBody.', truncated: false } },
+    ]);
+    assert(composed.includes('# Title'), 'the file content reaches the message');
+    assert(composed.includes('CLAUDE.md'), 'the file is named so the model can refer to it');
+    assert(
+      composed.indexOf("What's written in the file?") > composed.indexOf('# Title'),
+      'the question sits after the content, not buried above it',
+    );
+
+    const truncated = composeMessageWithAttachments('summarise', [
+      { name: 'big.md', outcome: { kind: 'text', text: 'x', truncated: true } },
+    ]);
+    assert(truncated.includes('(truncated)'), 'a cut file says so');
+
+    const unreadable = composeMessageWithAttachments('what is this', [
+      { name: 'photo.png', outcome: { kind: 'unsupported', reason: 'Creepy cannot read images yet.' } },
+    ]);
+    assert(
+      unreadable.includes('cannot read images'),
+      'an unreadable file is stated, never silently dropped',
+    );
+    assert(unreadable.includes('photo.png'), 'the unreadable file is named');
+
+    assert(
+      composeMessageWithAttachments('just text', []) === 'just text',
+      'a message with no attachments is unchanged',
+    );
+  }
 
   if (failures > 0) {
     console.error(`\n${failures} check(s) failed.`);

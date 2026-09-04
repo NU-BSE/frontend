@@ -169,7 +169,32 @@ export class NativeTdlibAdapter implements TdlibAdapter {
   // ------------------------------------------------------------------
 
   async requestPhoneNumber(phoneNumber: string): Promise<void> {
-    this.assertAuthState('wait_phone_number');
+    /*
+     * Not just `wait_phone_number`. TDLib's own contract for
+     * setAuthenticationPhoneNumber, which is what `login()` sends, is:
+     *
+     *   Works only when the current authorization state is
+     *   authorizationStateWaitPhoneNumber, or if there is no pending
+     *   authentication query and the current authorization state is
+     *   authorizationStateWaitEmailAddress, authorizationStateWaitEmailCode,
+     *   authorizationStateWaitCode, authorizationStateWaitRegistration, or
+     *   authorizationStateWaitPassword.
+     *
+     * Asserting only the first of those was stricter than TDLib and made a
+     * mistyped number unrecoverable: once a code had been sent, the session
+     * sat in `wait_code` for good. Leaving the screen did not help — TDLib
+     * keeps its state, so reopening landed back on the code prompt with no
+     * way to reach the phone field. Re-sending the number is the documented
+     * way out, and the native module passes it straight through.
+     */
+    this.assertAuthStateOneOf([
+      'wait_phone_number',
+      'wait_code',
+      'wait_email_address',
+      'wait_email_code',
+      'wait_registration',
+      'wait_password',
+    ]);
     const tdlib = this.assertModule();
     const cleaned = validatePhoneNumber(phoneNumber);
     const { countrycode, phoneNumber: localNumber } = parsePhoneNumber(cleaned);
@@ -650,6 +675,23 @@ export class NativeTdlibAdapter implements TdlibAdapter {
       });
       throw new ConnectorError(
         `Telegram authorization state changed. Expected ${expected}, got ${this.state.type}.`,
+        'VALIDATION_FAILED',
+      );
+    }
+  }
+
+  /** For requests TDLib accepts from more than one authorization state. */
+  private assertAuthStateOneOf(
+    expected: readonly TdlibAuthState['type'][],
+  ): void {
+    if (!expected.includes(this.state.type)) {
+      logError('assertAuthStateOneOf: state mismatch', {
+        expected,
+        actual: this.state.type,
+      });
+      throw new ConnectorError(
+        `Telegram authorization state changed. Expected one of ` +
+          `${expected.join(', ')}, got ${this.state.type}.`,
         'VALIDATION_FAILED',
       );
     }

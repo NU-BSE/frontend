@@ -22,10 +22,20 @@
       "package": "im.creepy.app"
     },
     "plugins": [
+      [
+        "expo-splash-screen",
+        {
+          "image": "./assets/icon.png",
+          "imageWidth": 180,
+          "resizeMode": "contain",
+          "backgroundColor": "#efe9df"
+        }
+      ],
       "expo-router",
       "expo-secure-store",
       "./plugins/with-assistant",
       "./plugins/with-voice",
+      "./plugins/with-device-signals",
       "./plugins/with-smart-cards",
       "./plugins/with-attestation-native-probes",
       "./plugins/with-google-authorization",

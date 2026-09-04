@@ -76,6 +76,7 @@
     "react-native-svg": "15.15.4",
     "react-native-tdlib": "^2.3.0",
     "react-native-web": "^0.21.2",
+    "react-native-webview": "13.16.1",
     "react-native-worklets": "0.10.1",
     "toqr": "^0.1.1",
     "uint8array-extras": "^1.5.0",
@@ -124,15 +125,20 @@
     "verify:attachments": "esbuild scripts/verify-attachments.mts --bundle --platform=node --format=cjs --outfile=node_modules/.cache/verify-attachments.cjs --log-level=error && node node_modules/.cache/verify-attachments.cjs",
     "verify:content-engine": "esbuild scripts/verify-content-engine.mts --bundle --platform=node --format=cjs --outfile=node_modules/.cache/verify-content-engine.cjs --log-level=error && node node_modules/.cache/verify-content-engine.cjs",
     "verify:content-engine:xlsx": "esbuild scripts/verify-content-engine-xlsx.mts --bundle --platform=node --format=cjs --outfile=node_modules/.cache/verify-content-engine-xlsx.cjs --log-level=error && node node_modules/.cache/verify-content-engine-xlsx.cjs",
-    "verify": "npm run verify:ignored && npm run typecheck && npm run lint && npm run verify:ai && npm run verify:logic && npm run verify:layout && npm run verify:device && npm run verify:mcp && npm run verify:agent && npm run verify:connections && npm run verify:routing && npm run verify:remote-agent && npm run verify:telegram && npm run verify:google && npm run verify:gmail && npm run verify:markdown && npm run verify:attachments && npm run verify:formats && npm run verify:content-engine && npm run verify:content-engine:xlsx",
+    "verify": "npm run verify:ignored && npm run typecheck && npm run lint && npm run verify:ai && npm run verify:logic && npm run verify:layout && npm run verify:device && npm run verify:mcp && npm run verify:prompt-intent && npm run verify:agent && npm run verify:connections && npm run verify:routing && npm run verify:remote-agent && npm run verify:telegram && npm run verify:google && npm run verify:gmail && npm run verify:markdown && npm run verify:attachments && npm run verify:prediction && npm run verify:formats && npm run verify:content-engine && npm run verify:content-engine:xlsx && npm run verify:custom-mcp && npm run verify:sandbox && npm run verify:on-device && npm run verify:model-install && npm run verify:resolver",
     "deploy": "node deploy.js",
     "preview": "npx expo export --platform web && wrangler dev",
     "verify:prediction": "esbuild scripts/verify-prediction.mts --bundle --platform=node --format=cjs --external:react-native --outfile=node_modules/.cache/verify-prediction.cjs --log-level=error && node node_modules/.cache/verify-prediction.cjs",
     "verify:ignored": "esbuild scripts/verify-ignored-sources.mts --bundle --platform=node --format=cjs --outfile=node_modules/.cache/verify-ignored.cjs --log-level=error && node node_modules/.cache/verify-ignored.cjs",
     "verify:markdown": "esbuild scripts/verify-inline-markdown.mts --bundle --platform=node --format=cjs --outfile=node_modules/.cache/verify-markdown.cjs --log-level=error && node node_modules/.cache/verify-markdown.cjs",
-    "verify:formats": "esbuild scripts/verify-format-adapters.mts --bundle --platform=node --format=cjs --outfile=node_modules/.cache/verify-formats.cjs --log-level=error && node node_modules/.cache/verify-formats.cjs",
+    "verify:formats": "esbuild scripts/verify-format-adapters.mts --bundle --platform=node --format=cjs --external:react-native --external:expo-file-system --outfile=node_modules/.cache/verify-formats.cjs --log-level=error && node node_modules/.cache/verify-formats.cjs",
+    "verify:prompt-intent": "esbuild scripts/verify-prompt-intent.mts --bundle --platform=node --format=cjs --external:react-native --outfile=node_modules/.cache/verify-prompt-intent.cjs --log-level=error && node node_modules/.cache/verify-prompt-intent.cjs",
     "verify:resolver": "esbuild scripts/verify-resolver.mts --bundle --platform=node --format=cjs --external:@modelcontextprotocol/client --external:@modelcontextprotocol/client/stdio --external:@modelcontextprotocol/server --external:@modelcontextprotocol/server/stdio --external:zod --outfile=node_modules/.cache/verify-resolver.cjs --log-level=error && node node_modules/.cache/verify-resolver.cjs",
-    "build:resolver": "cd resolver && ./gradlew installDist fatJar"
+    "build:resolver": "cd resolver && ./gradlew installDist fatJar",
+    "verify:custom-mcp": "esbuild scripts/verify-custom-mcp.mts --bundle --platform=node --format=cjs --alias:@react-native-async-storage/async-storage=./scripts/stubs/async-storage.mts --alias:@/mcp/runtime-singleton=./scripts/stubs/runtime-singleton.mts --alias:expo-secure-store=./scripts/stubs/expo-secure-store.mts --alias:expo-crypto=./scripts/stubs/expo-crypto.mts --alias:react-native=./scripts/stubs/react-native.mts --external:expo-file-system --outfile=node_modules/.cache/verify-custom-mcp.cjs --log-level=error && node node_modules/.cache/verify-custom-mcp.cjs",
+    "verify:sandbox": "esbuild scripts/verify-sandbox.mts --bundle --platform=node --format=cjs --outfile=node_modules/.cache/verify-sandbox.cjs --log-level=error && node node_modules/.cache/verify-sandbox.cjs",
+    "verify:on-device": "esbuild scripts/verify-on-device-engine.mts --bundle --platform=node --format=cjs --alias:llama.rn=./scripts/stubs/llama-rn.mts --outfile=node_modules/.cache/verify-on-device.cjs --log-level=error && node node_modules/.cache/verify-on-device.cjs",
+    "verify:model-install": "esbuild scripts/verify-model-install.mts --bundle --platform=node --format=esm --define:__DEV__=false --alias:expo-file-system=./scripts/stubs/expo-file-system.mts --alias:expo-file-system/legacy=./scripts/stubs/expo-file-system-legacy.mts --alias:@react-native-async-storage/async-storage=./scripts/stubs/async-storage.mts --alias:react-native=./scripts/stubs/react-native.mts --alias:expo-secure-store=./scripts/stubs/expo-secure-store.mts --outfile=node_modules/.cache/verify-model-install.mjs --log-level=error && node node_modules/.cache/verify-model-install.mjs"
   },
   "private": true
 }

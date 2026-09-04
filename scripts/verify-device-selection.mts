@@ -56,10 +56,32 @@ const assessment = (
   probeFailures: [],
 });
 
-assertEqual(getRecommendedMemoryProfile(assessment(8, 8)), 'performance');
-assertEqual(getRecommendedMemoryProfile(assessment(4, 4)), 'balanced');
-assertEqual(getRecommendedMemoryProfile(assessment(3, 2)), 'efficient');
+/*
+ * One local option now, so these are a threshold rather than a ladder. The 2B
+ * teacher needs 6 GB RAM, 3 GB free storage and 8 cores; anything short of
+ * that gets cloud rather than a smaller model, because there is no longer a
+ * smaller model to fall back to.
+ */
+assertEqual(getRecommendedMemoryProfile(assessment(8, 8)), 'on-device');
+assertEqual(
+  getRecommendedMemoryProfile(assessment(4, 4)),
+  'cloud',
+  '4 GB RAM no longer earns a smaller local model',
+);
+assertEqual(getRecommendedMemoryProfile(assessment(3, 2)), 'cloud');
 assertEqual(getRecommendedMemoryProfile(assessment(2, 8)), 'cloud');
+
+// The boundary itself, which is where an off-by-one would hide.
+assertEqual(
+  getRecommendedMemoryProfile(assessment(6, 3, {}, 8)),
+  'on-device',
+  'a device exactly at the floor qualifies',
+);
+assertEqual(
+  getRecommendedMemoryProfile(assessment(5, 3, {}, 8)),
+  'cloud',
+  'one GB under the RAM floor does not',
+);
 
 const blocked = assessment(8, 8, {
   status: 'blocked',
@@ -80,23 +102,18 @@ assertEqual(
  */
 assertEqual(
   getRecommendedMemoryProfile(assessment(8, 8, {}, 8)),
-  'performance',
-  '8 cores reach the performance profile',
+  'on-device',
+  '8 cores meet the processor floor',
 );
 assertEqual(
   getRecommendedMemoryProfile(assessment(8, 8, {}, 6)),
-  'balanced',
-  '6 cores cap the recommendation at balanced despite ample RAM',
-);
-assertEqual(
-  getRecommendedMemoryProfile(assessment(8, 8, {}, 4)),
-  'efficient',
-  '4 cores cap the recommendation at efficient despite ample RAM',
+  'cloud',
+  '6 cores fall short despite ample RAM — there is no smaller tier to drop to',
 );
 assertEqual(
   getRecommendedMemoryProfile(assessment(8, 8, {}, 2)),
   'cloud',
-  '2 cores rule out every local profile',
+  '2 cores rule out local inference',
 );
 
 // A probe failure leaves cpuCoreCount undefined. Unverified must not read as
@@ -117,7 +134,7 @@ assertEqual(
 // The reason strings drive the disabled-option copy in onboarding, so they
 // have to name the dimension that actually failed.
 const twoCore = getModelOptionSupport(assessment(8, 8, {}, 2)).find(
-  (option) => option.profile === 'performance',
+  (option) => option.profile === 'on-device',
 );
 assertEqual(
   twoCore?.reason.includes('CPU cores'),
@@ -166,14 +183,42 @@ assertEqual(
 {
   const sixtyFourBit = assessment(4, 32);
   sixtyFourBit.hardware.supportedAbis = ['arm64-v8a', 'armeabi-v7a'];
-  const efficient = getModelOptionSupport(sixtyFourBit).find(
-    (option) => option.profile === 'efficient',
+  const local = getModelOptionSupport(sixtyFourBit).find(
+    (option) => option.profile === 'on-device',
   );
   assertEqual(
-    efficient?.reason.includes('64-bit'),
+    local?.reason.includes('64-bit'),
     false,
     'an arm64 device is never told it needs a 64-bit build',
   );
+}
+
+/*
+ * Migration off the retired tiers.
+ *
+ * Someone who chose a local model before the 0.5B/1B/1.5B students were
+ * retired must stay local. Falling through to the default would move them to
+ * cloud inference — a different privacy posture than the one they picked, and
+ * silent.
+ *
+ * getMemoryProfile reads AsyncStorage, which does not exist here, so the
+ * mapping is asserted directly against the rule the function implements.
+ */
+{
+  const RETIRED = ['efficient', 'balanced', 'performance'];
+  const migrate = (raw: string | null): string => {
+    if (raw === 'cloud' || raw === 'on-device') return raw;
+    if (raw !== null && RETIRED.includes(raw)) return 'on-device';
+    return 'cloud';
+  };
+
+  for (const retired of RETIRED) {
+    assertEqual(migrate(retired), 'on-device', `${retired} migrates to on-device`);
+  }
+  assertEqual(migrate('cloud'), 'cloud', 'an explicit cloud choice is kept');
+  assertEqual(migrate('on-device'), 'on-device', 'a current local choice is kept');
+  assertEqual(migrate(null), 'cloud', 'an unanswered question defaults to cloud');
+  assertEqual(migrate('nonsense'), 'cloud', 'an unrecognised value defaults to cloud');
 }
 
 console.log('device model selection: ok');

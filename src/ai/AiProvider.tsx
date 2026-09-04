@@ -19,6 +19,7 @@ import {
 import { createConnection, resolveEngine } from './index';
 import { createStubEngine } from './engines/stubEngine';
 import { engineConnection } from './engineConnection';
+import { getInstalledModel, verifyInstalled } from './modelInstall';
 import { SYSTEM_PROMPT } from './config';
 import type { EngineOrigin, LlmEngine } from './types';
 
@@ -74,7 +75,16 @@ export function AiProvider({ children }: { children: React.ReactNode }) {
       const activation = activationRef.current + 1;
       activationRef.current = activation;
       const selection = { memoryProfile: profile, assessment };
-      const descriptor = resolveEngine(selection);
+      /*
+       * The weights are downloaded, not shipped, so where they are is a
+       * runtime fact rather than a build-time constant. Verified before use:
+       * a record left behind by cleared app storage would otherwise hand
+       * llama.rn a path that does not exist, which fails deep in native code.
+       */
+      const installed = profile === 'cloud' ? null : await getInstalledModel();
+      const installedModelPath =
+        installed && (await verifyInstalled(installed)) ? installed.path : null;
+      const descriptor = resolveEngine(selection, { installedModelPath });
       const nextConnection = createConnection(descriptor);
       const previous = engineRef.current;
 

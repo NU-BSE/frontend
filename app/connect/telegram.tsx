@@ -15,6 +15,7 @@ import { Button } from '@/components/Button';
 import { LocalQrCode } from '@/components/LocalQrCode';
 import { gutter, palette, radius, spacing } from '@/theme/tokens';
 import { TELEGRAM_CAPABILITY_DESCRIPTIONS } from '@/connections/telegram/scopeCopy';
+import { formatInternationalPhone } from '@/connections/telegram/phoneFormat';
 import { getCurrentRegistry, getLocalMcpRuntime } from '@/mcp/runtime-singleton';
 import { useConnectConnector } from '@/connections/useConnections';
 import type { TdlibAdapter, TdlibAuthState } from '@mobile-agent/connector-telegram';
@@ -41,6 +42,22 @@ export default function TelegramAuthScreen() {
    * runs until Continue is pressed.
    */
   const [consented, setConsented] = useState(false);
+
+  /*
+   * "Use a different number", which is the only way out of `wait_code`.
+   *
+   * TDLib keeps its authorization state, so a mistyped number left the session
+   * in `wait_code` permanently: Cancel returned to the connectors list, and
+   * reopening this screen re-read the same state and showed the same code
+   * prompt. There was no path back to the phone field.
+   *
+   * TDLib itself allows the recovery — setAuthenticationPhoneNumber is
+   * documented to work from `authorizationStateWaitCode` — so this shows the
+   * phone form over the current state, and submitting re-sends the number.
+   * The flag clears on every state change, so the moment Telegram accepts the
+   * new number and re-issues `wait_code`, the code screen returns on its own.
+   */
+  const [changingNumber, setChangingNumber] = useState(false);
 
   // Acceptance belongs to a specific Terms document. When TDLib re-sends
   // `wait_registration` with changed terms (same state, new document), the key
@@ -135,6 +152,8 @@ export default function TelegramAuthScreen() {
         unsub = adapter.setAuthStateListener((state) => {
           setAuthState(state);
           setLoading(false);
+          // A new state answers the question the phone form was asking.
+          setChangingNumber(false);
 
           if (state.type === 'ready' && !cancelled) {
             void completeConnect();
@@ -154,6 +173,7 @@ export default function TelegramAuthScreen() {
     cleanupRef.current = () => {
       cancelled = true;
       unsub?.();
+      setChangingNumber(false);
       setCode('');
       setEmailCode('');
       setPassword('');
@@ -248,6 +268,28 @@ export default function TelegramAuthScreen() {
     router.back();
   }, []);
 
+  /*
+   * Show the phone form again without touching TDLib.
+   *
+   * Nothing is sent until the user submits a number: `requestPhoneNumber`
+   * carries the change, and TDLib replies with a fresh `wait_code` for the new
+   * number. Seeding the field with the number currently being verified means
+   * the common case — one wrong digit — is an edit rather than a retype.
+   */
+  const handleChangeNumber = useCallback(() => {
+    if (authState.type === 'wait_code' && authState.phoneNumber && !phone) {
+      setPhone(authState.phoneNumber);
+    }
+    setCode('');
+    setError(null);
+    setChangingNumber(true);
+  }, [authState, phone]);
+
+  const formattedPhone =
+    authState.type === 'wait_code'
+      ? formatInternationalPhone(authState.phoneNumber)
+      : null;
+
   if (!consented) {
     return (
       <ScrollView contentContainerStyle={styles.consentContent}>
@@ -313,7 +355,9 @@ export default function TelegramAuthScreen() {
     >
       <View style={styles.form}>
         <Text variant="headline" style={styles.title}>
-          {getStepTitle(authState.type)}
+          {changingNumber
+            ? getStepTitle('wait_phone_number')
+            : getStepTitle(authState.type)}
         </Text>
 
         {__DEV__ ? (
@@ -322,14 +366,17 @@ export default function TelegramAuthScreen() {
           </Text>
         ) : null}
 
-        {authState.type === 'wait_phone_number' ? (
+        {authState.type === 'wait_phone_number' || changingNumber ? (
           <>
             <Text variant="body" tone="secondary" style={styles.description}>
-              Enter your phone number in international format.
+              {changingNumber
+                ? 'Enter the number to use instead, in international format. ' +
+                  'Telegram will send a new code.'
+                : 'Enter your phone number in international format.'}
             </Text>
             <TextInput
               style={styles.input}
-              placeholder="+7 701 234 56 78"
+              placeholder="+7 701 234 5678"
               placeholderTextColor={palette.textFaint}
               keyboardType="phone-pad"
               value={phone}
@@ -346,9 +393,22 @@ export default function TelegramAuthScreen() {
         ) : authState.type === 'wait_code' ? (
           <>
             <Text variant="body" tone="secondary" style={styles.description}>
-              Enter the verification code sent to your Telegram account
+              {formattedPhone
+                ? 'Enter the code Telegram sent to this number'
+                : 'Enter the verification code sent to your Telegram account'}
               {authState.codeLength ? ` (${authState.codeLength} digits)` : ''}.
             </Text>
+            {/*
+              * The number is the one thing on this screen that tells the user
+              * whether they typed it correctly, and it was not shown at all.
+              * TDLib hands it back in E.164; formatted so it can be checked at
+              * a glance rather than counted digit by digit.
+              */}
+            {formattedPhone ? (
+              <Text variant="optionValue" style={styles.phone}>
+                {formattedPhone}
+              </Text>
+            ) : null}
             <TextInput
               style={styles.input}
               placeholder={authState.codeLength
@@ -371,6 +431,12 @@ export default function TelegramAuthScreen() {
                   ? code.length !== authState.codeLength
                   : code.length === 0)
               }
+            />
+            <Button
+              label="Use a different number"
+              variant="ghost"
+              onPress={handleChangeNumber}
+              disabled={loading}
             />
           </>
         ) : authState.type === 'wait_password' ? (
@@ -574,10 +640,17 @@ export default function TelegramAuthScreen() {
         ) : null}
 
         <View style={styles.cancelWrap}>
+          {/*
+            * While changing the number, Cancel undoes the change rather than
+            * leaving the flow — the code Telegram already sent is still valid,
+            * so abandoning the sign-in is not what "cancel" means here.
+            */}
           <Button
-            label="Cancel"
+            label={changingNumber ? 'Keep the current number' : 'Cancel'}
             variant="ghost"
-            onPress={handleCancel}
+            onPress={
+              changingNumber ? () => setChangingNumber(false) : handleCancel
+            }
           />
         </View>
       </View>
@@ -620,6 +693,7 @@ function getStepTitle(stateType: string): string {
 }
 
 const styles = StyleSheet.create({
+  phone: { textAlign: 'center', marginBottom: spacing.sm },
   container: {
     flex: 1,
     justifyContent: 'center',

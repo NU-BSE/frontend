@@ -15,6 +15,7 @@ import {
 } from '../packages/connector-telegram/src/tdlib/bridge.js';
 import { chatIdField } from '../packages/connector-telegram/src/telegram-user-connector.js';
 import { resolveDefaultRuntimeMode } from '../src/mcp/runtime-mode.js';
+import { formatInternationalPhone } from '../src/connections/telegram/phoneFormat.js';
 
 function assert(condition: unknown, message: string): asserts condition {
   if (!condition) throw new Error(`FAIL: ${message}`);
@@ -536,5 +537,103 @@ void (async () => {
   console.error(error);
   process.exit(1);
 });
+
+/*
+ * A mistyped number must be recoverable.
+ *
+ * Once Telegram had sent a code the session sat in `wait_code` for good: the
+ * screen offered no way back to the phone field, and leaving did not help
+ * because TDLib keeps its authorization state, so reopening landed on the same
+ * prompt. The adapter was the reason a fix was not merely cosmetic — it
+ * asserted `wait_phone_number` and would have refused the retry.
+ *
+ * TDLib's own contract for setAuthenticationPhoneNumber, which is what the
+ * native module's `login()` sends, lists `authorizationStateWaitCode` among
+ * the states it accepts.
+ */
+void (async () => {
+console.log('\nthe phone number can be re-sent from a pending code:');
+{
+  const sent: string[] = [];
+
+  function adapterInState(state: string): NativeTdlibAdapter {
+    const adapter = new NativeTdlibAdapter();
+    const internals = adapter as unknown as {
+      state: { type: string };
+      tdlib: { login: (args: { countrycode: string; phoneNumber: string }) => Promise<void> };
+    };
+    internals.state = { type: state };
+    internals.tdlib = {
+      login: ({ countrycode, phoneNumber }) => {
+        sent.push(`${countrycode}${phoneNumber}`);
+        return Promise.resolve();
+      },
+    };
+    return adapter;
+  }
+
+  async function attempt(state: string): Promise<string | null> {
+    sent.length = 0;
+    try {
+      await adapterInState(state).requestPhoneNumber('+77012345678');
+      return null;
+    } catch (error) {
+      return error instanceof Error ? error.message : String(error);
+    }
+  }
+
+  assertEq(await attempt('wait_phone_number'), null, 'the ordinary case still works');
+  assertEq(sent[0], '+77012345678', 'the number reaches the native module');
+
+  assertEq(
+    await attempt('wait_code'),
+    null,
+    'a number can be re-sent while a code is pending — this was the dead end',
+  );
+  assertEq(await attempt('wait_password'), null, 'and from the 2FA prompt');
+  assertEq(await attempt('wait_registration'), null, 'and from registration');
+
+  // Still refused where TDLib itself would refuse.
+  const ready = await attempt('ready');
+  assert(
+    ready !== null && /Expected one of/u.test(ready),
+    'an authorized session does not accept a new phone number',
+  );
+  assertEq(sent.length, 0, 'and nothing is sent to TDLib when it is refused');
+}
+})().catch((error) => {
+  console.error(error);
+  process.exit(1);
+});
+
+/*
+ * The number is shown on the code screen so a wrong digit can be spotted.
+ * TDLib returns E.164; `+77012345678` is not something anyone checks at a
+ * glance.
+ */
+console.log('\nphone numbers are readable on the code screen:');
+{
+  assertEq(formatInternationalPhone('+77012345678'), '+7 701 234 5678', 'Kazakhstan/Russia +7');
+  assertEq(formatInternationalPhone('+14155552671'), '+1 415 555 2671', 'NANP +1');
+  assertEq(formatInternationalPhone('+442071838750'), '+44 207 183 8750', 'UK +44');
+  assertEq(formatInternationalPhone('+998901234567'), '+998 901 234 567', 'three-digit code +998');
+  assertEq(formatInternationalPhone('+380441234567'), '+380 441 234 567', 'three-digit code +380');
+
+  // The orphan-digit rule: never leave a lone trailing digit.
+  assertEq(formatInternationalPhone('+7701234567'), '+7 701 234 567', 'groups of three divide evenly');
+  assertEq(formatInternationalPhone('+491701234567'), '+49 170 123 4567', 'a trailing single digit joins the group before it');
+
+  // Anything unreadable is returned untouched rather than mangled.
+  assertEq(formatInternationalPhone(undefined), null, 'absent stays absent');
+  assertEq(formatInternationalPhone('77012345678'), '77012345678', 'a number without + is left alone');
+  assertEq(formatInternationalPhone('+7701abc5678'), '+7701abc5678', 'non-digits are left alone');
+  assertEq(formatInternationalPhone('+123'), '+123', 'too short to be E.164 is left alone');
+  assertEq(
+    formatInternationalPhone('+9991234567890'),
+    '+9991234567890',
+    'an unassigned calling code is left alone rather than split at a guess',
+  );
+  assertEq(formatInternationalPhone('+7 701 234 56 78'), '+7 701 234 5678', 'an already-spaced number is re-formatted, not rejected');
+}
 
 console.log('verify:telegram — all checks passed');

@@ -13,7 +13,7 @@ import { mapAndroidSettingsError } from './android-settings-errors';
  * (`overlay`, `writeSettings`, `batteryOptimization`, `unknownSources`) remain
  * deliberately excluded: those grants belong to the user-owned connector UI.
  */
-const OPEN_SCREENS = [
+export const OPEN_SCREENS = [
   'settings',
   'appDetails',
   'wifi',
@@ -27,6 +27,25 @@ const OPEN_SCREENS = [
   'assistant',
   'usageAccess',
   'notificationListener',
+  /*
+   * The two special-access screens that gate this connector's own tools.
+   *
+   * The native navigator has always resolved both, and the module's
+   * SettingsScreen type has always named them, but they were missing here — so
+   * the agent could hit `android.settings.write` and had no way to do anything
+   * about it. Asked to dim the screen it failed with "missing required scopes:
+   * android.settings.write", and nothing in the app could take the user to the
+   * toggle that fixes it; they reported never being prompted and being unable
+   * to find the setting at all. `usageAccess` and `notificationListener` are
+   * special-access screens too and were already offered, so the omission reads
+   * as an oversight rather than a policy.
+   *
+   * Opening a screen grants nothing. The user still has to find the toggle and
+   * turn it on, which is the whole point: this puts the switch in front of
+   * them instead of leaving them to hunt for it.
+   */
+  'writeSettings',
+  'overlay',
   'security',
   'privacy',
   'vpn',
@@ -77,7 +96,25 @@ const APP_TARGETS = [
 const OPEN_PANELS = ['internet', 'wifi', 'volume', 'nfc'] as const;
 
 const CONNECTION_ID = z.string().min(1);
-const PACKAGE_NAME = z.string().trim().min(1).max(255);
+/*
+ * Described, not just typed. A package name is not something a model can
+ * derive from a request: asked to turn off "Gemini" it called open_app with a
+ * target and no packageName at all, because nothing said where one comes from.
+ * The same shape as Telegram's chatId, which carries the same warning for the
+ * same reason.
+ */
+const PACKAGE_NAME = z
+  .string()
+  .trim()
+  .min(1)
+  .max(255)
+  .describe(
+    'Exact Android package id, e.g. "com.google.android.apps.bard". It MUST ' +
+      'be a packageName returned by android.apps.find — never a display ' +
+      'name like "Gemini" and never invented. If only the app\'s name is ' +
+      'known, call android.apps.find with that name first and copy the ' +
+      'chosen result\'s packageName verbatim.',
+  );
 
 const APP_TARGET_INPUT = z
   .object({
@@ -513,8 +550,24 @@ export function createAndroidSettingsTools(
     {
       name: 'android.settings.open_app',
       title: 'Open settings for an app',
+      /*
+       * The description says what the destinations are *for*, because a model
+       * that only knows their names cannot map a request onto them. Asked to
+       * "turn off Gemini app" it invented `android.settings.get_app_info` and
+       * gave up, while `appDetails` — the page carrying Disable, Uninstall and
+       * Force stop — was available the whole time.
+       *
+       * It also states the limit plainly. No app may disable, uninstall or
+       * force-stop another; Android reserves that for the user. Opening the
+       * page is the most that can be done, and a model told only what the tool
+       * *can* do will keep hunting for one that does the rest.
+       */
       description:
-        'Open a package-scoped Android Settings destination such as App info, notifications, a notification channel, Open by default, language, usage or background data.',
+        'Open one app\'s Settings page. "appDetails" is App info, where the ' +
+        'USER can disable, uninstall, force stop or clear data — use it for ' +
+        'any request to turn an app off, remove it or stop it. Opens the ' +
+        'screen only: no app may disable or uninstall another, so say what ' +
+        'to tap afterwards.',
       inputSchema: APP_TARGET_INPUT,
       outputSchema: z.object({
         opened: z.literal(true),

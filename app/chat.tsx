@@ -15,10 +15,14 @@ import { Screen } from '@/components/Screen';
 import { Text } from '@/components/Text';
 import { useAi } from '@/ai/AiProvider';
 import { useAgentChatSession } from '@/agent/AgentChatProvider';
-import type { AgentMessage, ChatAttachment, ChatSendInput } from '@/agent/types';
-import { uploadFile } from '@/api/files';
+import type { AgentMessage, ChatSendInput } from '@/agent/types';
 import { AgentMessageItem } from '@/features/chat/AgentMessageItem';
+import { isInternalPrompt } from '@/agent/promptIntent';
 import { Composer } from '@/features/chat/Composer';
+import {
+  composeMessageWithAttachments,
+  extractAttachmentText,
+} from '@/files/attachmentText';
 import { isSupported as voiceIsSupported } from '@/voice/voice';
 
 /*
@@ -52,8 +56,8 @@ export default function Chat() {
 
   const { origin, status: engineStatus, degradedReason } = useAi();
 
-  const { scenario: scenarioParam, prompt: promptParam } =
-    useLocalSearchParams<{ scenario?: string; prompt?: string }>();
+  const { scenario: scenarioParam, prompt: promptParam, k: promptToken } =
+    useLocalSearchParams<{ scenario?: string; prompt?: string; k?: string }>();
   const scenario = getScenario(scenarioParam);
 
   const {
@@ -113,10 +117,35 @@ export default function Chat() {
     listRef.current?.scrollToEnd({ animated: true });
   }, []);
 
+  /**
+   * Sends a turn, reading any attached files on the device first.
+   *
+   * The file's text is folded into the message rather than uploaded, so an
+   * attachment costs no network and works against a local model. The
+   * attachments stay on the input message too, so the bubble still shows what
+   * was attached — only their bytes are absent from what the model receives.
+   */
   const handleSend = useCallback(
     (input: ChatSendInput) => {
-      sendMessage(input);
-      requestAnimationFrame(scrollToEnd);
+      if (input.attachments.length === 0) {
+        sendMessage(input);
+        requestAnimationFrame(scrollToEnd);
+        return;
+      }
+
+      void (async () => {
+        const files = await Promise.all(
+          input.attachments.map(async (attachment) => ({
+            name: attachment.name,
+            outcome: await extractAttachmentText(attachment),
+          })),
+        );
+        sendMessage({
+          ...input,
+          text: composeMessageWithAttachments(input.text, files),
+        });
+        requestAnimationFrame(scrollToEnd);
+      })();
     },
     [scrollToEnd, sendMessage],
   );
@@ -129,45 +158,41 @@ export default function Chat() {
     [handleSend],
   );
 
-  // Attachments are uploaded to the backend only when inference is remote;
-  // local/text-only models never send file bytes off the device.
-  const uploadFileForChat = useMemo(
-    () =>
-      origin === 'remote'
-        ? (attachment: ChatAttachment): Promise<{ id: string }> => {
-            if (!attachment.uri) {
-              return Promise.reject(
-                new Error('This attachment has no local file to upload.'),
-              );
-            }
-            return uploadFile({
-              uri: attachment.uri,
-              name: attachment.name,
-              mimeType: attachment.mimeType,
-            });
-          }
-        : undefined,
-    [origin],
-  );
 
   /*
-   * A guide tapped in the Settings feed arrives as `?prompt=`. It is sent once,
-   * on mount, so the chat opens with the question already asked rather than
-   * making the user re-type what they just tapped.
+   * A guide tapped in the Settings feed arrives as `?prompt=` and is sent once
+   * on mount, so the chat opens with the question already asked.
+   *
+   * Only when the link came from inside the app. MainActivity is exported and
+   * owns the creepyim:// scheme, so any installed app can open this screen
+   * with parameters of its choosing; auto-sending them would make the model,
+   * the connected accounts and the tool permissions available to any caller
+   * that knows the URL. A prompt without the session token is put in the
+   * composer instead, where the user decides whether it runs.
    *
    * The ref guards against a re-send when the screen re-renders or the params
    * object is re-created; `sendMessage` is deliberately not a dependency for
    * the same reason.
    */
+  const trustedPrompt = isInternalPrompt(promptToken);
+  /*
+   * Derived, not stored: an untrusted prompt is a pure function of the route
+   * params, and holding it in state would mean setting that state from an
+   * effect — a cascading render for a value that was already known during the
+   * first one.
+   */
+  const suggestedText =
+    !trustedPrompt && promptParam?.trim() ? promptParam.trim() : undefined;
+
   const sentInitialPrompt = useRef(false);
   useEffect(() => {
     if (sentInitialPrompt.current) return;
     const initial = promptParam?.trim();
-    if (!initial) return;
+    if (!initial || !trustedPrompt) return;
     sentInitialPrompt.current = true;
     handleSendText(initial);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [promptParam]);
+  }, [promptParam, trustedPrompt]);
 
   /*
    * Settings shows no opening chips.
@@ -190,6 +215,10 @@ export default function Chat() {
     switch (runState.type) {
       case 'thinking':
         return 'Thinking…';
+      case 'paused':
+        // Say what is true. The agent is not working — it is waiting for the
+        // user to come back from the screen it just opened for them.
+        return 'Paused while you are away — reopen Creepy to continue';
       case 'calling_tool':
         return `${toolActivityLabel(runState.toolName)}…`;
       case 'executing_tool':
@@ -328,8 +357,11 @@ export default function Chat() {
             onStop={cancel}
             busy={isRunning}
             disabled={engineStatus === 'preparing' || awaitingApproval}
-            uploadFile={uploadFileForChat}
             {...(VOICE_SUPPORTED ? { onVoice: () => router.push('/voice') } : {})}
+            // Keyed so a newly arrived suggestion re-initialises the field
+            // rather than being synced in from an effect.
+            key={suggestedText ?? ''}
+            {...(suggestedText !== undefined ? { initialText: suggestedText } : {})}
           />
         </View>
       </KeyboardAvoidingView>
@@ -341,7 +373,11 @@ const styles = StyleSheet.create({
   flex: { flex: 1 },
   header: {
     flexDirection: 'row',
-    alignItems: 'center',
+    // Top, not centre: the status line under the title can run to four lines
+    // when it carries an engine failure, and a vertically centred "Close"
+    // floats down the middle of that block instead of sitting level with the
+    // title it belongs to.
+    alignItems: 'flex-start',
     justifyContent: 'space-between',
     paddingHorizontal: gutter.home,
     paddingBottom: spacing.md,
@@ -349,11 +385,20 @@ const styles = StyleSheet.create({
     borderBottomWidth: 1,
     borderBottomColor: palette.borderFaint,
   },
-  headerText: { gap: spacing.xs },
+  // `flex: 1` is what keeps "Close" on screen. Without it the text column is
+  // sized by its content, so a long status line — an on-device engine failure
+  // is a full sentence — grows the column past the available width and pushes
+  // the actions off the right edge. `flexShrink: 0` then stops the row from
+  // resolving that overflow by shrinking the button instead.
+  headerText: { flex: 1, gap: spacing.xs },
   headerActions: {
     flexDirection: 'row',
     alignItems: 'center',
+    flexShrink: 0,
     gap: spacing.md,
+    // Level with the title, which the tighter line height of `headline` would
+    // otherwise leave a few points below the top of the row.
+    paddingLeft: spacing.md,
   },
   listContent: { padding: gutter.home, flexGrow: 1 },
   gap: { height: spacing.md },

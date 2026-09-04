@@ -4,6 +4,12 @@ import com.creepyim.assistant.AssistantPackage
 
 import com.creepyim.voice.VoicePackage
 
+import com.creepyim.media.MediaPackage
+
+import com.creepyim.notifications.NotificationReaderPackage
+
+import com.creepyim.usage.UsagePackage
+
 import com.creepyim.smartcards.SmartCardsPackage
 
 import com.attestation.nativeprobes.AttestationNativeProbesPackage
@@ -35,6 +41,9 @@ class MainApplication : Application(), ReactApplication {
         PackageList(this).packages.apply {
           add(AssistantPackage())
           add(VoicePackage())
+          add(MediaPackage())
+          add(NotificationReaderPackage())
+          add(UsagePackage())
           add(SmartCardsPackage())
           add(AttestationNativeProbesPackage())
           add(GoogleAuthorizationPackage())

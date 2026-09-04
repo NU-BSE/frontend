@@ -23,7 +23,13 @@
  * an error so the caller can offer a retry instead of silently proceeding
  * without the file.
  */
-import { ApiError, baseUrl, getToken, NETWORK_ERROR_STATUS } from './client';
+import {
+  ApiError,
+  baseUrl,
+  getToken,
+  NETWORK_ERROR_STATUS,
+  refreshAccessTokenOnce,
+} from './client';
 
 /** Longer than the JSON request timeout: files are bigger than control calls. */
 const UPLOAD_TIMEOUT_MS = 60_000;
@@ -57,20 +63,38 @@ export async function uploadFile(file: LocalFileSource): Promise<UploadedFile> {
     type: file.mimeType || 'application/octet-stream',
   } as unknown as Blob);
 
-  const headers: Record<string, string> = {};
-  if (token) headers['Authorization'] = `Bearer ${token}`;
-
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), UPLOAD_TIMEOUT_MS);
 
-  let response: Response;
-  try {
-    response = await fetch(`${baseUrl()}/files`, {
+  const post = (bearer: string | null): Promise<Response> => {
+    const headers: Record<string, string> = {};
+    if (bearer) headers['Authorization'] = `Bearer ${bearer}`;
+    return fetch(`${baseUrl()}/files`, {
       method: 'POST',
       headers,
       body: formData,
       signal: controller.signal,
     });
+  };
+
+  let response: Response;
+  try {
+    response = await post(token);
+    /*
+     * This posts with a bare fetch rather than through `request`, because the
+     * multipart body has to reach RN's fetch untouched — so it does not get
+     * the client's refresh-on-401 for free. Without this retry an attachment
+     * sent more than about fifteen minutes after sign-in fails as an auth
+     * error while a usable refresh token sits in storage.
+     *
+     * Retried only when a token was sent and the refresh produced a new one;
+     * otherwise the 401 is a genuine sign-out and must surface. FormData is
+     * re-sent as-is: it is a description of the file, not a consumed stream.
+     */
+    if (response.status === 401 && token) {
+      const refreshed = await refreshAccessTokenOnce();
+      if (refreshed) response = await post(refreshed);
+    }
   } catch {
     const aborted = controller.signal.aborted;
     throw new ApiError(

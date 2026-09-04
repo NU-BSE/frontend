@@ -236,6 +236,14 @@ export class AgentError extends Error {
 export type AgentRunState =
   | { type: 'idle' }
   | { type: 'thinking' }
+  /**
+   * Holding because the app is not in front of the user.
+   *
+   * Distinct from `thinking`: nothing is running, and the status line should
+   * say so rather than imply work is happening. Entered after a tool that
+   * sends the user to a system screen, and left when they come back.
+   */
+  | { type: 'paused' }
   | { type: 'calling_tool'; toolName: string }
   | { type: 'awaiting_approval'; approval: PendingApproval }
   | { type: 'executing_tool'; toolName: string }

@@ -38,10 +38,11 @@ const OPTIONS: {
   label: string;
   value: string;
 }[] = [
-  { id: 'efficient', label: 'Efficient', value: '512MB (Basic Support)' },
-  { id: 'balanced', label: 'Balanced', value: '1B (Standard Tasks)' },
-  { id: 'performance', label: 'Performance', value: '1.5B (Deep Analysis)' },
-  { id: 'cloud', label: 'Cloud only', value: 'Opt-out' },
+  // One local option and one remote one. The three size tiers this replaced
+  // each ran a different student model; only the 2B teacher remains, and three
+  // names for a single model would be a menu that misleads.
+  { id: 'on-device', label: 'On this device', value: '2B (private, offline)' },
+  { id: 'cloud', label: 'Cloud only', value: 'Nothing is downloaded' },
 ];
 
 const formatBytes = (bytes?: number): string => {

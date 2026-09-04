@@ -43,10 +43,16 @@ async function writeAccessToken(token: string): Promise<void> {
  *
  * Single-flight, because a screen that fires three requests at once would
  * otherwise start three refreshes and race to store the results.
+ *
+ * Exported so callers that do not go through `request` can share the same
+ * flight rather than opening their own. The agent posts to /agent/step with a
+ * bare `fetch`, and having it refresh independently would mean two refreshes
+ * racing on every expiry — and would break outright if the server ever starts
+ * rotating refresh tokens.
  */
 let refreshInFlight: Promise<string | null> | null = null;
 
-async function refreshAccessTokenOnce(): Promise<string | null> {
+export async function refreshAccessTokenOnce(): Promise<string | null> {
   if (!refreshInFlight) {
     refreshInFlight = (async () => {
       try {
@@ -154,9 +160,24 @@ function apiUrl(path: string): string {
 }
 
 export class ApiError extends Error {
-  constructor(message: string, readonly status: number, readonly code?: string) {
+  /**
+   * Actionable detail the server chose to send alongside the message.
+   *
+   * Some failures are only useful with it: "this server could not be
+   * translated" is not a problem anyone can act on, while "it imports node:fs,
+   * which it cannot do inside the app sandbox" is.
+   */
+  readonly hints: readonly string[];
+
+  constructor(
+    message: string,
+    readonly status: number,
+    readonly code?: string,
+    hints: readonly string[] = [],
+  ) {
     super(message);
     this.name = 'ApiError';
+    this.hints = hints;
   }
 }
 
@@ -173,16 +194,20 @@ async function request<T>(
   method: string,
   path: string,
   body?: JsonObject,
-  options: { allowRefresh?: boolean } = {},
+  options: { allowRefresh?: boolean; timeoutMs?: number } = {},
 ): Promise<T> {
   const allowRefresh = options.allowRefresh !== false;
+  // Most calls are conversational and 15s is generous. A few are not: cloning
+  // a repository and bundling it is minutes of work, and timing that out at
+  // the default would report a failure for something still succeeding.
+  const timeoutMs = options.timeoutMs ?? REQUEST_TIMEOUT_MS;
   const token = await getToken();
   const headers: Record<string, string> = { 'Content-Type': 'application/json' };
   if (token) headers['Authorization'] = `Bearer ${token}`;
 
   const url = apiUrl(path);
   const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
 
   let response: Response;
   try {
@@ -203,7 +228,7 @@ async function request<T>(
     const aborted = controller.signal.aborted;
     throw new ApiError(
       aborted
-        ? `The server at ${baseUrl()} did not respond within ${REQUEST_TIMEOUT_MS / 1000}s.`
+        ? `The server at ${baseUrl()} did not respond within ${timeoutMs / 1000}s.`
         : `Could not reach the server at ${baseUrl()}.`,
       NETWORK_ERROR_STATUS,
       aborted ? 'timeout' : 'network_error',
@@ -223,7 +248,7 @@ async function request<T>(
   if (response.status === 401 && allowRefresh && token) {
     const refreshed = await refreshAccessTokenOnce();
     if (refreshed) {
-      return request<T>(method, path, body, { allowRefresh: false });
+      return request<T>(method, path, body, { allowRefresh: false, timeoutMs });
     }
   }
 
@@ -236,6 +261,9 @@ async function request<T>(
       message,
       response.status,
       typeof json.code === 'string' ? json.code : undefined,
+      Array.isArray(json.hints)
+        ? json.hints.filter((hint): hint is string => typeof hint === 'string')
+        : [],
     );
   }
 
@@ -336,4 +364,106 @@ export async function getMySubscription(): Promise<{
   entitlements: Entitlements;
 }> {
   return get('/subscriptions/me');
+}
+
+// --- Custom MCP servers ---
+
+export interface TranslatedEnvironmentVariable {
+  name: string;
+  required: boolean;
+  description?: string | null;
+}
+
+export interface TranslatedMcpServer {
+  bundleId: string;
+  runtime: string;
+  entrypoint: string | null;
+  confidence: number;
+  evidence: string[];
+  requiredEnvironment: TranslatedEnvironmentVariable[];
+  sha256: string;
+  bytes: number;
+  downloadUrl: string;
+}
+
+/** Cloning, installing and bundling a repository is minutes, not seconds. */
+const TRANSLATE_TIMEOUT_MS = 5 * 60_000;
+
+/**
+ * Ask the backend to translate an MCP server repository for this device.
+ *
+ * The server itself will run *here*, in the app's own runtime — the backend is
+ * a compiler, not a host. Once the bundle is downloaded the server keeps
+ * working with the backend unreachable, which is what makes these local.
+ */
+export async function translateMcpServer(input: {
+  url: string;
+  ref?: string;
+}): Promise<TranslatedMcpServer> {
+  return request<TranslatedMcpServer>(
+    'POST',
+    '/mcp/translate',
+    input as unknown as JsonObject,
+    { timeoutMs: TRANSLATE_TIMEOUT_MS },
+  );
+}
+
+/**
+ * Fetch a translated bundle as text.
+ *
+ * Not `request`, because the response is JavaScript rather than JSON. The
+ * caller verifies the SHA-256 before evaluating it: this is executable code,
+ * so "probably the right bytes" is not a standard worth holding it to.
+ */
+export async function downloadMcpBundle(bundleId: string): Promise<string> {
+  const token = await getToken();
+  const headers: Record<string, string> = {};
+  if (token) headers['Authorization'] = `Bearer ${token}`;
+
+  const response = await fetch(apiUrl(`/mcp/bundles/${bundleId}`), { headers });
+  if (!response.ok) {
+    throw new ApiError(
+      describeHttpFailure(response.status, response.statusText, baseUrl()),
+      response.status,
+    );
+  }
+  return response.text();
+}
+
+// --- On-device model weights ---
+
+export interface ModelFileEntry {
+  name: string;
+  role: string;
+  bytes: number;
+  sha256: string;
+  url: string;
+}
+
+export interface ModelBundleEntry {
+  profile: string;
+  model: string;
+  totalBytes: number;
+  files: ModelFileEntry[];
+}
+
+export interface ModelCatalog {
+  bundles: ModelBundleEntry[];
+  /** False without a live subscription. The sizes are still shown. */
+  downloadAllowed: boolean;
+}
+
+/**
+ * What the on-device model would cost to download, and whether it may be.
+ *
+ * Readable before paying on purpose: the size belongs on the screen where
+ * someone chooses on-device inference, which precedes the paywall.
+ */
+export async function getModelCatalog(): Promise<ModelCatalog> {
+  return get('/models/catalog');
+}
+
+/** An absolute URL for a weight file, for a streaming download. */
+export function modelFileUrl(path: string): string {
+  return apiUrl(path);
 }

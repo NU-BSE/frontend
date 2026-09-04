@@ -532,8 +532,27 @@ export function createAndroidSettingsTools(
     {
       name: 'android.settings.open_app',
       title: 'Open settings for an app',
+      /*
+       * The description says what the destinations are *for*, because a model
+       * that only knows their names cannot map a request onto them. Asked to
+       * "turn off Gemini app" it invented `android.settings.get_app_info` and
+       * gave up, while `appDetails` — the page carrying Disable, Uninstall and
+       * Force stop — was available the whole time.
+       *
+       * It also states the limit plainly. No app may disable, uninstall or
+       * force-stop another; Android reserves that for the user. Opening the
+       * page is the most that can be done, and a model told only what the tool
+       * *can* do will keep hunting for one that does the rest.
+       */
       description:
-        'Open a package-scoped Android Settings destination such as App info, notifications, a notification channel, Open by default, language, usage or background data.',
+        'Open a package-scoped Android Settings destination for one app. ' +
+        'Targets: "appDetails" is App info — the page where the USER can ' +
+        'disable, uninstall, force stop, or clear the data of that app; use ' +
+        'it for any request to turn an app off, remove it, or stop it. Also ' +
+        '"appNotifications", "notificationChannel", "notificationBubbles", ' +
+        '"appOpenByDefault" and the other targets in the schema. This opens ' +
+        'the screen only: no app is permitted to disable, uninstall or force ' +
+        'stop another one, so after opening it, tell the user what to tap.',
       inputSchema: APP_TARGET_INPUT,
       outputSchema: z.object({
         opened: z.literal(true),

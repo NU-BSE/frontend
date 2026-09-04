@@ -1204,6 +1204,109 @@ console.log('\nthe planner never shows protocol output as an answer:');
     'an answer that merely quotes JSON is left alone',
   );
 
+  /*
+   * An invented tool name gets the retry, not the user's screen.
+   *
+   * "Turn off Gemini app" was answered with "I wanted to use a tool named
+   * android.settings.get_app_info, but it is not available. Available tools:
+   * system.health, calendar.list_events, …" — the registry pasted into a chat
+   * bubble. That text was written for the model and shown to the user, and the
+   * model never got the second look that would have found the real name.
+   */
+  const recoveredName = await plan(
+    '{"type":"tool_call","tool":"android.settings.get_app_info","arguments":{"connectionId":"android-device"}}',
+    '{"type":"tool_call","tool":"android.assistant.open_settings","arguments":{"connectionId":"android-device"}}',
+  );
+  assert(
+    recoveredName.kind === 'tool_calls' &&
+      recoveredName.toolCalls[0]?.toolName === 'android.assistant.open_settings',
+    'an invented tool name is retried and the real one is used',
+  );
+
+  const stillInvented = await plan(
+    '{"type":"tool_call","tool":"android.settings.get_app_info","arguments":{}}',
+  );
+  assert(
+    stillInvented.kind === 'final' &&
+      !stillInvented.text.includes('android.assistant.open_settings'),
+    'giving up does not paste the tool registry into the chat',
+  );
+  assert(
+    stillInvented.kind === 'final' &&
+      stillInvented.text === 'I do not have a way to do that on this device.',
+    'the user gets a sentence about their request instead',
+  );
+
+  /*
+   * And the retry is told which real names are near the invented one, not all
+   * of them — the same list that was too long for a chat bubble is too long
+   * for a 2B's prompt.
+   */
+  {
+    const prompts: string[] = [];
+    const recording: LlmEngine = {
+      id: 'recording',
+      label: 'recording',
+      isReady: () => true,
+      prepare: () => Promise.resolve(),
+      // eslint-disable-next-line @typescript-eslint/require-await
+      async *generate(turns: readonly { content: string }[]) {
+        prompts.push(turns.map((turn) => turn.content).join('\n'));
+        yield '{"type":"tool_call","tool":"android.settings.get_app_info","arguments":{}}';
+      },
+    } as unknown as LlmEngine;
+
+    await createStructuredPlanner(recording).run({
+      messages: [{ id: 'm1', role: 'user', content: 'turn off the Gemini app' }],
+      // More tools than the hint will list, so trimming is observable. The
+      // registry on the device holds 22.
+      tools: [
+        { name: 'android.apps.get_info', description: '', inputSchema: {} },
+        { name: 'android.apps.find', description: '', inputSchema: {} },
+        { name: 'android.settings.get_brightness', description: '', inputSchema: {} },
+        { name: 'android.settings.set_brightness', description: '', inputSchema: {} },
+        { name: 'android.settings.open', description: '', inputSchema: {} },
+        { name: 'android.settings.open_app', description: '', inputSchema: {} },
+        { name: 'android.settings.get_capabilities', description: '', inputSchema: {} },
+        { name: 'android.settings.open_panel', description: '', inputSchema: {} },
+        { name: 'android.assistant.get_status', description: '', inputSchema: {} },
+        { name: 'telegram.user.send_message', description: '', inputSchema: {} },
+        { name: 'telegram.user.search_chats', description: '', inputSchema: {} },
+        { name: 'google.gmail.send_draft', description: '', inputSchema: {} },
+        { name: 'calendar.create_event', description: '', inputSchema: {} },
+        { name: 'system.health', description: '', inputSchema: {} },
+      ],
+      connections: [],
+    } as never);
+
+    // The correction only; the system prompt ahead of it lists every tool by
+    // design, so asserting against the whole turn would prove nothing.
+    const marker = 'There is no tool named';
+    const retry = prompts[1] ?? '';
+    const hint = retry.slice(retry.indexOf(marker));
+    assert(
+      hint.startsWith(`${marker} "android.settings.get_app_info"`),
+      'the retry names the tool that does not exist',
+    );
+    assert(
+      hint.includes('- android.apps.get_info'),
+      'and offers the real name closest to it',
+    );
+    assert(
+      !hint.includes('telegram.user.send_message') &&
+        !hint.includes('google.gmail.send_draft'),
+      'without dragging in tools from unrelated namespaces',
+    );
+    assert(
+      hint.includes('- android.settings.open_app'),
+      'and the door for "turn off an app" is among them',
+    );
+    assert(
+      hint.split('\n').filter((line) => line.startsWith('- ')).length <= 8,
+      'and the list stays short enough for a small model to read',
+    );
+  }
+
   const plain = await plan(
     '{"type":"final","content":"Telegram is not connected."}',
   );

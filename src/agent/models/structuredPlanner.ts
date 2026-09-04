@@ -6,6 +6,7 @@ import type {
   AgentModel,
   AgentModelInput,
   AgentModelResult,
+  AgentToolDefinition,
 } from '../types';
 
 const plannerReasoningSchema = z
@@ -307,6 +308,65 @@ function isRawProtocolFragment(content: string): boolean {
   return PROTOCOL_KEYS.test(trimmed);
 }
 
+/**
+ * The tool names worth showing a model that just invented one.
+ *
+ * Not all of them. The failure this replaces pasted every registered tool into
+ * the chat, and the same list in a correction prompt would be no better for a
+ * 2B: the useful signal is which real names are close to the one it reached
+ * for. `android.settings.get_app_info` is one edit-distance idea away from
+ * `android.apps.get_info`, and seeing the two side by side is what makes the
+ * second attempt land.
+ *
+ * Ranked by shared name parts — namespace first, then the words after it —
+ * with anything from the same namespace preferred, since a model that got the
+ * namespace right usually has the right area and the wrong verb.
+ */
+function nearestToolNames(
+  invented: string,
+  tools: readonly AgentToolDefinition[],
+  limit = 8,
+): string[] {
+  const parts = new Set(invented.split(/[._]/u).filter(Boolean));
+  const namespace = invented.split('.')[0] ?? '';
+
+  return [...tools]
+    .map((tool) => {
+      const overlap = tool.name
+        .split(/[._]/u)
+        .filter((part: string) => parts.has(part)).length;
+      const sameNamespace = tool.name.startsWith(`${namespace}.`) ? 1 : 0;
+      return { name: tool.name, score: overlap + sameNamespace * 2 };
+    })
+    .sort((a, b) => b.score - a.score || a.name.localeCompare(b.name))
+    .slice(0, limit)
+    .map((entry) => entry.name);
+}
+
+function unknownToolHint(
+  invented: string,
+  tools: readonly AgentToolDefinition[],
+): string {
+  if (tools.length === 0) {
+    return (
+      `There is no tool named "${invented}", and no tools are available at ` +
+      'all. Reply with {"type":"final","content":"<plain sentence saying you ' +
+      'cannot do this>"}.'
+    );
+  }
+
+  return (
+    `There is no tool named "${invented}". Use one of these exact names, or ` +
+    'say you cannot do it:\n' +
+    nearestToolNames(invented, tools)
+      .map((name) => `- ${name}`)
+      .join('\n') +
+    '\nReply with EXACTLY ONE JSON object: ' +
+    '{"type":"tool_call","tool":"<exact name>","arguments":{...}} or ' +
+    '{"type":"final","content":"<plain sentence for the user>"}.'
+  );
+}
+
 function parsePlannerResponse(
   text: string,
 ): z.infer<typeof plannerResponseSchema> | null {
@@ -364,10 +424,40 @@ export function createStructuredPlanner(engine: LlmEngine): AgentModel {
         },
       ];
 
+      const PROTOCOL_HINT =
+        'That was not valid protocol output. Reply with EXACTLY ONE ' +
+        'JSON object having a top-level "type". Either\n' +
+        '{"type":"tool_call","tool":"<one of the tool names above>",' +
+        '"arguments":{"connectionId":"<id>", ...}}\n' +
+        'or\n' +
+        '{"type":"final","content":"<plain sentence for the user>"}\n' +
+        'Do not put JSON inside "content". Do not put "connectionId" ' +
+        'at the top level. No other text.';
+
       let completion = await generateOnce(basePrompts, input.signal);
       let parsed = parsePlannerResponse(completion);
 
-      if (!parsed && !input.signal?.aborted) {
+      /*
+       * An invented tool name is a protocol failure and gets the same retry as
+       * malformed output, rather than ending the run.
+       *
+       * It used to return a `final`, so "Turn off Gemini app" was answered
+       * with "I wanted to use a tool named android.settings.get_app_info, but
+       * it is not available. Available tools: system.health,
+       * calendar.list_events, …" — the whole registry pasted into a chat
+       * bubble. That text was written for the model and handed to the user
+       * instead, and the model, which could have picked the real
+       * `android.apps.get_info` on a second look, never got one.
+       */
+      const requestedTool =
+        parsed?.type === 'tool_call' ? parsed.tool : null;
+      const unknownTool =
+        requestedTool !== null &&
+        !input.tools.some((tool) => tool.name === requestedTool)
+          ? requestedTool
+          : null;
+
+      if ((!parsed || unknownTool) && !input.signal?.aborted) {
         // One strict retry with a correction hint; then give up gracefully.
         const retryPrompts: EnginePrompt[] = [
           ...basePrompts,
@@ -380,17 +470,13 @@ export function createStructuredPlanner(engine: LlmEngine): AgentModel {
             /*
              * Concrete, because the generic version of this hint did not
              * recover a single one of the failures seen on device. The model
-             * that lost the envelope needs to be shown the envelope.
+             * that lost the envelope needs to be shown the envelope, and the
+             * model that invented a name needs the names that nearly match it
+             * rather than all of them.
              */
-            content:
-              'That was not valid protocol output. Reply with EXACTLY ONE ' +
-              'JSON object having a top-level "type". Either\n' +
-              '{"type":"tool_call","tool":"<one of the tool names above>",' +
-              '"arguments":{"connectionId":"<id>", ...}}\n' +
-              'or\n' +
-              '{"type":"final","content":"<plain sentence for the user>"}\n' +
-              'Do not put JSON inside "content". Do not put "connectionId" ' +
-              'at the top level. No other text.',
+            content: unknownTool
+              ? unknownToolHint(unknownTool, input.tools)
+              : PROTOCOL_HINT,
           },
         ];
         completion = await generateOnce(retryPrompts, input.signal);
@@ -428,15 +514,18 @@ export function createStructuredPlanner(engine: LlmEngine): AgentModel {
 
       const known = input.tools.some((tool) => tool.name === parsed.tool);
       if (!known) {
+        /*
+         * Still invented after the retry. What the user gets is a sentence
+         * about their request, not a catalogue: the tool list is this file's
+         * problem and means nothing to them.
+         */
         return {
           kind: 'final',
-          text: `I wanted to use a tool named "${parsed.tool}", but it is not available. ${
+          text:
             input.tools.length === 0
-              ? 'No external services are connected right now.'
-              : 'Available tools: ' +
-                input.tools.map((tool) => tool.name).join(', ') +
-                '.'
-          }`,
+              ? 'I cannot do that yet — nothing is connected for me to act ' +
+                'through. Connect an account in Settings and ask again.'
+              : 'I do not have a way to do that on this device.',
         };
       }
 

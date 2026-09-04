@@ -74,25 +74,44 @@ function sanitizeForModel(message: string): string {
  * Only scopes with a real, nameable action belong here. A scope with no entry
  * is left to speak for itself rather than given invented advice.
  */
-const SCOPE_REMEDIES: ReadonlyMap<string, string> = new Map([
+export interface ScopeRemedy {
+  /** The `android.settings.open` screen that shows the switch. */
+  screen: string;
+  /** What the model should do and say. */
+  advice: string;
+}
+
+export const SCOPE_REMEDIES: ReadonlyMap<string, ScopeRemedy> = new Map([
   [
     'android.settings.write',
-    'Creepy cannot change system settings until "Modify system settings" is ' +
-      'granted for it. The user can turn it on in Settings → This device → ' +
-      'Device access. Tell them that; do not retry until they have.',
+    {
+      screen: 'writeSettings',
+      advice:
+        'Creepy cannot change system settings until the user turns on ' +
+        '"Allow modifying system settings" for it. Call ' +
+        'android.settings.open with screen "writeSettings" to put that ' +
+        'switch in front of them, then say in plain words that they need to ' +
+        'turn it on. Do not retry the failed action until they confirm.',
+    },
   ],
   [
     'android.overlay',
-    'Creepy cannot draw over other apps until "Display over other apps" is ' +
-      'granted for it, in Settings → This device → Device access. Tell the ' +
-      'user; do not retry until they have.',
+    {
+      screen: 'overlay',
+      advice:
+        'Creepy cannot draw over other apps until the user turns on ' +
+        '"Display over other apps" for it. Call android.settings.open with ' +
+        'screen "overlay" to put that switch in front of them, then say in ' +
+        'plain words that they need to turn it on. Do not retry until they ' +
+        'confirm.',
+    },
   ],
 ]);
 
 /** Appends the remedy for whichever known scope the message names. */
 function withScopeRemedy(message: string): string {
   for (const [scope, remedy] of SCOPE_REMEDIES) {
-    if (message.includes(scope)) return `${message} ${remedy}`;
+    if (message.includes(scope)) return `${message} ${remedy.advice}`;
   }
   return message;
 }

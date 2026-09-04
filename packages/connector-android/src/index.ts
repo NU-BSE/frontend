@@ -14,6 +14,9 @@ export type {
 } from './android-settings-bridge';
 
 export { createAndroidSettingsTools } from './android-settings-tools';
+// Exported so the app can check that the remedy it gives the model for a
+// missing scope names a screen this connector will actually open.
+export { OPEN_SCREENS } from './android-settings-tools';
 export type { AndroidSettingsToolsDeps } from './android-settings-tools';
 
 export { mapAndroidSettingsError } from './android-settings-errors';

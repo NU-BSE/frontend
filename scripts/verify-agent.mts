@@ -32,9 +32,12 @@ import {
 
 import { AgentRuntime, toolsForConnections } from '../src/agent/AgentRuntime.js';
 import {
+  SCOPE_REMEDIES,
   classifyToolError,
+  executeToolCall,
   resolveConnectionIds,
 } from '../src/agent/toolExecutor.js';
+import { OPEN_SCREENS } from '@mobile-agent/connector-android';
 import type { ForegroundGate } from '../src/agent/foregroundGate.js';
 import { mapMcpTools } from '../src/agent/toolMapper.js';
 import { createStructuredPlanner } from '../src/agent/models/structuredPlanner.js';
@@ -1438,6 +1441,74 @@ console.log('\ntool errors are classified by what would actually fix them:');
       'CONNECTION_NOT_FOUND',
     'a missing connection is still not found',
   );
+}
+
+/*
+ * A permission wall must come with a door.
+ *
+ * The scope error names `android.settings.write`, a string that appears on no
+ * screen the user has ever seen, and the connector did not offer the screen
+ * that grants it: `writeSettings` and `overlay` were missing from the open
+ * tool's list even though the native navigator resolves both. The user could
+ * not find the setting and was never prompted for it.
+ */
+console.log('\na scope failure tells the model how to fix it:');
+{
+  const failing = {
+    callTool: () => {
+      const error = new Error(
+        'Connection "Xiaomi 2412DPC0AG" is missing required scopes: ' +
+          'android.settings.write.',
+      );
+      error.name = 'ToolExecutionError';
+      return Promise.reject(error);
+    },
+  } as never;
+
+  const result = await executeToolCall(
+    failing,
+    {
+      id: 'c1',
+      toolName: 'android.settings.set_brightness',
+      args: { connectionId: 'android-device', level: 0.2 },
+    } as never,
+  );
+
+  assert(
+    result.status === 'error' && result.errorCode === 'PERMISSION_REQUIRED',
+    'the failure is a permission problem',
+  );
+  assert(
+    result.error?.includes('android.settings.open') === true &&
+      result.error.includes('writeSettings'),
+    'and the error names the tool and screen that put the switch in front of the user',
+  );
+  assert(
+    result.error?.includes('Allow modifying system settings') === true,
+    'in the words Android itself uses on that screen',
+  );
+  assert(
+    (result.error?.length ?? 0) <= 600,
+    'and still fits the budget the model is given for an error',
+  );
+
+  /*
+   * The invariant that actually broke. The remedy named `writeSettings`; the
+   * open tool's enum did not contain it, so a model that followed the advice
+   * exactly would have been rejected by the schema. Advice pointing at a door
+   * that is not there is worse than no advice.
+   */
+  const offered = new Set<string>(OPEN_SCREENS);
+  for (const [scope, remedy] of SCOPE_REMEDIES) {
+    assert(
+      offered.has(remedy.screen),
+      `the screen the ${scope} remedy names ("${remedy.screen}") is one android.settings.open will accept`,
+    );
+    assert(
+      remedy.advice.includes(remedy.screen),
+      `and the ${scope} advice actually names it`,
+    );
+  }
 }
 
 console.log('verify:agent — all checks passed');

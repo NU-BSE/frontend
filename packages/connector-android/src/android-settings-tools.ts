@@ -13,7 +13,7 @@ import { mapAndroidSettingsError } from './android-settings-errors';
  * (`overlay`, `writeSettings`, `batteryOptimization`, `unknownSources`) remain
  * deliberately excluded: those grants belong to the user-owned connector UI.
  */
-const OPEN_SCREENS = [
+export const OPEN_SCREENS = [
   'settings',
   'appDetails',
   'wifi',
@@ -27,6 +27,25 @@ const OPEN_SCREENS = [
   'assistant',
   'usageAccess',
   'notificationListener',
+  /*
+   * The two special-access screens that gate this connector's own tools.
+   *
+   * The native navigator has always resolved both, and the module's
+   * SettingsScreen type has always named them, but they were missing here — so
+   * the agent could hit `android.settings.write` and had no way to do anything
+   * about it. Asked to dim the screen it failed with "missing required scopes:
+   * android.settings.write", and nothing in the app could take the user to the
+   * toggle that fixes it; they reported never being prompted and being unable
+   * to find the setting at all. `usageAccess` and `notificationListener` are
+   * special-access screens too and were already offered, so the omission reads
+   * as an oversight rather than a policy.
+   *
+   * Opening a screen grants nothing. The user still has to find the toggle and
+   * turn it on, which is the whole point: this puts the switch in front of
+   * them instead of leaving them to hunt for it.
+   */
+  'writeSettings',
+  'overlay',
   'security',
   'privacy',
   'vpn',

@@ -31,6 +31,7 @@ import {
 } from '@mobile-agent/connector-telegram';
 
 import { AgentRuntime, toolsForConnections } from '../src/agent/AgentRuntime.js';
+import { resolveConnectionIds } from '../src/agent/toolExecutor.js';
 import { mapMcpTools } from '../src/agent/toolMapper.js';
 import { createStructuredPlanner } from '../src/agent/models/structuredPlanner.js';
 import type { LlmEngine } from '../src/ai/types.js';
@@ -1213,6 +1214,103 @@ console.log('\nthe planner never shows protocol output as an answer:');
     braced.kind === 'final' &&
       braced.text === '{this is not json, it is a sentence}',
     'text in braces that is neither JSON nor protocol vocabulary is left alone',
+  );
+}
+
+/*
+ * A guessed connectionId is corrected only where there is nothing to choose.
+ *
+ * Every tool in a namespace is named for it, so `android` is the most
+ * available string in the prompt and is what the local model sent —
+ * CONNECTION_NOT_FOUND against an account called `android-device`, one
+ * character of copying from working.
+ */
+console.log('\nan unmistakable connectionId is resolved, an ambiguous one is not:');
+{
+  const call = (toolName: string, args: Record<string, unknown>) =>
+    ({ id: 'c', toolName, args }) as never;
+
+  const android = {
+    id: 'android-device',
+    provider: 'android',
+    displayName: 'This device',
+    capabilities: [],
+  };
+  const telegram = {
+    id: 'telegram-user-1',
+    provider: 'telegram-user',
+    displayName: 'Telegram',
+    capabilities: [],
+  };
+
+  const idOf = (calls: readonly { args: Record<string, unknown> }[]) =>
+    calls[0]?.args.connectionId;
+
+  assert(
+    idOf(
+      resolveConnectionIds(
+        [call('android.assistant.open_settings', { connectionId: 'android' })],
+        [android],
+      ),
+    ) === 'android-device',
+    'the namespace mistaken for an id is corrected to the only account',
+  );
+
+  assert(
+    idOf(
+      resolveConnectionIds(
+        [call('telegram.user.search_chats', { connectionId: 'telegram' })],
+        [android, telegram],
+      ),
+    ) === 'telegram-user-1',
+    'a provider whose id carries a suffix still resolves',
+  );
+
+  // Correct input must survive untouched.
+  const good = resolveConnectionIds(
+    [call('android.assistant.open_settings', { connectionId: 'android-device' })],
+    [android],
+  );
+  assert(idOf(good) === 'android-device', 'a correct id is left alone');
+
+  // Two accounts of one provider is a real choice and not ours to make.
+  const second = { ...android, id: 'android-device-2' };
+  assert(
+    idOf(
+      resolveConnectionIds(
+        [call('android.assistant.open_settings', { connectionId: 'android' })],
+        [android, second],
+      ),
+    ) === 'android',
+    'two accounts of one provider stay ambiguous — the error is the honest answer',
+  );
+
+  assert(
+    idOf(
+      resolveConnectionIds(
+        [call('google.gmail.send_draft', { connectionId: 'google' })],
+        [android],
+      ),
+    ) === 'google',
+    'a namespace with no connected account is not resolved to some other one',
+  );
+
+  // Absent stays absent: whether a tool takes a connectionId is the schema's
+  // business, and system.health would reject the extra field.
+  const noneGiven = resolveConnectionIds([call('system.health', {})], [android]);
+  assert(
+    !('connectionId' in (noneGiven[0]?.args ?? {})),
+    'a call with no connectionId does not acquire one',
+  );
+
+  // The correction must not disturb the rest of the payload.
+  const other = resolveConnectionIds(
+    [call('telegram.user.send_message', { connectionId: 'telegram', chatId: '5', text: 'hi' })],
+    [telegram],
+  );
+  assert(
+    other[0]?.args.chatId === '5' && other[0]?.args.text === 'hi',
+    'the other arguments are carried through unchanged',
   );
 }
 

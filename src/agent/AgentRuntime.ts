@@ -4,6 +4,7 @@ import { mapMcpTools } from './toolMapper';
 import {
   executeApprovedToolCall,
   executeToolCall,
+  resolveConnectionIds,
   sanitizeModelArgs,
 } from './toolExecutor';
 import { ToolExecutionLedger } from './toolExecutionLedger';
@@ -426,16 +427,25 @@ export class AgentRuntime {
           return;
         }
 
+        /*
+         * Before anything else sees them, so the approval sheet, the
+         * transcript the model reads back, and the call that runs all agree.
+         */
+        const toolCalls = resolveConnectionIds(
+          result.toolCalls,
+          this.options.connections,
+        );
+
         this.pushMessage({
           id: this.nextId('msg'),
           role: 'assistant',
           content: result.text ?? '',
-          toolCalls: result.toolCalls,
+          toolCalls,
         });
 
         const stepToolResults: StepToolResult[] = [];
 
-        for (const call of result.toolCalls) {
+        for (const call of toolCalls) {
           this.throwIfAborted(controller.signal);
           this.setState({ type: 'calling_tool', toolName: call.toolName });
           steps.push({

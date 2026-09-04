@@ -6,6 +6,7 @@ import {
   type AgentErrorCode,
   type AgentToolCall,
   type AgentToolResult,
+  type ConnectionSummary,
 } from './types';
 
 const MAX_ERROR_CHARS = 600;
@@ -50,6 +51,66 @@ interface StructuredToolContent {
   preview?: unknown;
   data?: unknown;
   error?: string;
+}
+
+/**
+ * Replaces a connectionId the model guessed with the one it can only have
+ * meant.
+ *
+ * Every tool in a namespace is named for it — `android.assistant.open_settings`
+ * — so "android" is the most available string in the prompt, and that is what
+ * the local model sent. The account's actual id is `android-device`, and the
+ * call came back CONNECTION_NOT_FOUND with the tool one character of copying
+ * away from working.
+ *
+ * The id exists to choose *between* several accounts of one provider. That is
+ * its entire job, and when a namespace has exactly one connected account there
+ * is nothing to choose: the value is determined by the app's own state, and
+ * asking a 2B to transcribe it adds a failure mode and no information. So a
+ * value that matches no connection is corrected when — and only when — one
+ * account serves that namespace.
+ *
+ * This is not the same thing as inventing a tool call. The call is the model's
+ * own, well-formed and schema-validated; what is supplied is a fact the model
+ * had no say in. Two or more accounts is a genuine ambiguity, and there the
+ * error stands — guessing which of a user's two Google accounts to act on is
+ * exactly the decision that must not be made for them.
+ *
+ * An absent connectionId is left absent: whether a tool takes one is the
+ * schema's business, and `system.health` would reject the extra field.
+ *
+ * Resolution happens before execution rather than inside it, so the approval
+ * sheet, the transcript the model reads back, and the call that finally runs
+ * all describe the same action.
+ */
+export function resolveConnectionIds(
+  calls: readonly AgentToolCall[],
+  connections: readonly ConnectionSummary[],
+): AgentToolCall[] {
+  return calls.map((call) => {
+    const given = call.args.connectionId;
+    if (typeof given !== 'string' || given.length === 0) return call;
+    if (connections.some((connection) => connection.id === given)) return call;
+
+    const namespace = call.toolName.split('.')[0] ?? '';
+    // The same match `toolsForConnections` uses: `telegram-user` serves
+    // `telegram.*`.
+    const serving = connections.filter(
+      (connection) =>
+        connection.provider === namespace ||
+        connection.provider.startsWith(`${namespace}-`),
+    );
+    if (serving.length !== 1) return call;
+
+    const resolved = serving[0]!.id;
+    if (DEV_LOG) {
+      console.log(
+        `[tool] connectionId "${given}" is not a connection; using the only ` +
+          `${namespace} account, "${resolved}"`,
+      );
+    }
+    return { ...call, args: { ...call.args, connectionId: resolved } };
+  });
 }
 
 /**

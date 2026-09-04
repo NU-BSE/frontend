@@ -129,7 +129,16 @@ function protocolInstructions(input: AgentModelInput): string {
      * tokens and removes the ambiguity.
      */
     'The object has exactly these top-level keys and no others. Example:',
-    '{"type":"tool_call","tool":"system.health","arguments":{"connectionId":"abc"}}',
+    /*
+     * The example carries a real connection id rather than a placeholder.
+     * A model that copies the example verbatim then copies something that
+     * works — and copying is what small models do. The observed failure was
+     * `"connectionId":"android"`, the namespace every tool name starts with,
+     * against an account actually called `android-device`.
+     */
+    `{"type":"tool_call","tool":"<name>","arguments":{"connectionId":"${
+      input.connections[0]?.id ?? '<id from the list below>'
+    }"}}`,
     'Rules:',
     '- Call one tool at a time, then wait for the tool result shown in the conversation.',
     '- Never invent tool names, connection ids or chat ids — use only values present in this prompt or in tool results.',

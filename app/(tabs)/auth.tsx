@@ -107,10 +107,6 @@ export default function Account() {
           <ModelDownloadCard profile="on-device" />
         </View>
 
-        <View style={styles.section}>
-          <Text variant="headline">Developer</Text>
-          <Button label="Agent diagnostics" variant="secondary" onPress={() => router.push("/dev/diagnostics")} />
-        </View>
       </ScrollView>
     </Screen>
   );

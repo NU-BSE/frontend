@@ -33,6 +33,11 @@ import {
 } from '@mobile-agent/connector-telegram';
 
 import { createConnectorRegistry } from '../src/mcp/create-connector-registry.js';
+import { isEntitled } from '../src/features/subscription/entitlement.js';
+import {
+  buildConnectorCatalog,
+  CUSTOM_SERVERS_ENTRY,
+} from '../src/features/connections/catalog.js';
 import {
   closeLocalMcpRuntime,
   configureAppDependencies,
@@ -606,6 +611,76 @@ async function main(): Promise<void> {
     await store.remove('google-no-credential');
     await closeLocalMcpRuntime();
   }
+
+/*
+ * The free plan reaches the device and nothing else.
+ *
+ * Drawn at the device boundary rather than by naming tiles, so a connector
+ * added later is behind the paywall by default instead of because someone
+ * remembered to add it to a list.
+ */
+console.log('\nonly the local device connector is free:');
+{
+  const entries = [
+    ...buildConnectorCatalog({ customServers: true }),
+  ];
+
+  const free = entries
+    .filter((entry) => entry.includedOnFreePlan)
+    .map((entry) => entry.key);
+
+  assert(
+    free.join(',') === 'android',
+    `Settings alone is included on the free plan (found ${free.join(', ') || 'none'})`,
+  );
+
+  for (const key of ['telegram-user', 'google', CUSTOM_SERVERS_ENTRY.key]) {
+    const entry = entries.find((candidate) => candidate.key === key);
+    assert(
+      entry !== undefined && !entry.includedOnFreePlan,
+      `${key} is behind the subscription`,
+    );
+  }
+}
+
+/*
+ * And the gate fails closed. An unanswered question — the request in flight,
+ * or failed — must read as unpaid, or the product is free to anyone who can
+ * drop a packet.
+ */
+console.log('\nentitlement is decided by the server, and defaults to unpaid:');
+{
+  const base = {
+    agentAccess: true,
+    cloudAgentAllowed: false,
+    maxAgentMessagesPerDay: null,
+    planCode: null,
+    subscriptionStatus: null,
+    currentPeriodEnd: null,
+  };
+
+  assert(!isEntitled(undefined), 'no answer yet is not entitlement');
+  assert(
+    !isEntitled(base),
+    'the free plan — cloud_agent_allowed false, plan_code null — is not entitlement',
+  );
+  assert(
+    isEntitled({ ...base, cloudAgentAllowed: true, planCode: 'pro' }),
+    'a paid plan is',
+  );
+  assert(
+    isEntitled({ ...base, subscriptionRequired: false }),
+    'and so is an account the server exempts, with no plan at all',
+  );
+  assert(
+    !isEntitled({ ...base, subscriptionRequired: true }),
+    'while an account told payment is required is not',
+  );
+  assert(
+    !isEntitled({ ...base, agentAccess: true }),
+    'agentAccess is not the paid signal — the free plan has it too',
+  );
+}
 
   console.log('no mock connector registers in either mode:');
   for (const mode of ['development', 'production'] as const) {

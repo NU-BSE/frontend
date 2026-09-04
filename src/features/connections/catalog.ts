@@ -51,10 +51,26 @@ export interface ConnectorCatalogEntry {
    * different kind of thing.
    */
   fullWidth?: boolean;
+  /**
+   * Available without a subscription.
+   *
+   * The line is drawn at the device boundary rather than by naming tiles:
+   * Settings is the phone the user already owns, and everything else reaches
+   * a service off it. Marking the exception keeps the rule in one place, so a
+   * connector added later is behind the paywall by default rather than
+   * because someone remembered to add it to a list.
+   */
+  includedOnFreePlan?: boolean;
 }
 
 export const CONNECTOR_CATALOG: ConnectorCatalogEntry[] = [
-  { key: 'android', label: 'Settings', summary: 'This device', connectorId: 'android' },
+  {
+    key: 'android',
+    label: 'Settings',
+    summary: 'This device',
+    connectorId: 'android',
+    includedOnFreePlan: true,
+  },
   { key: 'telegram-user', label: 'Telegram', summary: 'Personal account', connectorId: 'telegram-user' },
   { key: 'google', label: 'Google', summary: 'Calendar, Gmail, Drive', connectorId: 'google' },
 ];

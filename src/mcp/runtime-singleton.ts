@@ -55,7 +55,7 @@ export function getConnectionStore(): ConnectionStore {
  * Everything else is an account somewhere, and an account with no credential
  * is not connected however the record reads.
  */
-const LOCAL_DEVICE_CONNECTORS = ['android', 'intent'] as const;
+export const LOCAL_DEVICE_CONNECTORS = ['android', 'intent'] as const;
 
 async function reconcileConnectionCredentials(
   connectionStore: ConnectionStore,

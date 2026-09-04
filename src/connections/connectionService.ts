@@ -9,6 +9,7 @@ import {
   getCredentialVault,
   getCurrentRegistry,
   getLocalMcpRuntime,
+  LOCAL_DEVICE_CONNECTORS,
   restartLocalMcpRuntime,
 } from '@/mcp/runtime-singleton';
 
@@ -184,3 +185,44 @@ export const connectionService: ConnectionService = {
   disconnect: disconnectConnection,
   reconnect: reconnectConnection,
 };
+
+/**
+ * Tear down every account the free plan does not include.
+ *
+ * Locking the tiles was not enough. A tile decides what a tap does; it does
+ * nothing about a connection that already exists, and tools follow the
+ * connection record — so an account linked while subscribed went on feeding
+ * the planner, and went on being callable, after the subscription lapsed. The
+ * entitlement has to reach the connections themselves.
+ *
+ * The device is exempt. `android` and `intent` are the phone the user already
+ * owns: they authenticate to nothing, hold no credential, and are the same set
+ * that `reconcileConnectionCredentials` exempts for exactly that reason. That
+ * is the whole rule — an account off the device is paid, the device is not —
+ * so no list of connector names is kept here to drift.
+ *
+ * Each disconnect runs the connector's real teardown and drops its
+ * credentials, the same path a user's own tap takes. Failures are absorbed per
+ * connection: one provider that will not answer must not leave the others
+ * connected.
+ *
+ * Returns the ids it disconnected, so a caller can say what happened.
+ */
+export async function disconnectUnentitledConnections(): Promise<string[]> {
+  const local = new Set<string>(LOCAL_DEVICE_CONNECTORS);
+  const records = await getConnectionStore().list();
+  const revoked: string[] = [];
+
+  for (const record of records) {
+    if (local.has(record.connectorId)) continue;
+    try {
+      await disconnectConnection(record.id);
+      revoked.push(record.id);
+    } catch {
+      // `disconnectConnection` already drops the local record when provider
+      // teardown fails, so the tools are gone either way.
+    }
+  }
+
+  return revoked;
+}

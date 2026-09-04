@@ -34,6 +34,8 @@ import {
 
 import { createConnectorRegistry } from '../src/mcp/create-connector-registry.js';
 import { isEntitled } from '../src/features/subscription/entitlement.js';
+import { disconnectUnentitledConnections } from '../src/connections/connectionService.js';
+import { LOCAL_DEVICE_CONNECTORS } from '../src/mcp/runtime-singleton.js';
 import {
   buildConnectorCatalog,
   CUSTOM_SERVERS_ENTRY,
@@ -644,6 +646,35 @@ console.log('\nonly the local device connector is free:');
 }
 
 /*
+ * The two definitions of "free" have to agree.
+ *
+ * The catalogue marks which tile a free user may tap; the teardown decides
+ * which connection survives a lapse. They are the same idea — the device is
+ * free, an account off it is paid — written twice, and they would drift
+ * silently: a connector marked free in the catalogue but not exempt from
+ * teardown would be tappable and then immediately disconnected.
+ */
+console.log('\nthe tile gate and the teardown exempt the same connectors:');
+{
+  const local = new Set<string>(LOCAL_DEVICE_CONNECTORS);
+  const entries = buildConnectorCatalog({ customServers: true });
+
+  for (const entry of entries) {
+    if (!entry.connectorId) continue;
+    assert(
+      Boolean(entry.includedOnFreePlan) === local.has(entry.connectorId),
+      `${entry.connectorId} is free in the catalogue exactly when it is exempt from teardown`,
+    );
+  }
+
+  // `intent` has no tile at all, and must still survive — it is the device.
+  assert(
+    local.has('intent'),
+    'the intent connector is exempt from teardown despite having no tile',
+  );
+}
+
+/*
  * And the gate fails closed. An unanswered question — the request in flight,
  * or failed — must read as unpaid, or the product is free to anyone who can
  * drop a packet.
@@ -680,6 +711,90 @@ console.log('\nentitlement is decided by the server, and defaults to unpaid:');
     !isEntitled({ ...base, agentAccess: true }),
     'agentAccess is not the paid signal — the free plan has it too',
   );
+}
+
+/*
+ * A lapse takes the accounts with it.
+ *
+ * Locking the tiles decided what a tap does and nothing else: tools follow the
+ * connection record, so an account linked while subscribed went on feeding the
+ * planner after the subscription ended.
+ */
+console.log('\na lapsed subscription disconnects the paid accounts:');
+{
+  await closeLocalMcpRuntime();
+  await getLocalMcpRuntime({ mode: 'development' });
+
+  const store = getConnectionStore();
+  const vault = getCredentialVault();
+  const now = Date.now();
+
+  for (const [id, connectorId] of [
+    ['google-lapse', 'google'],
+    ['telegram-user:lapse', 'telegram-user'],
+  ] as const) {
+    await vault.save(`secret:${id}`, { kind: 'static_token', token: 'x' });
+    await store.save({
+      id,
+      connectorId,
+      displayName: id,
+      status: 'connected',
+      scopes: [],
+      capabilities: [],
+      credentialReference: `secret:${id}`,
+      createdAt: now,
+      updatedAt: now,
+    });
+  }
+
+  /*
+   * The device connections, which must survive: they authenticate to nothing.
+   * `intent` is here because it has no catalogue tile at all — an exemption
+   * derived from the tiles rather than from the device would drop it, and the
+   * user would lose app-launching and sharing on a plan that includes them.
+   */
+  for (const [id, connectorId] of [
+    ['android-device', 'android'],
+    ['intent-device', 'intent'],
+  ] as const) {
+    await store.save({
+      id,
+      connectorId,
+      displayName: id,
+      status: 'connected',
+      scopes: [],
+      capabilities: [],
+      createdAt: now,
+      updatedAt: now,
+    });
+  }
+
+  const revoked = await disconnectUnentitledConnections();
+
+  assert(
+    revoked.length === 2,
+    `both paid accounts are disconnected (revoked ${revoked.length})`,
+  );
+
+  const remaining = (await store.list()).map((record) => record.id);
+  assert(
+    !remaining.includes('google-lapse') &&
+      !remaining.includes('telegram-user:lapse'),
+    'and their records are gone, so their tools go with them',
+  );
+  assert(
+    remaining.includes('android-device') && remaining.includes('intent-device'),
+    'while both device connections survive — they are not accounts',
+  );
+
+  assert(
+    (await vault.get('secret:google-lapse')) === null,
+    'the credentials are revoked too, not merely unlinked',
+  );
+
+  await store.remove('android-device');
+  await store.remove('intent-device');
+  await closeLocalMcpRuntime();
 }
 
   console.log('no mock connector registers in either mode:');

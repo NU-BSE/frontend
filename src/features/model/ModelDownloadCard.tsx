@@ -1,9 +1,11 @@
-import React, { useMemo } from 'react';
+import React, { useEffect, useMemo, useRef } from 'react';
 import { StyleSheet, View } from 'react-native';
 
 import { Text } from '@/components/Text';
 import { Button } from '@/components/Button';
 import { SubscriptionRequiredError } from '@/ai/modelInstall';
+import { useAi } from '@/ai/AiProvider';
+import { getDeviceAssessment, getMemoryProfile } from '@/storage/prefs';
 import { useModelInstall } from './useModelInstall';
 import { palette, radius, spacing, typography } from '@/theme/tokens';
 
@@ -29,6 +31,33 @@ function formatBytes(bytes: number): string {
  */
 export function ModelDownloadCard({ profile }: { profile: string }) {
   const { state, start, stop, remove } = useModelInstall(profile);
+  const { activateSelectedEngine } = useAi();
+
+  /*
+   * Restart the engine when the model arrives.
+   *
+   * The engine is chosen once, when the provider mounts, from what was on disk
+   * then. Downloading a model after that changed nothing until the app was
+   * killed and reopened — the user watched a download finish and kept talking
+   * to the stub. Removing it has the same problem in reverse, which is why
+   * this reacts to the phase rather than to the download's success.
+   */
+  const lastPhase = useRef(state.phase);
+  useEffect(() => {
+    const previous = lastPhase.current;
+    lastPhase.current = state.phase;
+    if (previous === state.phase) return;
+    if (state.phase !== 'installed' && previous !== 'installed') return;
+    if (previous === 'checking') return;
+
+    void (async () => {
+      const [memoryProfile, assessment] = await Promise.all([
+        getMemoryProfile(),
+        getDeviceAssessment(),
+      ]);
+      await activateSelectedEngine(memoryProfile, assessment);
+    })();
+  }, [state.phase, activateSelectedEngine]);
 
   const percent = state.progress ? Math.round(state.progress.fraction * 100) : 0;
 

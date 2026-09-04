@@ -64,6 +64,13 @@ async function asyncStorage() {
   return (await import('@react-native-async-storage/async-storage')).default;
 }
 
+/** One downloaded file, with the length it is supposed to have. */
+export interface InstalledFile {
+  path: string;
+  bytes: number;
+  role: string;
+}
+
 export interface InstalledModel {
   profile: string;
   model: string;
@@ -71,6 +78,17 @@ export interface InstalledModel {
   path: string;
   /** Absolute path to the vision projector, when the model has one. */
   projectorPath: string | null;
+  /**
+   * Every file, each with *its own* length.
+   *
+   * `bytes` below is the bundle total, which is the number to show a user
+   * choosing whether to download. Verification needs the per-file lengths, and
+   * conflating the two was a real bug: the total was compared against the
+   * weights file alone, so a complete install failed its own check on every
+   * launch and the engine silently fell back to the stub.
+   */
+  files: InstalledFile[];
+  /** Total across every file, for display. */
   bytes: number;
   installedAt: number;
 }
@@ -142,8 +160,21 @@ export async function getInstalledModel(): Promise<InstalledModel | null> {
 export async function verifyInstalled(install: InstalledModel): Promise<boolean> {
   try {
     const { File } = fileSystem();
+
+    if (install.files && install.files.length > 0) {
+      return install.files.every((entry) => {
+        const file = new File(entry.path);
+        return file.exists && file.size === entry.bytes;
+      });
+    }
+
+    // A record written before per-file lengths existed. Its `bytes` is the
+    // bundle total and cannot be compared against any single file, so this
+    // falls back to existence — the download verified each length at the time
+    // it finished, and discarding a working install to punish an old record
+    // would cost the user the whole download again.
     const file = new File(install.path);
-    return file.exists && file.size === install.bytes;
+    return file.exists && file.size > 0;
   } catch {
     return false;
   }
@@ -323,6 +354,11 @@ export async function installModel(options: {
     model: bundle.model,
     path: weights,
     projectorPath: paths.projector ?? null,
+    files: bundle.files.map((entry) => ({
+      path: paths[entry.role] ?? '',
+      bytes: entry.bytes,
+      role: entry.role,
+    })),
     bytes: bundle.totalBytes,
     installedAt: Date.now(),
   };

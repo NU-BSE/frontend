@@ -14,6 +14,7 @@ import { appendHistory } from '@/storage/history';
 import { useCreepyChat } from '@/ai/useCreepyChat';
 
 import { AgentRuntime } from './AgentRuntime';
+import { createAppStateForegroundGate } from './appStateForegroundGate';
 import { toConnectionSummaries } from './capabilityContext';
 import { useAgentContext } from './AgentProvider';
 import { AgentError } from './types';
@@ -65,6 +66,13 @@ const NOOP_UNSUBSCRIBE = () => {};
  * interruptions, cancellation, max-step protection and errors — screens
  * never call MCP directly.
  */
+/*
+ * Built once. `createAppStateForegroundGate` holds no state of its own — it
+ * subscribes only for the duration of a wait — so a single instance serves
+ * every runtime this hook builds.
+ */
+const foregroundGate = createAppStateForegroundGate();
+
 export function useAgentChat(options: UseAgentChatOptions = {}): AgentChat {
   const { model, modelId } = useAgentContext();
   const queryClient = useQueryClient();
@@ -99,6 +107,7 @@ export function useAgentChat(options: UseAgentChatOptions = {}): AgentChat {
       model,
       connections: toConnectionSummaries(connectionsQuery.data ?? []),
       approveApproval: approveConnectorTool,
+      foreground: foregroundGate,
       onState: (state) => {
         setRunState(state);
         setPendingApproval(

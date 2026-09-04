@@ -215,6 +215,10 @@ export default function Chat() {
     switch (runState.type) {
       case 'thinking':
         return 'Thinking…';
+      case 'paused':
+        // Say what is true. The agent is not working — it is waiting for the
+        // user to come back from the screen it just opened for them.
+        return 'Paused while you are away — reopen Creepy to continue';
       case 'calling_tool':
         return `${toolActivityLabel(runState.toolName)}…`;
       case 'executing_tool':

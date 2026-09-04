@@ -192,6 +192,26 @@ export async function getRegisteredConnectorIds(): Promise<Set<string>> {
   return new Set(registry.listConnectors().map((connector) => connector.id));
 }
 
+/**
+ * Re-derive the local device connections' scopes.
+ *
+ * `AndroidConnector.connect()` reads WRITE_SETTINGS and overlay access at the
+ * moment it runs and writes the resulting scopes onto the connection record.
+ * Those grants are made on a system screen, outside this app, so a record
+ * created before the grant keeps saying the permission is absent — and
+ * `android.settings.set_brightness` keeps failing with "missing required
+ * scopes: android.settings.write" long after the user has granted it. Until
+ * now only a restart fixed that.
+ *
+ * Cheap enough to call whenever the app returns to the foreground: it touches
+ * the two local connectors, and each writes only if something changed.
+ */
+export async function refreshLocalDeviceConnections(): Promise<void> {
+  const registry = getCurrentRegistry();
+  if (!registry) return;
+  await ensureLocalDeviceConnections(registry);
+}
+
 export async function restartLocalMcpRuntime(): Promise<LocalMcpRuntime> {
   const mode = runtimeMode;
   await closeLocalMcpRuntime();

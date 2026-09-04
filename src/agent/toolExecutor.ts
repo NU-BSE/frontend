@@ -21,11 +21,24 @@ export function classifyToolError(message: string): AgentErrorCode {
   if (/connection "[^"]*" was not found/iu.test(message)) {
     return 'CONNECTION_NOT_FOUND';
   }
-  if (/connection "[^"]*" is (?!connected)/iu.test(message)) {
-    return 'CONNECTION_EXPIRED';
-  }
+  /*
+   * Before the connection-state rule, which is broader than it looks.
+   *
+   *   Connection "Xiaomi 2412DPC0AG" is missing required scopes:
+   *   android.settings.write.
+   *
+   * matched `connection "…" is (?!connected)` and was reported as
+   * CONNECTION_EXPIRED — a Telegram-shaped diagnosis ("sign in again") for a
+   * device permission the user has simply never granted. Reconnecting would
+   * have changed nothing; granting "Modify system settings" is the fix, and
+   * PERMISSION_REQUIRED is the code that says so. The scope rule was already
+   * here and could never fire, sitting one branch too late.
+   */
   if (/missing required scopes/iu.test(message)) {
     return 'PERMISSION_REQUIRED';
+  }
+  if (/connection "[^"]*" is (?!connected)/iu.test(message)) {
+    return 'CONNECTION_EXPIRED';
   }
   if (/approval/iu.test(message)) {
     return 'TOOL_VALIDATION_ERROR';
@@ -43,6 +56,45 @@ function sanitizeForModel(message: string): string {
   const trimmed = message.trim();
   if (trimmed.length <= MAX_ERROR_CHARS) return trimmed;
   return `${trimmed.slice(0, MAX_ERROR_CHARS)}…`;
+}
+
+/**
+ * What the user would have to do about a missing scope.
+ *
+ * MCP reports the failure precisely and uselessly:
+ *
+ *   Connection "Xiaomi 2412DPC0AG" is missing required scopes:
+ *   android.settings.write.
+ *
+ * That is true and names nothing a person can act on — the scope string
+ * appears in no screen the user has ever seen. The remedy is app knowledge,
+ * not protocol knowledge, so it is attached here rather than in the MCP
+ * server, which serves connectors that know nothing of this app's screens.
+ *
+ * Only scopes with a real, nameable action belong here. A scope with no entry
+ * is left to speak for itself rather than given invented advice.
+ */
+const SCOPE_REMEDIES: ReadonlyMap<string, string> = new Map([
+  [
+    'android.settings.write',
+    'Creepy cannot change system settings until "Modify system settings" is ' +
+      'granted for it. The user can turn it on in Settings → This device → ' +
+      'Device access. Tell them that; do not retry until they have.',
+  ],
+  [
+    'android.overlay',
+    'Creepy cannot draw over other apps until "Display over other apps" is ' +
+      'granted for it, in Settings → This device → Device access. Tell the ' +
+      'user; do not retry until they have.',
+  ],
+]);
+
+/** Appends the remedy for whichever known scope the message names. */
+function withScopeRemedy(message: string): string {
+  for (const [scope, remedy] of SCOPE_REMEDIES) {
+    if (message.includes(scope)) return `${message} ${remedy}`;
+  }
+  return message;
 }
 
 interface StructuredToolContent {
@@ -172,7 +224,9 @@ async function callMcpTool(
     }
     return {
       status: 'error',
-      error: sanitizeForModel(message),
+      error: sanitizeForModel(
+        errorCode === 'PERMISSION_REQUIRED' ? withScopeRemedy(message) : message,
+      ),
       errorCode,
     };
   }

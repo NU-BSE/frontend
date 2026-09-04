@@ -31,7 +31,11 @@ import {
 } from '@mobile-agent/connector-telegram';
 
 import { AgentRuntime, toolsForConnections } from '../src/agent/AgentRuntime.js';
-import { resolveConnectionIds } from '../src/agent/toolExecutor.js';
+import {
+  classifyToolError,
+  resolveConnectionIds,
+} from '../src/agent/toolExecutor.js';
+import type { ForegroundGate } from '../src/agent/foregroundGate.js';
 import { mapMcpTools } from '../src/agent/toolMapper.js';
 import { createStructuredPlanner } from '../src/agent/models/structuredPlanner.js';
 import type { LlmEngine } from '../src/ai/types.js';
@@ -584,6 +588,7 @@ async function main(): Promise<void> {
   {
     const harness = await createHarness();
     let plannerCalls = 0;
+  const calls = () => plannerCalls;
 
     const { agent, states } = createAgent(
       harness,
@@ -1311,6 +1316,127 @@ console.log('\nan unmistakable connectionId is resolved, an ambiguous one is not
   assert(
     other[0]?.args.chatId === '5' && other[0]?.args.text === 'hi',
     'the other arguments are carried through unchanged',
+  );
+}
+
+/*
+ * The agent does not act while the user is out of the app.
+ *
+ * `open_settings` is a tool whose whole effect is to put Android's Settings in
+ * front of the user, and the run continued behind it:
+ *
+ *   android.assistant.request_role — done
+ *   android.assistant.open_settings — done
+ *   android.assistant.get_status — done
+ *   Checking agent health — done
+ *   android.assistant.open_settings — cancelled by you
+ *   Checking agent health — done   (x3)
+ *
+ * It asked whether the role had been granted before the user had reached the
+ * screen, and burned the rest of its step budget re-asking. Polling a state
+ * the user is mid-way through changing has no true answer, so the loop holds.
+ */
+console.log('\nthe loop holds while the app is backgrounded:');
+{
+  function gate() {
+    let active = true;
+    const waiters: (() => void)[] = [];
+    return {
+      background: () => {
+        active = false;
+      },
+      foreground: () => {
+        active = true;
+        for (const resume of waiters.splice(0)) resume();
+      },
+      waiting: () => waiters.length,
+      gate: {
+        isActive: () => active,
+        waitUntilActive: () =>
+          active
+            ? Promise.resolve()
+            : new Promise<void>((resolve) => waiters.push(resolve)),
+      } satisfies ForegroundGate,
+    };
+  }
+
+  const controller = gate();
+  let plannerCalls = 0;
+  const calls = () => plannerCalls;
+
+  const model: AgentModel = {
+    id: 'counting-planner',
+    capabilities: { textGeneration: true, toolCalling: true, structuredOutput: true },
+    run: () => {
+      plannerCalls += 1;
+      // Background the app the way `open_settings` does, on the first step.
+      if (plannerCalls === 1) controller.background();
+      return Promise.resolve(
+        plannerCalls >= 2
+          ? { kind: 'final', text: 'done' }
+          : { kind: 'final', text: 'first' },
+      ) as never;
+    },
+  } as never;
+
+  const states: string[] = [];
+  const runtime = new AgentRuntime({
+    model,
+    connections: [],
+    approveApproval: () => Promise.resolve(),
+    foreground: controller.gate,
+    onState: (state) => states.push(state.type),
+  });
+
+  await runtime.sendMessage('open the assistant settings');
+  assert(calls() === 1, 'the first step runs while the app is in front');
+
+  // A second turn, started while backgrounded, must not plan at all.
+  const pending = runtime.sendMessage('are we there yet');
+  await new Promise((resolve) => setTimeout(resolve, 10));
+
+  assert(
+    calls() === 1,
+    'no planning happens while the user is on a system screen',
+  );
+  assert(
+    states.includes('paused'),
+    'the run reports itself paused rather than leaving "Thinking…" on screen',
+  );
+  assert(controller.waiting() === 1, 'the run is waiting, not spinning');
+
+  controller.foreground();
+  await pending;
+
+  assert(calls() === 2, 'coming back resumes the run');
+}
+
+/*
+ * Scope failures are permission problems, not stale sessions.
+ *
+ *   Connection "Xiaomi 2412DPC0AG" is missing required scopes:
+ *   android.settings.write.
+ *
+ * matched the broader `connection "…" is (?!connected)` rule first and was
+ * reported as CONNECTION_EXPIRED — "sign in again" for a device permission the
+ * user has never granted. Reconnecting fixes nothing.
+ */
+console.log('\ntool errors are classified by what would actually fix them:');
+{
+  assert(
+    classifyToolError(
+      'Connection "Xiaomi 2412DPC0AG" is missing required scopes: android.settings.write.',
+    ) === 'PERMISSION_REQUIRED',
+    'a missing scope is a permission problem, not an expired connection',
+  );
+  assert(
+    classifyToolError('Connection "Google" is expired.') === 'CONNECTION_EXPIRED',
+    'an actually expired connection still classifies as expired',
+  );
+  assert(
+    classifyToolError('Connection "android" was not found.') ===
+      'CONNECTION_NOT_FOUND',
+    'a missing connection is still not found',
   );
 }
 

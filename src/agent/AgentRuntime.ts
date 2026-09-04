@@ -7,6 +7,7 @@ import {
   resolveConnectionIds,
   sanitizeModelArgs,
 } from './toolExecutor';
+import { alwaysActive, type ForegroundGate } from './foregroundGate';
 import { ToolExecutionLedger } from './toolExecutionLedger';
 import type { ToolExecutionRecord } from './toolExecutionLedger';
 import { detectStepProgress } from './routing/progressTracker';
@@ -54,6 +55,11 @@ export interface AgentRuntimeOptions {
   /** What the user actually has connected — injected into model context. */
   connections: ConnectionSummary[];
   maxSteps?: number;
+  /**
+   * Whether the app is in front of the user. Defaults to always active, which
+   * is right for remote runs and for Node, where there is no AppState.
+   */
+  foreground?: ForegroundGate;
   /**
    * UI-only gate: marks an approval confirmed in the approval service.
    * The model has no way to call this — approvals can only come from the
@@ -168,9 +174,30 @@ export class AgentRuntime {
    */
   private mcp: AgentMcpClient | undefined;
 
+  private readonly foreground: ForegroundGate;
+
   constructor(private readonly options: AgentRuntimeOptions) {
     this.maxSteps = options.maxSteps ?? MAX_AGENT_STEPS;
     this.mcp = options.mcp;
+    this.foreground = options.foreground ?? alwaysActive;
+  }
+
+  /**
+   * Holds until the app is in front of the user again.
+   *
+   * The state is reported so the status line reads "Paused…" rather than
+   * leaving "Thinking…" on screen for a minute while nothing runs. Whatever
+   * state the caller had set is restored, since the gate is a pause and not a
+   * transition.
+   */
+  private async awaitForeground(signal: AbortSignal): Promise<void> {
+    if (this.foreground.isActive()) return;
+
+    const resumeState = this.runState;
+    this.setState({ type: 'paused' });
+    await this.foreground.waitUntilActive(signal);
+    this.throwIfAborted(signal);
+    this.setState(resumeState);
   }
 
   /** Updates the local MCP client without rebuilding the runtime. */
@@ -344,6 +371,13 @@ export class AgentRuntime {
         step += 1;
         this.throwIfAborted(controller.signal);
 
+        /*
+         * Do not plan behind the user's back. A step taken while they are on a
+         * system screen reads a device state they are in the middle of
+         * changing, and queues approval sheets they cannot see.
+         */
+        await this.awaitForeground(controller.signal);
+
         this.routingMonitor.recordStep();
 
         this.setState({ type: 'thinking' });
@@ -447,6 +481,9 @@ export class AgentRuntime {
 
         for (const call of toolCalls) {
           this.throwIfAborted(controller.signal);
+          // One step can carry several calls, and the first is often the one
+          // that sent the user out of the app.
+          await this.awaitForeground(controller.signal);
           this.setState({ type: 'calling_tool', toolName: call.toolName });
           steps.push({
             type: 'tool_call',

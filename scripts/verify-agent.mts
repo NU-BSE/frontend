@@ -1172,6 +1172,20 @@ console.log('\nthe planner never shows protocol output as an answer:');
     'the retry can still recover the tool call the model meant to make',
   );
 
+  /*
+   * The second failure from the same phone, and the reason this check cannot
+   * simply require valid JSON. The model nested a tool call inside a stray
+   * `"arguments"` key and broke the quoting (`{""assistant":`), so JSON.parse
+   * throws — which is evidence of debris, not of prose.
+   */
+  const malformed = await plan(
+    '{"type": "final", "content": "{\\"connectionId\\":\\"android-device\\",\\"arguments\\":{\\"\\"assistant\\":{\\"type\\":\\"tool_call\\",\\"tool\\":\\"android.assistant.request_role\\",\\"connectionId\\":\\"android-device\\"}"}',
+  );
+  assert(
+    malformed.kind === 'final' && malformed.text === DEGRADED,
+    'malformed protocol debris is refused too — being broken is not a defence',
+  );
+
   const quoting = await plan(
     '{"type":"final","content":"The tool returned {\\"ok\\":true}, so it worked."}',
   );
@@ -1187,6 +1201,18 @@ console.log('\nthe planner never shows protocol output as an answer:');
   assert(
     plain.kind === 'final' && plain.text === 'Telegram is not connected.',
     'an ordinary answer is unaffected',
+  );
+
+  // The boundary: braces alone are not enough to condemn an answer. Prose
+  // wrapped in braces carries none of the protocol's vocabulary and does not
+  // parse, so it survives.
+  const braced = await plan(
+    '{"type":"final","content":"{this is not json, it is a sentence}"}',
+  );
+  assert(
+    braced.kind === 'final' &&
+      braced.text === '{this is not json, it is a sentence}',
+    'text in braces that is neither JSON nor protocol vocabulary is left alone',
   );
 }
 

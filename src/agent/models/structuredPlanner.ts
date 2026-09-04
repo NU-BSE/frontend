@@ -120,10 +120,22 @@ function protocolInstructions(input: AgentModelInput): string {
     'Reply with EXACTLY ONE JSON object. No markdown fences, no commentary.',
     'To call one tool: {"type":"tool_call","tool":"<name>","arguments":{...}}',
     'To answer the user: {"type":"final","content":"<text>"}',
+    /*
+     * The worked example is here because the abstract shape was not enough.
+     * A local 2B twice produced `{"connectionId":"android-device", ...}` —
+     * `connectionId` hoisted to the top level, the envelope lost — after
+     * being told only to "always pass the connectionId", which says what to
+     * send and not where it goes. Showing one filled-in object costs a few
+     * tokens and removes the ambiguity.
+     */
+    'The object has exactly these top-level keys and no others. Example:',
+    '{"type":"tool_call","tool":"system.health","arguments":{"connectionId":"abc"}}',
     'Rules:',
     '- Call one tool at a time, then wait for the tool result shown in the conversation.',
     '- Never invent tool names, connection ids or chat ids — use only values present in this prompt or in tool results.',
+    '- connectionId is a tool argument: put it INSIDE "arguments", never at the top level.',
     '- Always pass the connectionId of a connected account from the list below.',
+    '- "content" is plain text for the user to read. Never put JSON in it.',
     '- Actions with side effects (sending messages, creating events) require user approval; just call the tool, the app handles confirmation.',
     '- If the needed service is not connected, reply with {"type":"final"} saying so.',
     '- You may include an optional "reasoning" object describing the reasoning required for the current task.',
@@ -226,23 +238,48 @@ function extractJsonObject(text: string): string | null {
 }
 
 /**
- * A `final` whose whole content is JSON is a protocol failure, not an answer.
+ * The protocol's own vocabulary: the keys this planner asks the model to emit.
+ *
+ * Content carrying these is describing a tool call, not answering a user. No
+ * ordinary reply says `"tool":` or `"connectionId":` — those are words this
+ * file put in the model's mouth.
+ */
+const PROTOCOL_KEYS =
+  /"(?:type|tool|arguments|connectionId|content)"\s*:/u;
+
+/**
+ * A `final` whose whole content is a protocol fragment is a failure, not an
+ * answer.
  *
  * The schema only asks that `content` be a non-empty string, and a small model
- * asked to emit JSON will sometimes emit JSON there too. This reached a user:
- * "Open Digital Assistant App setting and change it to Creepy" was answered
- * with the literal text
+ * asked to emit JSON will emit JSON there too. Twice now this reached a user
+ * asking "Open Digital Assistant App setting and change it to Creepy":
  *
  *     {"connectionId":"android-device"}
  *
- * — the arguments of the tool call it meant to make, wrapped in a `final` the
- * parser accepted and the chat rendered as a reply. The tool it wanted
- * (`android.assistant.open_settings`) existed and was never called.
+ *     {"connectionId":"android-device","arguments":{""assistant":{"type":
+ *      "tool_call","tool":"android.assistant.request_role","connectionId":
+ *      "android-device"}
  *
- * Only a content that is *entirely* a JSON object or array counts. Text that
- * merely quotes some JSON is a legitimate answer — explaining a tool result
- * is exactly the kind of thing the assistant should be able to do — so the
- * check is anchored at both ends and parses before rejecting.
+ * Both are the tool call the model meant to make, mangled and wrapped in a
+ * `final` the parser accepted. `android.assistant.request_role` was available
+ * throughout and was never called.
+ *
+ * The second one is why this cannot simply require valid JSON, which is what
+ * the first version of this check did. Debris is *usually* malformed — being
+ * malformed is often why the model ended up putting it in a string — so
+ * `JSON.parse` throwing is evidence for a fragment, not against one. What
+ * separates the two cases is vocabulary: valid JSON standing alone is treated
+ * as a fragment, and malformed JSON only when it also names the protocol's own
+ * keys.
+ *
+ * Text that merely quotes JSON is a legitimate answer — explaining a tool
+ * result is exactly what the assistant should be able to do — so the check
+ * still requires the content to be structural end to end.
+ *
+ * The residual cost is a user who genuinely asks for a bare JSON document
+ * containing one of those key names. They get the retry, and then an honest
+ * failure rather than a wrong answer.
  */
 function isRawProtocolFragment(content: string): boolean {
   const trimmed = content.trim();
@@ -253,11 +290,12 @@ function isRawProtocolFragment(content: string): boolean {
 
   try {
     const value: unknown = JSON.parse(trimmed);
-    return typeof value === 'object' && value !== null;
+    if (typeof value === 'object' && value !== null) return true;
   } catch {
-    // Not actually JSON — prose that happens to be wrapped in braces.
-    return false;
+    // Malformed. Decided by vocabulary below rather than dismissed.
   }
+
+  return PROTOCOL_KEYS.test(trimmed);
 }
 
 function parsePlannerResponse(
@@ -330,10 +368,20 @@ export function createStructuredPlanner(engine: LlmEngine): AgentModel {
           },
           {
             role: 'user',
+            /*
+             * Concrete, because the generic version of this hint did not
+             * recover a single one of the failures seen on device. The model
+             * that lost the envelope needs to be shown the envelope.
+             */
             content:
               'That was not valid protocol output. Reply with EXACTLY ONE ' +
-              'JSON object: {"type":"tool_call","tool":...,"arguments":{...}} ' +
-              'or {"type":"final","content":"..."}.',
+              'JSON object having a top-level "type". Either\n' +
+              '{"type":"tool_call","tool":"<one of the tool names above>",' +
+              '"arguments":{"connectionId":"<id>", ...}}\n' +
+              'or\n' +
+              '{"type":"final","content":"<plain sentence for the user>"}\n' +
+              'Do not put JSON inside "content". Do not put "connectionId" ' +
+              'at the top level. No other text.',
           },
         ];
         completion = await generateOnce(retryPrompts, input.signal);

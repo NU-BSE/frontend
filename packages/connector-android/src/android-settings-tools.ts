@@ -96,7 +96,25 @@ const APP_TARGETS = [
 const OPEN_PANELS = ['internet', 'wifi', 'volume', 'nfc'] as const;
 
 const CONNECTION_ID = z.string().min(1);
-const PACKAGE_NAME = z.string().trim().min(1).max(255);
+/*
+ * Described, not just typed. A package name is not something a model can
+ * derive from a request: asked to turn off "Gemini" it called open_app with a
+ * target and no packageName at all, because nothing said where one comes from.
+ * The same shape as Telegram's chatId, which carries the same warning for the
+ * same reason.
+ */
+const PACKAGE_NAME = z
+  .string()
+  .trim()
+  .min(1)
+  .max(255)
+  .describe(
+    'Exact Android package id, e.g. "com.google.android.apps.bard". It MUST ' +
+      'be a packageName returned by android.apps.find — never a display ' +
+      'name like "Gemini" and never invented. If only the app\'s name is ' +
+      'known, call android.apps.find with that name first and copy the ' +
+      'chosen result\'s packageName verbatim.',
+  );
 
 const APP_TARGET_INPUT = z
   .object({

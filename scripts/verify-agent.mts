@@ -1343,7 +1343,9 @@ console.log('\nthe planner never shows protocol output as an answer:');
                 enum: ['appDetails', 'appNotifications', 'appUsage'],
               },
               packageName: { type: 'string' },
+              channelId: { type: 'string' },
             },
+            required: ['connectionId', 'target', 'packageName'],
           },
         },
       ],
@@ -1354,6 +1356,26 @@ console.log('\nthe planner never shows protocol output as an answer:');
     assert(
       system.includes('target: one of "appDetails"|"appNotifications"|"appUsage"'),
       'an enum argument is spelled out so the model can copy a valid value',
+    );
+    /*
+     * open_app was called with connectionId and target and no packageName.
+     * The schema's `required` list had it; the prompt rendered all four
+     * arguments identically, so nothing said which could be left out.
+     */
+    assert(
+      system.includes('packageName: string;') ||
+        system.includes('packageName: string }'),
+      'a required argument carries no marker',
+    );
+    assert(
+      system.includes('channelId: string (optional)'),
+      'and an optional one is marked, which is what says the others are not',
+    );
+    assert(
+      system.includes(
+        'Every argument listed for a tool is required unless marked (optional)',
+      ),
+      'with the rule that gives the marker its meaning stated in the protocol',
     );
     assert(
       !system.includes('target: string'),

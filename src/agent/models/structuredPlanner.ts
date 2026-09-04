@@ -94,7 +94,11 @@ const MAX_ENUM_VALUES = 60;
  * to make. The values are in `inputSchema` already; this stops throwing them
  * away.
  */
-function describeArgument(name: string, property: unknown): string {
+function describeArgument(
+  name: string,
+  property: unknown,
+  required: boolean,
+): string {
   const spec = property as {
     description?: string;
     type?: string;
@@ -113,7 +117,21 @@ function describeArgument(name: string, property: unknown): string {
     type = spec?.type ?? 'value';
   }
 
-  return `${name}: ${type}${spec?.description ? ` — ${spec.description}` : ''}`;
+  /*
+   * Optional is marked; required is the default and costs nothing to say.
+   *
+   * `android.settings.open_app` was called with connectionId and target and
+   * no `packageName` at all. The schema's `required` list had it and the
+   * prompt rendered every argument the same way, so there was nothing to tell
+   * a model which of the four it could leave out. Most arguments are
+   * required, so marking the exceptions is the cheaper half — and the rule
+   * that makes an unmarked argument mean "required" is stated in the protocol
+   * section rather than left to be inferred.
+   */
+  const suffix = required ? '' : ' (optional)';
+  return `${name}: ${type}${suffix}${
+    spec?.description ? ` — ${spec.description}` : ''
+  }`;
 }
 
 function protocolInstructions(input: AgentModelInput): string {
@@ -121,8 +139,15 @@ function protocolInstructions(input: AgentModelInput): string {
     const properties =
       (tool.inputSchema.properties as Record<string, unknown> | undefined) ??
       {};
+    const required = new Set(
+      Array.isArray(tool.inputSchema.required)
+        ? (tool.inputSchema.required as string[])
+        : [],
+    );
     const args = Object.keys(properties)
-      .map((name) => describeArgument(name, properties[name]))
+      .map((name) =>
+        describeArgument(name, properties[name], required.has(name)),
+      )
       .join('; ');
     return `- ${tool.name}: ${tool.description} Arguments: { ${args} }`;
   });
@@ -177,6 +202,7 @@ function protocolInstructions(input: AgentModelInput): string {
       input.connections[0]?.id ?? '<id from the list below>'
     }"}}`,
     'Rules:',
+    '- Every argument listed for a tool is required unless marked (optional).',
     '- Call one tool at a time, then wait for the tool result shown in the conversation.',
     '- Never invent tool names, connection ids or chat ids — use only values present in this prompt or in tool results.',
     '- connectionId is a tool argument: put it INSIDE "arguments", never at the top level.',

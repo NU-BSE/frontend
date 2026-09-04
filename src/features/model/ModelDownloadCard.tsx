@@ -46,7 +46,26 @@ export function ModelDownloadCard({ profile }: { profile: string }) {
     return 'Not downloaded';
   }, [state]);
 
-  const needsSubscription = state.error instanceof SubscriptionRequiredError;
+  const needsSubscription =
+    state.error instanceof SubscriptionRequiredError ||
+    state.blocker.kind === 'subscription';
+
+  /** The reason the button is dead, in words the user can act on. */
+  const blocked = useMemo(() => {
+    switch (state.blocker.kind) {
+      case 'offline':
+        // The transport's own message already names the host it could not
+        // reach, which is the actionable part; prefixing it repeated the
+        // sentence back at the user.
+        return state.blocker.message;
+      case 'nothing-published':
+        return 'The server has no weights published for this profile yet.';
+      case 'subscription':
+        return 'A subscription is required to download the model.';
+      default:
+        return null;
+    }
+  }, [state.blocker]);
 
   return (
     <View style={styles.card}>
@@ -90,13 +109,22 @@ export function ModelDownloadCard({ profile }: { profile: string }) {
 
       {state.phase === 'not-installed' || state.phase === 'failed' ? (
         <>
-          <Text style={styles.note}>
-            Runs entirely on this phone. Nothing you type reaches a server.
-          </Text>
+          {/*
+            Say which of the three reasons applies. A disabled button that
+            explains nothing is the worst outcome, because only one of these
+            is the user's to fix.
+          */}
+          {blocked ? (
+            <Text style={styles.blocker}>{blocked}</Text>
+          ) : (
+            <Text style={styles.note}>
+              Runs entirely on this phone. Nothing you type reaches a server.
+            </Text>
+          )}
           <Button
             label={state.progress ? 'Resume download' : 'Download'}
             onPress={start}
-            disabled={!state.bundle || (!state.downloadAllowed && !needsSubscription)}
+            disabled={state.blocker.kind !== 'none'}
           />
         </>
       ) : null}
@@ -151,5 +179,6 @@ const styles = StyleSheet.create({
   progressFile: { ...typography.bodySmall, color: palette.textFaint, flex: 1 },
   progressPercent: { ...typography.labelSmall, color: palette.textSecondary },
   note: { ...typography.bodySmall, color: palette.textSecondary },
+  blocker: { ...typography.bodySmall, color: palette.gold },
   error: { ...typography.bodySmall, color: palette.danger },
 });

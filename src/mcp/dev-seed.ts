@@ -1,80 +1,49 @@
-import type { ConnectionRecord, ConnectionStore } from '@mobile-agent/connector-core';
-import { TELEGRAM_USER_SCOPES } from '@mobile-agent/connector-telegram';
+import type { ConnectionStore } from '@mobile-agent/connector-core';
 
 /**
- * Development-mode account seeding. Local device connectors (Android Settings
- * and Android Intents) are never mocked or seeded; the runtime connects them
- * only when their real native bridges are present.
+ * Cleanup for the development account fixtures this app used to seed.
+ *
+ * It wrote eleven connections marked `connected` with no credentials behind
+ * any of them, so a fresh install showed Google as signed in before the user
+ * had done anything — and because tools follow the connection record, all
+ * sixteen Google tools sat in the planner's prompt, ready to be called against
+ * an account that did not exist. Eight of the eleven named connectors this
+ * branch no longer registers, leaving records claiming accounts nothing could
+ * serve.
+ *
+ * The seeding is gone. What remains is the list of ids it wrote, so a device
+ * already carrying them is cleaned on its next launch. Removing this file
+ * would strand those records on every phone that ever ran the old build, so it
+ * stays until that is no longer a concern.
  */
-function devConnection(
-  id: string,
-  connectorId: ConnectionRecord['connectorId'],
-  displayName: string,
-  extra?: Partial<ConnectionRecord>,
-): ConnectionRecord {
-  const now = Date.now();
-  return {
-    id,
-    connectorId,
-    displayName: `${displayName} (development mock)`,
-    status: 'connected',
-    scopes: [],
-    capabilities: [`${connectorId}.read`, `${connectorId}.write`],
-    createdAt: now,
-    updatedAt: now,
-    ...extra,
-  };
-}
-
-const DEV_CONNECTIONS: ConnectionRecord[] = [
-  devConnection('google-default', 'google', 'Google Account'),
-  devConnection('telegram-bot-default', 'telegram-bot', 'Telegram Bot'),
-  devConnection('telegram-user-default', 'telegram-user', 'Telegram User', {
-    scopes: [...TELEGRAM_USER_SCOPES],
-    capabilities: [...TELEGRAM_USER_SCOPES],
-    credentialReference: 'tdlib-session:dev',
-  }),
-  devConnection('microsoft-default', 'microsoft', 'Microsoft Account'),
-  devConnection('slack-default', 'slack', 'Slack'),
-  devConnection('notion-default', 'notion', 'Notion'),
-  devConnection('todoist-default', 'todoist', 'Todoist'),
-  devConnection('github-default', 'github', 'GitHub'),
-  devConnection('dropbox-default', 'dropbox', 'Dropbox'),
-  devConnection('discord-default', 'discord', 'Discord'),
-  devConnection('spotify-default', 'spotify', 'Spotify'),
-];
-
-export interface SeedOptions {
-  /** When true, skip seeding the mock Telegram connection. */
-  skipTelegramSeed?: boolean;
-}
-
-export async function seedDevelopmentConnections(
-  store: ConnectionStore,
-  options: SeedOptions = {},
-): Promise<void> {
-  for (const connection of DEV_CONNECTIONS) {
-    if (options.skipTelegramSeed && connection.connectorId === 'telegram-user') continue;
-    const existing = await store.get(connection.id);
-    if (existing) continue;
-    await store.save(connection);
-  }
-}
-
-/** Include the retired mock intent id so upgrades clean it up once. */
-const CLEANUP_IDS = new Set([
-  ...DEV_CONNECTIONS.map((connection) => connection.id),
+const SEEDED_CONNECTION_IDS = [
+  'google-default',
+  'telegram-bot-default',
+  'telegram-user-default',
+  'microsoft-default',
+  'slack-default',
+  'notion-default',
+  'todoist-default',
+  'github-default',
+  'dropbox-default',
+  'discord-default',
+  'spotify-default',
+  /** A mock intent connection from an earlier build. */
   'intent-default',
-]);
+] as const;
 
 /**
- * Removes known development-seed connections from the store. Safe in
- * production because only fixed fixture ids are removed.
+ * Removes the development fixtures from the store.
+ *
+ * Safe to run unconditionally and on every launch: only these fixed ids are
+ * removed, and a real connection never carries one of them — they are minted
+ * by the connectors themselves (`android-device`, `telegram-user`, and the
+ * ids returned by an OAuth flow).
  */
 export async function removeDevelopmentConnections(
   store: ConnectionStore,
 ): Promise<void> {
-  for (const id of CLEANUP_IDS) {
+  for (const id of SEEDED_CONNECTION_IDS) {
     await store.remove(id);
   }
 }

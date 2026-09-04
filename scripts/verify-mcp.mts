@@ -12,6 +12,7 @@ import {
   approveConnectorTool,
   closeLocalMcpRuntime,
   getConnectionStore,
+  getCredentialVault,
   getLocalMcpRuntime,
   restartLocalMcpRuntime,
 } from '../src/mcp/runtime-singleton.js';
@@ -107,6 +108,7 @@ async function main(): Promise<void> {
   console.log('connector tools:');
 
   const connectionStore = getConnectionStore();
+  const credentialVault = getCredentialVault();
   for (const namespace of CONNECTOR_NAMESPACES) {
     const connectorId = namespace === 'telegram' ? 'telegram-user' : namespace;
     const now = Date.now();
@@ -114,6 +116,20 @@ async function main(): Promise<void> {
       connectorId === 'telegram-user'
         ? [...TELEGRAM_USER_SCOPES]
         : [`${connectorId}.read`, `${connectorId}.write`];
+
+    /*
+     * With a credential, because the runtime now demotes any external account
+     * marked `connected` that has none. These records used to have none and
+     * kept their tools, which is exactly how a seeded fixture made Google look
+     * signed in on a fresh install. A test connection has to be as real as the
+     * thing it stands in for.
+     */
+    const credentialReference = `secret:${connectorId}-verify`;
+    await credentialVault.save(credentialReference, {
+      kind: 'static_token',
+      token: 'verification',
+    });
+
     await connectionStore.save({
       id: `${connectorId}-verify`,
       connectorId: connectorId as never,
@@ -121,6 +137,7 @@ async function main(): Promise<void> {
       status: 'connected',
       scopes,
       capabilities: scopes,
+      credentialReference,
       createdAt: now,
       updatedAt: now,
     });
@@ -250,9 +267,9 @@ async function main(): Promise<void> {
 
   for (const tool of gated) {
     const args: Record<string, unknown> = {
-      // The Telegram *bot* connector was a mock and is gone; every gated
-      // telegram tool now belongs to the personal-account connector.
-      connectionId: 'telegram-user-default',
+      // The connection this test created, not a fixture the runtime used to
+      // seed. `telegram-user-default` was one of those and is gone.
+      connectionId: 'telegram-user-verify',
       chatId: '1',
       text: 'x',
       messageId: 1,

@@ -97,6 +97,116 @@ assert(
   'removing the model clears resume tokens, which would otherwise point at files that are gone',
 );
 
+/*
+ * And a behavioural half, because the source check above cannot see the
+ * mistake that actually shipped.
+ *
+ * `verifyInstalled` fed the stored path straight into `new File(...)`. The
+ * record holds a plain absolute path — llama.rn needs one — while
+ * expo-file-system is URI-based, and on Android the class ends at
+ * `File(URI.create(uri.toString()))`, which throws for a URI with no scheme.
+ * `verifyInstalled` catches everything and answers `false`, so a complete
+ * 1.1 GB install failed its own check on every launch: the engine fell back
+ * to the stub and the account screen said "The on-device model has not been
+ * downloaded yet" to someone looking at the model they had just downloaded.
+ *
+ * The stub throws on a scheme-less argument exactly as the platform does. One
+ * that returned `exists === false` instead would let this back in silently.
+ */
+const { verifyInstalled } = await import('../src/ai/modelInstall.js');
+
+interface StubEntry {
+  size: number;
+}
+/*
+ * Read through a function, not captured once. `modelInstall` requires
+ * expo-file-system lazily, so the stub module is first evaluated partway
+ * through these checks — after this file has run. Both sides adopt whichever
+ * map is already on `globalThis`.
+ */
+function fsFiles(): Map<string, StubEntry> {
+  const slot = globalThis as { __fsFiles?: Map<string, StubEntry> };
+  slot.__fsFiles ??= new Map<string, StubEntry>();
+  return slot.__fsFiles;
+}
+
+const WEIGHTS = '/data/user/0/im.creepy.app/files/models/model.gguf';
+const PROJECTOR = '/data/user/0/im.creepy.app/files/models/mmproj.gguf';
+
+function present(...entries: [string, number][]): void {
+  const files = fsFiles();
+  files.clear();
+  for (const [path, size] of entries) files.set(`file://${path}`, { size });
+}
+
+console.log('\na complete install verifies:');
+
+present([WEIGHTS, 100], [PROJECTOR, 20]);
+assert(
+  await verifyInstalled({
+    profile: 'on-device',
+    model: 'gui-owl-2b',
+    path: WEIGHTS,
+    projectorPath: PROJECTOR,
+    files: [
+      { path: WEIGHTS, bytes: 100, role: 'weights' },
+      { path: PROJECTOR, bytes: 20, role: 'projector' },
+    ],
+    bytes: 120,
+    installedAt: 0,
+  }),
+  'a record holding plain paths verifies against the files on disk',
+);
+
+assert(
+  await verifyInstalled({
+    profile: 'on-device',
+    model: 'gui-owl-2b',
+    path: WEIGHTS,
+    projectorPath: null,
+    files: [],
+    bytes: 100,
+    installedAt: 0,
+  }),
+  'and so does a legacy record with no per-file lengths',
+);
+
+console.log('\nand a broken one does not:');
+
+present([WEIGHTS, 99], [PROJECTOR, 20]);
+assert(
+  !(await verifyInstalled({
+    profile: 'on-device',
+    model: 'gui-owl-2b',
+    path: WEIGHTS,
+    projectorPath: PROJECTOR,
+    files: [
+      { path: WEIGHTS, bytes: 100, role: 'weights' },
+      { path: PROJECTOR, bytes: 20, role: 'projector' },
+    ],
+    bytes: 120,
+    installedAt: 0,
+  })),
+  'a truncated file fails, which is the check the size comparison is for',
+);
+
+present([WEIGHTS, 100]);
+assert(
+  !(await verifyInstalled({
+    profile: 'on-device',
+    model: 'gui-owl-2b',
+    path: WEIGHTS,
+    projectorPath: PROJECTOR,
+    files: [
+      { path: WEIGHTS, bytes: 100, role: 'weights' },
+      { path: PROJECTOR, bytes: 20, role: 'projector' },
+    ],
+    bytes: 120,
+    installedAt: 0,
+  })),
+  'and so does a missing second file',
+);
+
 if (failures > 0) {
   console.error(`\nmodel install: ${failures} check(s) failed`);
   process.exit(1);

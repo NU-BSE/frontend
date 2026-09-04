@@ -132,6 +132,32 @@ function fileFor(name: string) {
   return new File(modelsDirectory(), name);
 }
 
+/**
+ * The two spellings of a location, and why both exist.
+ *
+ * llama.rn takes a plain absolute path; `expo-file-system` takes a URI. The
+ * install record stores the plain path, because that is what is handed to
+ * native inference, and every filesystem call has to convert on the way in.
+ *
+ * Skipping the conversion is not a soft failure. On Android the File class
+ * ends at
+ *
+ *     class JavaFile(override val uri: Uri) : File(URI.create(uri.toString()))
+ *
+ * and `java.io.File(URI)` rejects a URI with no scheme outright. So
+ * `new File('/data/user/0/…/model.gguf')` throws rather than reporting a
+ * missing file — and `verifyInstalled` catches everything and answers
+ * `false`, which reads as "not downloaded". A complete 1.1 GB install failed
+ * its own check on every launch, the engine fell back to the stub, and the
+ * account screen reported "The on-device model has not been downloaded yet"
+ * to someone looking at the model they had just waited twenty minutes for.
+ *
+ * Idempotent, so a record already holding a URI is left alone.
+ */
+function fileUri(pathOrUri: string): string {
+  return pathOrUri.startsWith('file://') ? pathOrUri : `file://${pathOrUri}`;
+}
+
 export async function getInstalledModel(): Promise<InstalledModel | null> {
   try {
     const raw = await (await asyncStorage()).getItem(INSTALL_KEY);
@@ -163,7 +189,7 @@ export async function verifyInstalled(install: InstalledModel): Promise<boolean>
 
     if (install.files && install.files.length > 0) {
       return install.files.every((entry) => {
-        const file = new File(entry.path);
+        const file = new File(fileUri(entry.path));
         return file.exists && file.size === entry.bytes;
       });
     }
@@ -173,7 +199,7 @@ export async function verifyInstalled(install: InstalledModel): Promise<boolean>
     // falls back to existence — the download verified each length at the time
     // it finished, and discarding a working install to punish an old record
     // would cost the user the whole download again.
-    const file = new File(install.path);
+    const file = new File(fileUri(install.path));
     return file.exists && file.size > 0;
   } catch {
     return false;
@@ -191,7 +217,7 @@ export async function removeInstalledModel(): Promise<void> {
       if (!path) continue;
       try {
         const { File } = fileSystem();
-        const file = new File(path);
+        const file = new File(fileUri(path));
         if (file.exists) file.delete();
       } catch {
         // Already gone is the desired end state.

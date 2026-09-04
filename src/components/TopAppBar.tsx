@@ -101,7 +101,7 @@ const styles = StyleSheet.create({
     // More on the right than the left: the mascot is a solid shape that fills
     // its box, while text has its own optical sidebearing, so equal padding
     // would read as tighter on the text side.
-    paddingRight: spacing.md,
+    paddingRight: MASCOT_INSET,
     paddingVertical: MASCOT_INSET,
     ...shadow.raised,
   },

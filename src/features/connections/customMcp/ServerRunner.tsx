@@ -27,7 +27,8 @@ const PHASE_COPY = {
  */
 export function ServerRunner({ server }: { server: CustomMcpServer }) {
   const [requested, setRequested] = useState(false);
-  const { state, onReady, onLog, onError } = useSandboxedServer(requested ? server : null);
+  const { state, onReady, onLog, onError, onSaveFiles } =
+    useSandboxedServer(requested ? server : null);
   const [tools, setTools] = useState<string[] | null>(null);
   const [toolError, setToolError] = useState<string | null>(null);
 
@@ -120,9 +121,11 @@ export function ServerRunner({ server }: { server: CustomMcpServer }) {
         <McpSandbox
           bundleBase64={state.bundleBase64}
           environment={state.environment}
+          files={state.files}
           onReady={onReady}
           onLog={onLog}
           onError={onError}
+          onSaveFiles={onSaveFiles}
         />
       ) : null}
     </View>

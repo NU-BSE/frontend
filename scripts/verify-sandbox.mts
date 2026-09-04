@@ -61,10 +61,15 @@ interface Posted {
   [key: string]: unknown;
 }
 
-function loadSandbox(bundleSource: string, environment: Record<string, string>) {
+function loadSandbox(
+  bundleSource: string,
+  environment: Record<string, string>,
+  files: Record<string, string> = {},
+) {
   const html = sandboxHtml(
     Buffer.from(bundleSource, 'utf8').toString('base64'),
     environment,
+    files,
   );
 
   const posted: Posted[] = [];
@@ -77,6 +82,8 @@ function loadSandbox(bundleSource: string, environment: Record<string, string>) 
   scope.TextDecoder = TextDecoder;
   scope.Uint8Array = Uint8Array;
   scope.console = console;
+  scope.setTimeout = setTimeout;
+  scope.clearTimeout = clearTimeout;
   scope.addEventListener = () => {};
   scope.ReactNativeWebView = {
     postMessage: (raw: string) => posted.push(JSON.parse(raw) as Posted),
@@ -322,12 +329,60 @@ async function checkHostileEnvironmentValue(): Promise<void> {
   );
 }
 
+
+/**
+ * The virtual filesystem's two ends.
+ *
+ * The backend's fs shim reads `__CREEPY_FILES__` at startup and calls
+ * `saveFiles` on write; this document supplies the first and forwards the
+ * second. Those live in different repositories and agree only by convention,
+ * so a rename on either side would look like a server that quietly forgets
+ * everything between runs.
+ */
+async function checkTheFileStoreCrossesTheBoundary(): Promise<void> {
+  const probe = [
+    'globalThis.__creepyMcpHost.log("probe", JSON.stringify(globalThis.__CREEPY_FILES__));',
+    'globalThis.__creepyMcpHost.saveFiles({ "/home/mcp/.srv/state.json": "[1,2]" });',
+    'globalThis.__creepyMcpHost.ready({ deliver: () => {} });',
+  ].join('\n');
+
+  const { posted } = loadSandbox(probe, {}, { '/package.json': '{"name":"srv"}' });
+  await tick();
+
+  const seeded = posted.find((message) => message.t === 'log');
+  assert(
+    String(seeded?.text).includes('"/package.json"'),
+    'a previous run\'s files reach the server before it starts',
+  );
+
+  // saveFiles is coalesced, so the write arrives after a delay rather than
+  // synchronously — a server writing in a loop must not post per write.
+  assert(
+    !posted.some((message) => message.t === 'files'),
+    'writes are coalesced rather than posted one per call',
+  );
+
+  await new Promise((resolve) => setTimeout(resolve, 400));
+
+  const saved = posted.find((message) => message.t === 'files') as
+    | { files: Record<string, string> }
+    | undefined;
+  assert(saved !== undefined, 'and the store reaches the host to be persisted');
+  assert(
+    saved?.files['/home/mcp/.srv/state.json'] === '[1,2]',
+    'with the path the server chose and the content it wrote',
+  );
+}
+
 async function main(): Promise<void> {
   console.log('the sandbox document:');
   await checkSandboxDocument();
 
   console.log('\nhostile environment values:');
   await checkHostileEnvironmentValue();
+
+  console.log('\nthe virtual filesystem:');
+  await checkTheFileStoreCrossesTheBoundary();
 
   console.log('\nno ambient authority:');
   await checkTheGuestHasNoAmbientAuthority();

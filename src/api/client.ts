@@ -429,3 +429,41 @@ export async function downloadMcpBundle(bundleId: string): Promise<string> {
   }
   return response.text();
 }
+
+// --- On-device model weights ---
+
+export interface ModelFileEntry {
+  name: string;
+  role: string;
+  bytes: number;
+  sha256: string;
+  url: string;
+}
+
+export interface ModelBundleEntry {
+  profile: string;
+  model: string;
+  totalBytes: number;
+  files: ModelFileEntry[];
+}
+
+export interface ModelCatalog {
+  bundles: ModelBundleEntry[];
+  /** False without a live subscription. The sizes are still shown. */
+  downloadAllowed: boolean;
+}
+
+/**
+ * What the on-device model would cost to download, and whether it may be.
+ *
+ * Readable before paying on purpose: the size belongs on the screen where
+ * someone chooses on-device inference, which precedes the paywall.
+ */
+export async function getModelCatalog(): Promise<ModelCatalog> {
+  return get('/models/catalog');
+}
+
+/** An absolute URL for a weight file, for a streaming download. */
+export function modelFileUrl(path: string): string {
+  return apiUrl(path);
+}

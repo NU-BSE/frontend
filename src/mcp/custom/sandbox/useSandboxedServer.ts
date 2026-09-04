@@ -19,7 +19,7 @@ import { Client } from '@modelcontextprotocol/client';
 import { AgentMcpClient } from '@mobile-agent/mcp-client';
 
 import { ensureBundle, readBundleBase64 } from '../bundleStore';
-import { readEnvironment } from '../store';
+import { readEnvironment, readFiles, writeFiles } from '../store';
 import type { CustomMcpServer } from '../types';
 import type { SandboxTransport } from './SandboxTransport';
 
@@ -35,6 +35,8 @@ export interface SandboxState {
   /** Set once the bundle is verified and the sandbox may be mounted. */
   bundleBase64: string | null;
   environment: Record<string, string>;
+  /** The server's virtual filesystem as of the last run. */
+  files: Record<string, string>;
   /** An MCP client for the running server. Null until `phase` is 'ready'. */
   client: AgentMcpClient | null;
   error: Error | null;
@@ -50,6 +52,7 @@ export function useSandboxedServer(server: CustomMcpServer | null) {
     phase: 'idle',
     bundleBase64: null,
     environment: {},
+    files: {},
     client: null,
     error: null,
     logs: [],
@@ -67,6 +70,7 @@ export function useSandboxedServer(server: CustomMcpServer | null) {
         phase: 'idle',
         bundleBase64: null,
         environment: {},
+        files: {},
         client: null,
         error: null,
         logs: [],
@@ -80,9 +84,10 @@ export function useSandboxedServer(server: CustomMcpServer | null) {
     void (async () => {
       try {
         await ensureBundle(bundleId, sha256);
-        const [base64, environment] = await Promise.all([
+        const [base64, environment, files] = await Promise.all([
           readBundleBase64(bundleId),
           readEnvironment(server.id),
+          readFiles(server.id),
         ]);
         if (generation.current !== current) return;
         setState((previous) => ({
@@ -90,6 +95,7 @@ export function useSandboxedServer(server: CustomMcpServer | null) {
           phase: 'starting',
           bundleBase64: base64,
           environment,
+          files,
         }));
       } catch (error) {
         if (generation.current !== current) return;
@@ -122,6 +128,26 @@ export function useSandboxedServer(server: CustomMcpServer | null) {
     })();
   }, []);
 
+  /**
+   * Persist what the server wrote.
+   *
+   * Failures surface as an error rather than being swallowed: a store that has
+   * hit its cap means the next restart silently loses the user's data, and
+   * they should be told while the running server still holds it.
+   */
+  const onSaveFiles = useCallback(
+    (files: Record<string, string>) => {
+      if (!server) return;
+      void writeFiles(server.id, files).catch((error: unknown) => {
+        setState((previous) => ({
+          ...previous,
+          error: error instanceof Error ? error : new Error(String(error)),
+        }));
+      });
+    },
+    [server],
+  );
+
   const onLog = useCallback((stream: string, text: string) => {
     setState((previous) => ({
       ...previous,
@@ -139,5 +165,5 @@ export function useSandboxedServer(server: CustomMcpServer | null) {
     }));
   }, []);
 
-  return { state, onReady, onLog, onError };
+  return { state, onReady, onLog, onError, onSaveFiles };
 }

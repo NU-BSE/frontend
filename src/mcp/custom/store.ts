@@ -27,6 +27,23 @@ import {
 
 const SERVERS_KEY = 'creepyim.mcp.custom-servers.v1';
 
+/**
+ * A server's virtual filesystem, one key per server.
+ *
+ * Kept apart from the server record so a large store cannot slow down the list
+ * screen, which reads every record to render, and so clearing a server's state
+ * never risks the record that describes it.
+ */
+const FILES_KEY_PREFIX = 'creepyim.mcp.custom-files.';
+
+/**
+ * A cap, because this is AsyncStorage and a server writing in a loop would
+ * otherwise fill the device. Servers keep configuration and small caches here;
+ * anything approaching a megabyte is a server misusing it, and refusing to
+ * grow is better than an unbounded write that the user cannot see or stop.
+ */
+const MAX_FILES_BYTES = 512 * 1024;
+
 /** Vault reference for one variable of one server. */
 function variableReference(serverId: string, name: string): string {
   return `custom-mcp/${serverId}/${name}`;
@@ -214,6 +231,41 @@ export async function readEnvironment(id: string): Promise<Record<string, string
   return environment;
 }
 
+/** The virtual filesystem this server left behind, for seeding the sandbox. */
+export async function readFiles(id: string): Promise<Record<string, string>> {
+  try {
+    const raw = await AsyncStorage.getItem(FILES_KEY_PREFIX + id);
+    if (!raw) return {};
+    const parsed: unknown = JSON.parse(raw);
+    if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) return {};
+    const files: Record<string, string> = {};
+    for (const [name, content] of Object.entries(parsed)) {
+      if (typeof content === 'string') files[name] = content;
+    }
+    return files;
+  } catch {
+    // A corrupt store must not stop the server starting; it starts empty,
+    // which is the same state it had before it ever ran.
+    return {};
+  }
+}
+
+export class FileStoreTooLargeError extends Error {
+  constructor(readonly bytes: number) {
+    super(`This server tried to store ${bytes} bytes, over the ${MAX_FILES_BYTES} limit.`);
+    this.name = 'FileStoreTooLargeError';
+  }
+}
+
+/** Persist what a sandboxed server wrote. */
+export async function writeFiles(id: string, files: Record<string, string>): Promise<void> {
+  const serialised = JSON.stringify(files);
+  if (serialised.length > MAX_FILES_BYTES) {
+    throw new FileStoreTooLargeError(serialised.length);
+  }
+  await AsyncStorage.setItem(FILES_KEY_PREFIX + id, serialised);
+}
+
 /** Remove a server and every secret it owns. */
 export async function removeCustomServer(id: string): Promise<void> {
   const servers = await listCustomServers();
@@ -228,6 +280,7 @@ export async function removeCustomServer(id: string): Promise<void> {
     }
     // The bundle is a megabyte of executable code with nothing left to run it.
     if (server.detected) deleteBundle(server.detected.bundleId);
+    await AsyncStorage.removeItem(FILES_KEY_PREFIX + id);
   }
 
   await writeAll(servers.filter((item) => item.id !== id));

@@ -25,11 +25,15 @@ export interface McpSandboxProps {
   bundleBase64: string;
   /** Values from the credential vault; becomes the server's process.env. */
   environment: Record<string, string>;
+  /** What this server wrote last time; becomes its virtual filesystem. */
+  files: Record<string, string>;
   /** Called once the server has connected its transport and is ready. */
   onReady: (transport: SandboxTransport) => void;
   /** Server diagnostics — its stderr and console. Never its data. */
   onLog?: (stream: string, text: string) => void;
   onError?: (error: Error) => void;
+  /** Called when the server writes, with its whole store. */
+  onSaveFiles?: (files: Record<string, string>) => void;
   /**
    * Decides whether the server may make a request, and performs it.
    *
@@ -78,10 +82,12 @@ async function defaultFetch(
 export function McpSandbox({
   bundleBase64,
   environment,
+  files,
   onReady,
   onLog,
   onError,
   onFetch,
+  onSaveFiles,
 }: McpSandboxProps) {
   const webViewRef = useRef<WebView>(null);
   const transportRef = useRef<SandboxTransport | null>(null);
@@ -114,7 +120,7 @@ export function McpSandbox({
   // Built once. Rebuilding it would reload the WebView and restart the server
   // mid-conversation, losing whatever state it holds.
   const html = useMemo(
-    () => sandboxHtml(bundleBase64, environment),
+    () => sandboxHtml(bundleBase64, environment, files),
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [],
   );
@@ -147,6 +153,9 @@ export function McpSandbox({
         case 'log':
           onLog?.(parsed.stream, parsed.text);
           return;
+        case 'files':
+          onSaveFiles?.(parsed.files);
+          return;
         case 'error': {
           const error = new Error(parsed.message);
           if (parsed.stack) error.stack = parsed.stack;
@@ -166,7 +175,7 @@ export function McpSandbox({
         }
       }
     },
-    [getTransport, onError, onFetch, onLog, onReady],
+    [getTransport, onError, onFetch, onLog, onReady, onSaveFiles],
   );
 
   return (

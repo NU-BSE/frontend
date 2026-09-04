@@ -29,6 +29,16 @@ export const palette = {
   brandWash: 'rgba(74, 52, 40, 0.1)',
   /** 20% brand — the load-more underline. */
   brandHairline: 'rgba(74, 52, 40, 0.2)',
+  /**
+   * `brandWash` flattened onto `canvas`, for anything that also has elevation.
+   *
+   * Android composites an elevation shadow *through* a translucent background
+   * rather than behind it, so `brandWash` plus `shadow.card` renders as a flat
+   * grey block with a lighter patch where the text sits — which is what the
+   * deep-link button in chat looked like. An opaque colour has no such
+   * interaction. Same appearance over the canvas, minus the artifact.
+   */
+  brandChip: '#dfd7cd',
 
   textPrimary: '#33251c',
   textSecondary: '#5c4a3d',

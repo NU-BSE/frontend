@@ -5,6 +5,7 @@ import { ScrollView, StyleSheet, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { clearAuthSession, getAuthenticatedEmail } from "@/auth/emailAuth";
 import { useAi } from "@/ai/AiProvider";
+import { ModelDownloadCard } from "@/features/model/ModelDownloadCard";
 import { Button } from "@/components/Button";
 import { Screen } from "@/components/Screen";
 import { Text } from "@/components/Text";
@@ -100,6 +101,13 @@ export default function Account() {
             <Row label="Memory profile" value={memoryProfile ?? "—"} />
             {degradedReason ? <Text variant="bodySmall" tone="danger">{degradedReason}</Text> : null}
           </View>
+
+          {/*
+            Shown whatever the current profile is. Someone on cloud inference
+            deciding whether to switch needs to see the download size first —
+            that is the whole reason the weights are not in the APK.
+          */}
+          <ModelDownloadCard profile="on-device" />
         </View>
 
         <View style={styles.section}>

@@ -32,6 +32,7 @@ export type GuestMessage =
   | { t: 'mcp'; message: unknown }
   | { t: 'log'; stream: string; text: string }
   | { t: 'fetch'; id: number; url: string; init: GuestFetchInit }
+  | { t: 'files'; files: Record<string, string> }
   | { t: 'error'; message: string; stack?: string };
 
 export interface GuestFetchInit {
@@ -65,6 +66,8 @@ const PREAMBLE = String.raw`
   var transport = null;
   var pendingFetches = {};
   var nextFetchId = 1;
+  var pendingFiles = null;
+  var filesTimer = null;
 
   // Deny storage rather than emulate it. A server that quietly writes to a
   // store nobody can inspect is worse than one that fails loudly.
@@ -166,6 +169,20 @@ const PREAMBLE = String.raw`
     log: function (stream, text) { post({ t: 'log', stream: stream, text: text }); },
     ready: function (t) { transport = t; post({ t: 'ready' }); },
     receive: function (message) { post({ t: 'mcp', message: message }); },
+    // The virtual filesystem's whole store, whenever the server writes.
+    //
+    // Sent in full rather than as a delta: the store is a handful of small
+    // JSON files, and a delta protocol would have to survive dropped messages
+    // and reordering to end up at the same place this gets to by construction.
+    // Coalesced, because a server writing in a loop must not post per write.
+    saveFiles: function (files) {
+      pendingFiles = files;
+      if (filesTimer) return;
+      filesTimer = setTimeout(function () {
+        filesTimer = null;
+        post({ t: 'files', files: pendingFiles });
+      }, 250);
+    },
   };
 
   window.__creepyDeliver = function (message) {
@@ -232,17 +249,25 @@ function jsonForScriptTag(value: unknown): string {
  * The document the sandbox loads.
  *
  * The bundle rides in a `text/plain` script tag as base64, which the preamble
- * decodes. `default-src 'none'` in the CSP is deliberate belt-and-braces: the
+ * decodes. `__CREEPY_FILES__` is whatever this server wrote on a previous run;
+ * the bundle's fs shim starts from it, so state survives a restart. `default-src 'none'` in the CSP is deliberate belt-and-braces: the
  * fetch proxy already means the guest makes no requests of its own, and this
  * makes an image tag or a stylesheet reference fail too.
  */
-export function sandboxHtml(bundleBase64: string, environment: Record<string, string>): string {
+export function sandboxHtml(
+  bundleBase64: string,
+  environment: Record<string, string>,
+  files: Record<string, string> = {},
+): string {
   return `<!doctype html>
 <html><head><meta charset="utf-8">
 <meta http-equiv="Content-Security-Policy"
       content="default-src 'none'; script-src 'unsafe-inline' 'unsafe-eval'">
 </head><body>
-<script>window.__CREEPY_ENV__ = ${jsonForScriptTag(environment)};</script>
+<script>
+window.__CREEPY_ENV__ = ${jsonForScriptTag(environment)};
+window.__CREEPY_FILES__ = ${jsonForScriptTag(files)};
+</script>
 <script>${PREAMBLE}</script>
 <script id="bundle" type="text/plain">${bundleBase64}</script>
 <script>window.__creepyStart(document.getElementById('bundle').textContent.trim());</script>

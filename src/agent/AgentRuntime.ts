@@ -499,6 +499,42 @@ export class AgentRuntime {
             toolDef?.risk === 'external_side_effect' ||
             toolDef?.risk === 'destructive';
 
+          /*
+           * A call that already failed this run is not run again.
+           *
+           * Unlike the guards below, this applies to every tool, not only the
+           * side-effecting ones: a read that failed on its arguments fails the
+           * same way on the same arguments, and four identical
+           * `android.settings.open_app` failures are what spent a whole run's
+           * budget and ended it at the step ceiling.
+           *
+           * The model gets the original error back, plus the one instruction
+           * it needs — change something or say it cannot. Different arguments
+           * hash differently and are never blocked.
+           */
+          const settledFailure = this.toolLedger.findRepeatedFailure(call);
+          if (settledFailure) {
+            const previous = settledFailure.result?.error ?? 'It failed.';
+            this.pushToolResult(
+              call,
+              {
+                status: 'error',
+                error:
+                  `${previous} You already called ${call.toolName} with these ` +
+                  'exact arguments and it failed for this reason. Repeating it ' +
+                  'will not help: change the arguments, use a different tool, ' +
+                  'or reply with {"type":"final"} telling the user what you ' +
+                  'could not do.',
+                errorCode: settledFailure.result?.errorCode ?? 'TOOL_EXECUTION_ERROR',
+              },
+              toolDef,
+              stepToolResults,
+              steps,
+              false,
+            );
+            continue;
+          }
+
           // Idempotency guard: never replay a completed side effect.
           if (isSideEffect) {
             const duplicate =

@@ -39,6 +39,7 @@ import {
 } from '../src/agent/toolExecutor.js';
 import { OPEN_SCREENS } from '@mobile-agent/connector-android';
 import type { ForegroundGate } from '../src/agent/foregroundGate.js';
+import { ToolExecutionLedger } from '../src/agent/toolExecutionLedger.js';
 import { mapMcpTools } from '../src/agent/toolMapper.js';
 import { createStructuredPlanner } from '../src/agent/models/structuredPlanner.js';
 import type { LlmEngine } from '../src/ai/types.js';
@@ -1522,6 +1523,161 @@ console.log('\nan unmistakable connectionId is resolved, an ambiguous one is not
  * screen, and burned the rest of its step budget re-asking. Polling a state
  * the user is mid-way through changing has no true answer, so the loop holds.
  */
+/*
+ * The same failing call is not run twice.
+ *
+ * Asked to open Gemini's settings, the planner called
+ * android.settings.open_app with identical arguments four times — each one
+ * failing the same way — then wandered into brightness and auto-rotate and
+ * hit the ten-step ceiling with nothing to show. Nothing stopped it: the
+ * ledger only looked for successful duplicates, and the loop detector feeds
+ * tier escalation rather than termination.
+ */
+console.log('\nan identical call that already failed is not repeated:');
+{
+  const ledger = new ToolExecutionLedger();
+  const call = {
+    id: 'c1',
+    toolName: 'android.settings.open_app',
+    args: { connectionId: 'android-device', target: 'appDetails', packageName: 'com.x' },
+  } as never;
+
+  assert(
+    ledger.findRepeatedFailure(call) === undefined,
+    'a call that has not been tried is allowed',
+  );
+
+  ledger.record(call, {
+    status: 'error',
+    error: 'The "appDetails" destination is unavailable for com.x.',
+    errorCode: 'TOOL_EXECUTION_ERROR',
+  });
+
+  const blocked = ledger.findRepeatedFailure(call);
+  assert(blocked !== undefined, 'the identical repeat is caught');
+  assert(
+    blocked?.result?.error?.includes('unavailable') === true,
+    'and carries the original reason back, so the model is told why',
+  );
+
+  // Different arguments are a different call, and are the recovery the model
+  // should be making.
+  const other = {
+    ...(call as unknown as { id: string; toolName: string; args: Record<string, unknown> }),
+    args: { connectionId: 'android-device', target: 'appDetails', packageName: 'com.y' },
+  } as never;
+  assert(
+    ledger.findRepeatedFailure(other) === undefined,
+    'a call with different arguments is never blocked',
+  );
+
+  // Transient failures describe the world, not the call.
+  const flaky = { id: 'c2', toolName: 'google.gmail.list', args: {} } as never;
+  for (const errorCode of ['NETWORK_ERROR', 'RATE_LIMITED'] as const) {
+    ledger.record(flaky, { status: 'error', error: 'later', errorCode });
+    assert(
+      ledger.findRepeatedFailure(flaky) === undefined,
+      `${errorCode} stays retryable — a second attempt genuinely can succeed`,
+    );
+  }
+
+  // A success is not a failure, and must still be found by the dedup guard.
+  const done = { id: 'c3', toolName: 'calendar.create_event', args: { a: 1 } } as never;
+  ledger.record(done, { status: 'success', data: { id: 'e1' } });
+  assert(
+    ledger.findRepeatedFailure(done) === undefined,
+    'a successful call is not mistaken for a failed one',
+  );
+  assert(
+    ledger.findDuplicate(done) !== undefined,
+    'and the side-effect dedup guard still sees it',
+  );
+}
+
+/*
+ * And end to end: the second attempt never reaches MCP.
+ *
+ * The ledger check above proves the rule; this proves the runtime applies it,
+ * which is the part that spent a real run's budget.
+ */
+console.log('\na repeated failing call does not reach the tool twice:');
+{
+  let executions = 0;
+  const failingMcp = {
+    listTools: () =>
+      Promise.resolve([
+        {
+          name: 'android.settings.open_app',
+          description: 'Open app settings.',
+          inputSchema: { properties: {} },
+        },
+      ]),
+    callTool: () => {
+      executions += 1;
+      const error = new Error(
+        'The "appDetails" destination is unavailable for com.x on this device.',
+      );
+      error.name = 'ToolExecutionError';
+      return Promise.reject(error);
+    },
+  } as never;
+
+  // A planner that never learns: the same call, every step.
+  const stubborn: AgentModel = {
+    id: 'stubborn',
+    capabilities: { textGeneration: true, toolCalling: true, structuredOutput: true },
+    run: () =>
+      Promise.resolve({
+        kind: 'tool_calls',
+        toolCalls: [
+          {
+            id: `call_${executions}`,
+            toolName: 'android.settings.open_app',
+            args: { connectionId: 'android-device', target: 'appDetails', packageName: 'com.x' },
+          },
+        ],
+      }) as never,
+  } as never;
+
+  const runtime = new AgentRuntime({
+    model: stubborn,
+    mcp: failingMcp,
+    connections: [
+      { id: 'android-device', provider: 'android', displayName: 'This device', capabilities: [] },
+    ],
+    approveApproval: () => Promise.resolve(),
+    maxSteps: 6,
+  });
+
+  await runtime.sendMessage('open the Gemini app settings and turn it off');
+
+  assert(
+    executions === 1,
+    `the tool is called once however many times the planner asks (called ${executions})`,
+  );
+
+  const toolMessages = runtime
+    .getMessages()
+    .filter((message) => message.role === 'tool');
+  assert(
+    toolMessages.length > 1,
+    'the planner still gets a result for every attempt, so it can change course',
+  );
+  assert(
+    toolMessages
+      .slice(1)
+      .every((message) =>
+        String((message as { result?: { error?: string } }).result?.error ?? '')
+          .includes('Repeating it will not help'),
+      ),
+    'and every repeat is told plainly that repeating will not help',
+  );
+  assert(
+    toolMessages[0]?.result?.error?.includes('unavailable') === true,
+    'while the first attempt carries the real reason',
+  );
+}
+
 console.log('\nthe loop holds while the app is backgrounded:');
 {
   function gate() {

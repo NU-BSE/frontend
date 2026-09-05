@@ -9,9 +9,20 @@ import type {
 import { mapAndroidSettingsError } from './android-settings-errors';
 
 /**
- * Agent-facing global Settings screens. Permission-granting destinations
- * (`overlay`, `writeSettings`, `batteryOptimization`, `unknownSources`) remain
- * deliberately excluded: those grants belong to the user-owned connector UI.
+ * Agent-facing global Settings screens.
+ *
+ * `writeSettings` and `overlay` are here because they gate this connector's
+ * own tools: without them the agent could fail on a missing scope with no way
+ * to put the switch in front of the user. See the note beside them below.
+ *
+ * `batteryOptimization` and `unknownSources` remain deliberately excluded.
+ * They gate nothing this connector does, so there is no failure for the agent
+ * to recover from — and unknownSources in particular is the toggle that
+ * permits sideloading, which the agent has no business steering anyone toward.
+ * They belong in the user-owned connector UI if anywhere.
+ *
+ * Opening any of these grants nothing in either case: Android shows its own
+ * permission screen and the user turns the switch.
  */
 export const OPEN_SCREENS = [
   'settings',

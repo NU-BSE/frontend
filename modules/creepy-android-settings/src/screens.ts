@@ -7,8 +7,10 @@ import type {
 /** Mirrors SettingsNavigator.SCREENS so TS/MCP can enumerate global screens. */
 export const SETTINGS_SCREENS: readonly SettingsScreen[] = [
   'settings',
+  'settingsSearch',
   'appDetails',
   'wifi',
+  'wifiIp',
   'bluetooth',
   'wireless',
   'location',
@@ -36,11 +38,13 @@ export const SETTINGS_SCREENS: readonly SettingsScreen[] = [
   'defaultApps',
   'home',
   'batterySaver',
+  'batteryUsage',
   'dataUsage',
   'airplaneMode',
   'apn',
   'roaming',
   'doNotDisturb',
+  'doNotDisturbPriority',
   'storage',
   'deviceInfo',
   'systemUpdate',
@@ -66,6 +70,8 @@ export const APP_SETTINGS_TARGETS: readonly AppSettingsTarget[] = [
   'appLocale',
   'appUsage',
   'backgroundData',
+  'exactAlarm',
+  'fullScreenIntent',
 ];
 
 /** Android Settings Panels (API 29+): Internet Connectivity, Wi-Fi, Volume, NFC. */

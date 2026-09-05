@@ -5,8 +5,10 @@
 
 export type SettingsScreen =
   | 'settings'
+  | 'settingsSearch'
   | 'appDetails'
   | 'wifi'
+  | 'wifiIp'
   | 'bluetooth'
   | 'wireless'
   | 'location'
@@ -34,11 +36,13 @@ export type SettingsScreen =
   | 'defaultApps'
   | 'home'
   | 'batterySaver'
+  | 'batteryUsage'
   | 'dataUsage'
   | 'airplaneMode'
   | 'apn'
   | 'roaming'
   | 'doNotDisturb'
+  | 'doNotDisturbPriority'
   | 'storage'
   | 'deviceInfo'
   | 'systemUpdate'
@@ -62,7 +66,9 @@ export type AppSettingsTarget =
   | 'appOpenByDefault'
   | 'appLocale'
   | 'appUsage'
-  | 'backgroundData';
+  | 'backgroundData'
+  | 'exactAlarm'
+  | 'fullScreenIntent';
 
 export type SettingsPanel = 'internet' | 'wifi' | 'volume' | 'nfc';
 export type BrightnessMode = 'manual' | 'automatic';

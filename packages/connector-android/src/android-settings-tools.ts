@@ -9,14 +9,21 @@ import type {
 import { mapAndroidSettingsError } from './android-settings-errors';
 
 /**
- * Agent-facing global Settings screens. Permission-granting destinations
- * (`overlay`, `writeSettings`, `batteryOptimization`, `unknownSources`) remain
- * deliberately excluded: those grants belong to the user-owned connector UI.
+ * Agent-facing Settings destinations. Opening any of these screens changes
+ * nothing by itself; the user owns the system UI and confirms the action.
+ *
+ * Creepy-specific special-access grants (`writeSettings`, `overlay`) and the
+ * unknown-sources grant stay out of this model-facing list. Battery
+ * optimization is different: it is a normal troubleshooting destination used
+ * to review optimization/exemption state, so the agent may open it while the
+ * user still makes the decision in Android Settings.
  */
 export const OPEN_SCREENS = [
   'settings',
+  'settingsSearch',
   'appDetails',
   'wifi',
+  'wifiIp',
   'bluetooth',
   'wireless',
   'location',
@@ -27,25 +34,7 @@ export const OPEN_SCREENS = [
   'assistant',
   'usageAccess',
   'notificationListener',
-  /*
-   * The two special-access screens that gate this connector's own tools.
-   *
-   * The native navigator has always resolved both, and the module's
-   * SettingsScreen type has always named them, but they were missing here — so
-   * the agent could hit `android.settings.write` and had no way to do anything
-   * about it. Asked to dim the screen it failed with "missing required scopes:
-   * android.settings.write", and nothing in the app could take the user to the
-   * toggle that fixes it; they reported never being prompted and being unable
-   * to find the setting at all. `usageAccess` and `notificationListener` are
-   * special-access screens too and were already offered, so the omission reads
-   * as an oversight rather than a policy.
-   *
-   * Opening a screen grants nothing. The user still has to find the toggle and
-   * turn it on, which is the whole point: this puts the switch in front of
-   * them instead of leaving them to hunt for it.
-   */
-  'writeSettings',
-  'overlay',
+  'batteryOptimization',
   'security',
   'privacy',
   'vpn',
@@ -59,11 +48,13 @@ export const OPEN_SCREENS = [
   'defaultApps',
   'home',
   'batterySaver',
+  'batteryUsage',
   'dataUsage',
   'airplaneMode',
   'apn',
   'roaming',
   'doNotDisturb',
+  'doNotDisturbPriority',
   'storage',
   'deviceInfo',
   'systemUpdate',
@@ -91,18 +82,13 @@ const APP_TARGETS = [
   'appLocale',
   'appUsage',
   'backgroundData',
+  'exactAlarm',
+  'fullScreenIntent',
 ] as const satisfies readonly AppSettingsTarget[];
 
 const OPEN_PANELS = ['internet', 'wifi', 'volume', 'nfc'] as const;
-
 const CONNECTION_ID = z.string().min(1);
-/*
- * Described, not just typed. A package name is not something a model can
- * derive from a request: asked to turn off "Gemini" it called open_app with a
- * target and no packageName at all, because nothing said where one comes from.
- * The same shape as Telegram's chatId, which carries the same warning for the
- * same reason.
- */
+
 const PACKAGE_NAME = z
   .string()
   .trim()
@@ -518,7 +504,11 @@ export function createAndroidSettingsTools(
       name: 'android.settings.open',
       title: 'Open Android settings screen',
       description:
-        'Open a global Android Settings screen. Permission-granting special-access screens are not available here.',
+        'Open an allow-listed global Android Settings destination. Use ' +
+        'batteryUsage for battery-use details, batteryOptimization for ' +
+        'optimization exemptions, wifiIp for Wi-Fi IP configuration, ' +
+        'doNotDisturbPriority for priority-mode rules, and settingsSearch ' +
+        'when Android exposes no stable direct destination for an OEM-specific setting.',
       inputSchema: z.object({ connectionId: CONNECTION_ID, screen: z.enum(OPEN_SCREENS) }),
       outputSchema: z.object({ opened: z.literal(true), screen: z.string() }),
       risk: 'external_side_effect',
@@ -550,24 +540,13 @@ export function createAndroidSettingsTools(
     {
       name: 'android.settings.open_app',
       title: 'Open settings for an app',
-      /*
-       * The description says what the destinations are *for*, because a model
-       * that only knows their names cannot map a request onto them. Asked to
-       * "turn off Gemini app" it invented `android.settings.get_app_info` and
-       * gave up, while `appDetails` — the page carrying Disable, Uninstall and
-       * Force stop — was available the whole time.
-       *
-       * It also states the limit plainly. No app may disable, uninstall or
-       * force-stop another; Android reserves that for the user. Opening the
-       * page is the most that can be done, and a model told only what the tool
-       * *can* do will keep hunting for one that does the rest.
-       */
       description:
-        'Open one app\'s Settings page. "appDetails" is App info, where the ' +
-        'USER can disable, uninstall, force stop or clear data — use it for ' +
-        'any request to turn an app off, remove it or stop it. Opens the ' +
-        'screen only: no app may disable or uninstall another, so say what ' +
-        'to tap afterwards.',
+        'Open one app\'s Android Settings destination. Use appDetails as the ' +
+        'safe public fallback for permissions, Force stop, cache/storage, ' +
+        'uninstall/disable and OEM-specific app battery controls; the USER ' +
+        'must tap those controls. Use appNotifications or notificationChannel ' +
+        'for alerts, exactAlarm for Android 12+ exact-alarm access, and ' +
+        'fullScreenIntent for Android 14+ full-screen notification access.',
       inputSchema: APP_TARGET_INPUT,
       outputSchema: z.object({
         opened: z.literal(true),

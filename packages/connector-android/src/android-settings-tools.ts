@@ -12,11 +12,24 @@ import { mapAndroidSettingsError } from './android-settings-errors';
  * Agent-facing Settings destinations. Opening any of these screens changes
  * nothing by itself; the user owns the system UI and confirms the action.
  *
- * Creepy-specific special-access grants (`writeSettings`, `overlay`) and the
- * unknown-sources grant stay out of this model-facing list. Battery
- * optimization is different: it is a normal troubleshooting destination used
- * to review optimization/exemption state, so the agent may open it while the
- * user still makes the decision in Android Settings.
+ * `writeSettings` and `overlay` are the two exceptions to keeping
+ * Creepy-specific grants out of a model-facing list, and they are here for a
+ * reason the list itself creates: they gate this connector's own tools, so
+ * excluding them leaves the agent able to fail on a missing scope and unable
+ * to do anything about it. `SCOPE_REMEDIES` in the app names both by screen,
+ * and `verify:agent` asserts every remedy names a screen this list accepts —
+ * advice pointing at a door that is not there is worse than no advice.
+ *
+ * That was not theoretical: asked to dim the screen, the agent failed with
+ * "missing required scopes: android.settings.write" and nothing in the app
+ * could reach the toggle. The report was "it wasn't prompted and it's not
+ * present in permissions".
+ *
+ * The unknown-sources grant does stay out. It gates nothing this connector
+ * does, so there is no failure to recover from, and it is the toggle that
+ * permits sideloading. Battery optimization is different again: a normal
+ * troubleshooting destination used to review optimization/exemption state, so
+ * the agent may open it while the user still decides in Android Settings.
  */
 export const OPEN_SCREENS = [
   'settings',
@@ -34,6 +47,13 @@ export const OPEN_SCREENS = [
   'assistant',
   'usageAccess',
   'notificationListener',
+  /*
+   * Special access that gates this connector's own tools. Opening either puts
+   * Android's own toggle in front of the user, switched off; nothing is
+   * granted here, and nothing can be granted without them acting on it.
+   */
+  'writeSettings',
+  'overlay',
   'batteryOptimization',
   'security',
   'privacy',

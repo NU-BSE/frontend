@@ -1,9 +1,9 @@
 # creepy-android-settings
 
-Android-only Expo native module for Creepy.IM. It exposes the ordinary public
-Android APIs used by the local MCP connectors: typed `Settings.System`
-operations, Settings navigation, app lookup, Settings Panels and a constrained
-set of outward Android intents.
+Android-only Expo native module for Creepy.IM. It exposes the Android framework
+APIs used by the local MCP connectors: typed `Settings.System` operations,
+Settings navigation, app lookup, Settings Panels and a constrained set of
+outward Android intents.
 
 On iOS and web every public method fails with the normalized
 `ERR_PLATFORM_NOT_SUPPORTED` error.
@@ -41,20 +41,29 @@ Writes require live `Settings.System.canWrite(context)` permission.
 
 ## Global Settings navigation
 
-`canOpenSettings(screen)` and `openSettings(screen)` support the original
-Settings destinations plus public Android screens for:
+`canOpenSettings(screen)` and `openSettings(screen)` cover the general Android
+Settings destinations needed by the troubleshooting agent, including:
 
+- Wi-Fi, Wi-Fi IP, Bluetooth and wireless/network settings
+- location, display, sound, notifications and accessibility
+- Default apps / digital-assistant selection
+- privacy/security, VPN, NFC, language/date/input/developer settings
 - application management, all apps, default apps and Home selection
-- Battery Saver
+- Battery Saver, battery-usage summary and battery optimization
 - data usage, airplane mode, APNs and roaming
-- Do Not Disturb
-- storage
-- device info and system update
+- Do Not Disturb and priority-mode rules
+- storage, device info and system update
 - account/sync screens
 - user dictionary and hardware keyboard
 - captioning, Cast and Print
 - screensaver, auto-rotate and WebView selection
 - all-app notification settings on supported API levels
+- Settings search on API 29+ as a safe fallback for OEM-specific UI leaves
+
+The `assistant` destination intentionally opens the public Default apps screen
+on Android 7+ rather than `ACTION_VOICE_INPUT_SETTINGS`; the latter configures
+voice input methods and is not the digital-assistant chooser. Creepy's own
+assistant-role request is handled separately through RoleManager.
 
 Availability is checked through `PackageManager.resolveActivity()` before any
 activity is launched. No OEM private activity class names are used.
@@ -73,11 +82,18 @@ targets are:
 - `appLocale`
 - `appUsage`
 - `backgroundData`
+- `exactAlarm` — API 31+
+- `fullScreenIntent` — API 34+
 
-The native implementation passes the official package URI or extras required
-by each Android `Settings.ACTION_*` contract. The legacy parameterless
-`appDetails` screen remains for direct callers and points to Creepy.IM itself;
-agent code should use the package-aware API.
+The native implementation passes the package URI or Android extras required by
+each framework Settings contract. The legacy parameterless `appDetails` screen
+remains for direct callers and points to Creepy.IM itself; agent code should use
+the package-aware API.
+
+`appDetails` is also the deliberate fallback for protected app controls Android
+does not expose as third-party mutations, such as Force stop, clearing another
+app's data/cache and changing another app's runtime permissions. Creepy opens
+App info and guides the user; it does not fake those operations.
 
 ## Installed applications
 
@@ -107,20 +123,23 @@ functions rather than a generic arbitrary-Intent API:
 - open a map query/coordinate
 - open the phone dialer
 
-These operations use public Android intents and return `false` when no
+These operations use Android framework intents and return `false` when no
 compatible activity can be launched.
 
 ## Observer
 
-`watchSetting(namespace, key)` continues to expose a `ContentObserver`-backed
-change stream via `onSettingChanged`. Call `unwatchSetting` or
-`unwatchAllSettings` when finished.
+`watchSetting(namespace, key)` exposes a `ContentObserver`-backed change stream
+via `onSettingChanged`. Call `unwatchSetting` or `unwatchAllSettings` when
+finished.
 
 ## Security limitations
 
-No root, `su`, adb, Shizuku, hidden APIs, `WRITE_SECURE_SETTINGS` tricks or
-accessibility automation are used. Special permissions are never toggled
-programmatically. Unsupported actions fail cleanly.
+No root, `su`, adb, Shizuku, reflection into hidden APIs,
+`WRITE_SECURE_SETTINGS` tricks, accessibility automation or OEM private
+activity class names are used. Special permissions are never toggled
+programmatically. Unsupported actions fail cleanly. A small number of
+framework Settings action strings absent from the compile SDK are resolved at
+runtime before launch rather than assumed to exist.
 
 ## Tests
 

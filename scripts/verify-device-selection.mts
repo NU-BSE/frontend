@@ -3,6 +3,7 @@ import {
   getRecommendedMemoryProfile,
   storageRequirementFor,
 } from '../src/ai/deviceModelSelection';
+import { memoryProfileAfterInstallChange } from '../src/features/model/memoryProfileForInstall';
 import {
   MAX_CONTEXT_SIZE,
   MIN_CONTEXT_SIZE,
@@ -337,6 +338,47 @@ assertEqual(
       derivedReply.maxTokens < derivedReply.contextSize,
     true,
     'an underived reply budget is a share of the window, never all of it',
+  );
+}
+
+/*
+ * The profile follows the weights.
+ *
+ * `resolveEngine` returns remote for `cloud` before it looks at the disk, so
+ * the stored profile decides which engine runs. The download card is shown to
+ * a cloud user on purpose — deciding whether to switch means seeing the size
+ * first — and it was offered as the way to switch while switching nothing: a
+ * gigabyte downloaded, the download finished, and the app still talking to the
+ * cloud.
+ */
+{
+  const after = memoryProfileAfterInstallChange;
+
+  assertEqual(
+    after({ installed: true, current: 'cloud', canRunLocally: true }),
+    'on-device',
+    'downloading the model on a cloud profile switches to on-device — the bug',
+  );
+  assertEqual(
+    after({ installed: true, current: 'cloud', canRunLocally: false }),
+    'cloud',
+    'unless the device cannot run it, which no part of the download checks',
+  );
+  assertEqual(
+    after({ installed: true, current: 'on-device', canRunLocally: true }),
+    'on-device',
+    'a profile already there is left alone',
+  );
+
+  assertEqual(
+    after({ installed: false, current: 'on-device', canRunLocally: true }),
+    'cloud',
+    'removing the model moves back — on-device with no weights is a stub',
+  );
+  assertEqual(
+    after({ installed: false, current: 'cloud', canRunLocally: true }),
+    'cloud',
+    'and removing it while already on cloud changes nothing',
   );
 }
 

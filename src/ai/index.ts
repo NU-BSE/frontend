@@ -17,7 +17,8 @@ import {
   isOnDeviceSupported,
 } from './engines/onDeviceEngine';
 import { createStubEngine } from './engines/stubEngine';
-import { LOCAL_MODEL_PATHS, LOCAL_MODEL_RUNTIME } from './modelProfiles';
+import { LOCAL_MODEL_PATHS, runtimeForModel } from './modelProfiles';
+import type { ModelRuntime } from './modelProfiles';
 import type { EngineDescriptor, EngineOrigin } from './types';
 
 export * from './types';
@@ -33,6 +34,14 @@ export interface EngineConfigOverrides {
   forcedEngine?: '' | 'on-device' | 'remote' | 'stub';
   /** Raw backend origin (EXPO_PUBLIC_API_URL). Injected for tests. */
   backendApiUrl?: string;
+  /**
+   * The install record for the weights on this device, if any.
+   *
+   * Carries the runtime the model was published with, so the engine is
+   * configured for the model it is loading rather than for whichever one the
+   * app was written against.
+   */
+  installedModel?: { path: string; runtime?: ModelRuntime; bytes?: number } | null;
   /**
    * Weights downloaded to this device, if any.
    *
@@ -83,12 +92,25 @@ export function resolveEngine(
     assessmentAllowsLocal && Boolean(modelPath) && isOnDeviceSupported();
 
   if ((forced === 'on-device' || !forced) && canRunOnDevice) {
+    /*
+     * The model's own budget, not the app's. `runtimeForModel` prefers what
+     * the backend published and falls back to a size-derived estimate, so
+     * swapping the served model changes the context the app loads with
+     * instead of silently reusing the previous model's numbers.
+     */
+    const runtime = runtimeForModel({
+      ...(config.installedModel?.runtime ?? {}),
+      ...(typeof config.installedModel?.bytes === 'number'
+        ? { totalBytes: config.installedModel.bytes }
+        : {}),
+    });
+
     return {
       origin: 'on-device',
       engine: createOnDeviceEngine({
         modelPath,
         ...ON_DEVICE_DEFAULTS,
-        ...LOCAL_MODEL_RUNTIME[profile],
+        ...runtime,
       }),
     };
   }

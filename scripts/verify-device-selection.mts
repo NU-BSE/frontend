@@ -1,7 +1,13 @@
 import {
   getModelOptionSupport,
   getRecommendedMemoryProfile,
+  storageRequirementFor,
 } from '../src/ai/deviceModelSelection';
+import {
+  MAX_CONTEXT_SIZE,
+  MIN_CONTEXT_SIZE,
+  runtimeForModel,
+} from '../src/ai/modelProfiles';
 import type { DeviceAssessment } from '../src/attestation/client/deviceAssessment';
 
 function assertEqual<T>(actual: T, expected: T, message?: string): void {
@@ -219,6 +225,119 @@ assertEqual(
   assertEqual(migrate('on-device'), 'on-device', 'a current local choice is kept');
   assertEqual(migrate(null), 'cloud', 'an unanswered question defaults to cloud');
   assertEqual(migrate('nonsense'), 'cloud', 'an unrecognised value defaults to cloud');
+}
+
+/*
+ * The app downloads whichever model the backend publishes, so nothing about
+ * the model may be a constant in here.
+ *
+ * Storage was a flat 3 GB: the 2B teacher's download plus room to work. That
+ * refuses a 700 MB model on a phone with 2 GB free and accepts a 4 GB model on
+ * a phone that cannot hold it. The published size is the only honest input.
+ */
+{
+  const GB = 1024 ** 3;
+
+  assertEqual(
+    storageRequirementFor(700 * 1024 ** 2),
+    Math.round(700 * 1024 ** 2 * 2),
+    'a small model asks for room for itself, not for the largest model ever served',
+  );
+  assertEqual(
+    storageRequirementFor(4 * GB),
+    8 * GB,
+    'and a large one asks for more than the old fixed figure',
+  );
+  assertEqual(
+    storageRequirementFor(undefined),
+    3 * GB,
+    'an unanswered catalogue falls back rather than admitting everything',
+  );
+  assertEqual(
+    storageRequirementFor(0),
+    3 * GB,
+    'and so does a nonsense size',
+  );
+
+  // The gate has to move with it, not just the helper.
+  const smallModel = 400 * 1024 ** 2;
+  const phoneWith1GbFree = assessment(8, 1);
+  const supportedForSmall = getModelOptionSupport(
+    phoneWith1GbFree,
+    smallModel,
+  ).find((option) => option.profile === 'on-device')?.supported;
+  const supportedForDefault = getModelOptionSupport(phoneWith1GbFree).find(
+    (option) => option.profile === 'on-device',
+  )?.supported;
+
+  assertEqual(
+    supportedForSmall,
+    true,
+    'a 400 MB model is offered on a phone with 1 GB free',
+  );
+  assertEqual(
+    supportedForDefault,
+    false,
+    'while the same phone is refused when the size is unknown',
+  );
+}
+
+/*
+ * And the runtime limits follow the model too.
+ *
+ * 4096/480 was measured against the 2B teacher. Correct for exactly one model,
+ * and silently wrong for the next one the backend serves.
+ */
+{
+  const GB = 1024 ** 3;
+
+  const declared = runtimeForModel({
+    totalBytes: 3 * GB,
+    contextSize: 8192,
+    maxTokens: 512,
+  });
+  assertEqual(declared.contextSize, 8192, 'what the backend declares wins');
+  assertEqual(declared.maxTokens, 512, 'including the reply budget');
+
+  const small = runtimeForModel({ totalBytes: 500 * 1024 ** 2 });
+  const large = runtimeForModel({ totalBytes: 3 * GB });
+  assertEqual(
+    small.contextSize > large.contextSize,
+    true,
+    'without a declaration, a smaller download gets the wider window',
+  );
+
+  assertEqual(
+    runtimeForModel({ totalBytes: 3 * GB, contextSize: 128 }).contextSize,
+    MIN_CONTEXT_SIZE,
+    'a window under the planner prompt is raised — llama.cpp refuses it, it does not truncate',
+  );
+  assertEqual(
+    runtimeForModel({ totalBytes: GB, contextSize: 1_000_000 }).contextSize,
+    MAX_CONTEXT_SIZE,
+    'and one no phone can hold is capped rather than trusted',
+  );
+
+  assertEqual(
+    runtimeForModel(null).contextSize,
+    MIN_CONTEXT_SIZE,
+    'no bundle at all still yields a usable window',
+  );
+
+  const capped = runtimeForModel({ contextSize: 4096, maxTokens: 4000 });
+  assertEqual(
+    capped.maxTokens <= 2048,
+    true,
+    'a reply budget larger than the window it must fit in is cut down',
+  );
+
+  const derivedReply = runtimeForModel({ totalBytes: 500 * 1024 ** 2 });
+  assertEqual(
+    derivedReply.maxTokens > 0 &&
+      derivedReply.maxTokens < derivedReply.contextSize,
+    true,
+    'an underived reply budget is a share of the window, never all of it',
+  );
 }
 
 console.log('device model selection: ok');

@@ -82,9 +82,16 @@ export function AiProvider({ children }: { children: React.ReactNode }) {
        * llama.rn a path that does not exist, which fails deep in native code.
        */
       const installed = profile === 'cloud' ? null : await getInstalledModel();
-      const installedModelPath =
-        installed && (await verifyInstalled(installed)) ? installed.path : null;
-      const descriptor = resolveEngine(selection, { installedModelPath });
+      const usable = installed && (await verifyInstalled(installed))
+        ? installed
+        : null;
+      const descriptor = resolveEngine(selection, {
+        installedModelPath: usable?.path ?? null,
+        // Passed whole: the record carries the context and reply budget the
+        // model was published with, and the engine has to be configured for
+        // the model actually on disk.
+        installedModel: usable,
+      });
       const nextConnection = createConnection(descriptor);
       const previous = engineRef.current;
 

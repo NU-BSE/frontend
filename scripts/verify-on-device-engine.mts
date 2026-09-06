@@ -32,6 +32,8 @@ interface StubContext {
   released: boolean;
   stopCalls: number;
   releaseCalls: number;
+  /** The `n_ctx` the engine asked llama.rn for. */
+  contextSize?: number;
 }
 
 function stubContexts(): StubContext[] {
@@ -149,7 +151,92 @@ async function main(): Promise<void> {
     await engine.dispose?.();
   }
 
-  console.log('\nsupport detection:');
+  /*
+ * The engine is configured for the model on disk, not for the one the app was
+ * written against.
+ *
+ * `resolveEngine` used to spread a module constant — 4096/480, measured from
+ * the 2B teacher — into every engine it built. Correct while there was one
+ * model, and silently wrong the moment the backend published another: the app
+ * would load the new weights with the old model's window.
+ */
+console.log('\nthe engine takes its window from the installed model:');
+{
+  const { resolveEngine } = await import('../src/ai/index.js');
+
+  /*
+   * A device that passes the local gate. `resolveEngine` refuses on-device
+   * without one, so a null assessment would test the fallback rather than the
+   * window.
+   */
+  const selection = {
+    memoryProfile: 'on-device' as const,
+    assessment: {
+      schemaVersion: 1,
+      platform: 'android',
+      collectedAtMs: 0,
+      hardware: {
+        supportedAbis: ['arm64-v8a'],
+        totalMemoryBytes: 8 * 1024 ** 3,
+        availableStorageBytes: 16 * 1024 ** 3,
+        cpuCoreCount: 8,
+        lowRamDevice: false,
+      },
+      integrity: {
+        status: 'ok',
+        riskFlags: [],
+        nativeProbeAvailable: true,
+      },
+    },
+  } as never;
+
+  resetStubContexts();
+  const declared = resolveEngine(selection, {
+    forcedEngine: 'on-device',
+    installedModelPath: '/tmp/model.gguf',
+    installedModel: {
+      path: '/tmp/model.gguf',
+      bytes: 3 * 1024 ** 3,
+      runtime: { contextSize: 8192, maxTokens: 512 },
+    },
+  });
+  assert(declared.origin === 'on-device', 'the on-device engine is chosen');
+  await declared.engine.prepare();
+  assert(
+    stubContexts()[0]?.contextSize === 8192,
+    `the declared window reaches llama.rn (${stubContexts()[0]?.contextSize})`,
+  );
+
+  // A record from before runtimes were stored: derived from its size instead.
+  resetStubContexts();
+  const legacy = resolveEngine(selection, {
+    forcedEngine: 'on-device',
+    installedModelPath: '/tmp/model.gguf',
+    installedModel: { path: '/tmp/model.gguf', bytes: 500 * 1024 ** 2 },
+  });
+  await legacy.engine.prepare();
+  const derivedSmall = stubContexts()[0]?.contextSize ?? 0;
+  assert(
+    derivedSmall >= 4096,
+    `a record with no runtime still gets a usable window (${derivedSmall})`,
+  );
+
+  // And the derivation is a derivation: a bigger download gets a smaller one.
+  resetStubContexts();
+  const big = resolveEngine(selection, {
+    forcedEngine: 'on-device',
+    installedModelPath: '/tmp/model.gguf',
+    installedModel: { path: '/tmp/model.gguf', bytes: 3 * 1024 ** 3 },
+  });
+  await big.engine.prepare();
+  const derivedLarge = stubContexts()[0]?.contextSize ?? 0;
+  assert(
+    derivedSmall > derivedLarge,
+    `the window follows the download size (${derivedSmall} for 500 MB vs ${derivedLarge} for 3 GB)`,
+  );
+}
+
+console.log('\nsupport detection:');
   assert(isOnDeviceSupported(), 'the binding is detected when the module is present');
 
   if (failures > 0) {

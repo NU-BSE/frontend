@@ -6,6 +6,8 @@ import React, {
   useState,
 } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
+
+import { getModelCatalog } from '@/api/client';
 import { useRouter } from 'expo-router';
 import {
   ActivityIndicator,
@@ -33,15 +35,23 @@ import {
 } from '@/storage/prefs';
 import { gutter, palette, radius, spacing } from '@/theme/tokens';
 
+/*
+ * One local option and one remote one. The three size tiers this replaced each
+ * ran a different student model; there is one local model now, and three names
+ * for it would be a menu that misleads.
+ *
+ * The local row does not name the model. It said "2B", which was true of the
+ * model the app happened to be written against and became a lie the moment the
+ * backend published a different one — the app downloads whatever the catalogue
+ * offers. The catalogue's own size is shown instead, which stays true whatever
+ * is served, and reads as the thing a user actually weighs.
+ */
 const OPTIONS: {
   id: MemoryProfile;
   label: string;
   value: string;
 }[] = [
-  // One local option and one remote one. The three size tiers this replaced
-  // each ran a different student model; only the 2B teacher remains, and three
-  // names for a single model would be a menu that misleads.
-  { id: 'on-device', label: 'On this device', value: '2B (private, offline)' },
+  { id: 'on-device', label: 'On this device', value: 'Private, offline' },
   { id: 'cloud', label: 'Cloud only', value: 'Nothing is downloaded' },
 ];
 
@@ -75,9 +85,25 @@ export default function OnboardingMemory() {
     staleTime: Infinity,
   });
 
+  /*
+   * What the backend actually publishes, so the storage requirement is the
+   * size of this download rather than a constant measured from one model.
+   * Best-effort: an unreachable catalogue leaves the fallback in place instead
+   * of blocking the screen.
+   */
+  const { data: catalog } = useQuery({
+    queryKey: ['model-catalog'],
+    queryFn: getModelCatalog,
+    retry: false,
+    staleTime: 5 * 60_000,
+  });
+  const localBundle = catalog?.bundles.find(
+    (bundle) => bundle.profile === 'on-device',
+  );
+
   const support = useMemo(
-    () => getModelOptionSupport(assessment ?? null),
-    [assessment],
+    () => getModelOptionSupport(assessment ?? null, localBundle?.totalBytes),
+    [assessment, localBundle?.totalBytes],
   );
 
   useEffect(() => {

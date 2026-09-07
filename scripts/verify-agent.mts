@@ -1355,7 +1355,9 @@ console.log('\nthe planner never shows protocol output as an answer:');
 
     const system = prompts[0] ?? '';
     assert(
-      system.includes('target: one of "appDetails"|"appNotifications"|"appUsage"'),
+      /^ {4}- target: one of "appDetails"\|"appNotifications"\|"appUsage"$/mu.test(
+        system,
+      ),
       'an enum argument is spelled out so the model can copy a valid value',
     );
     /*
@@ -1364,12 +1366,37 @@ console.log('\nthe planner never shows protocol output as an answer:');
      * arguments identically, so nothing said which could be left out.
      */
     assert(
-      system.includes('packageName: string;') ||
-        system.includes('packageName: string }'),
+      /^ {4}- packageName: string$/mu.test(system),
       'a required argument carries no marker',
     );
+
+    /*
+     * Each argument on its own line.
+     *
+     * They used to run together inside braces, separated by `;`, and
+     * `android.settings.open_app` came to 800 characters with one 300-character
+     * description among them. The model filled the slots positionally:
+     * `{"connectionId":"android-device","target":"com.google.android.apps.gemini"}`
+     * — a package id in the enum's slot, `packageName` missing entirely. The
+     * boundaries between arguments were invisible, so this checks they are not.
+     */
+    const argumentLines = system
+      .split('\n')
+      .filter((line) => line.startsWith('    - '));
     assert(
-      system.includes('channelId: string (optional)'),
+      argumentLines.length >= 4,
+      'every argument is on a line of its own',
+    );
+    assert(
+      argumentLines.every((line) => /^ {4}- [A-Za-z]+: /u.test(line)),
+      'and each line starts with the argument it describes',
+    );
+    assert(
+      !/Arguments: \{/u.test(system),
+      'nothing is left running together inside braces',
+    );
+    assert(
+      /^ {4}- channelId: string \(optional\)$/mu.test(system),
       'and an optional one is marked, which is what says the others are not',
     );
     assert(

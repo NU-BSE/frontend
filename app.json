@@ -14,7 +14,7 @@
     },
     "android": {
       "adaptiveIcon": {
-        "backgroundColor": "#E6F4FE",
+        "backgroundColor": "#0d1512",
         "foregroundImage": "./assets/android-icon-foreground.png",
         "monochromeImage": "./assets/android-icon-monochrome.png"
       },
@@ -28,7 +28,7 @@
           "image": "./assets/icon.png",
           "imageWidth": 180,
           "resizeMode": "contain",
-          "backgroundColor": "#efe9df"
+          "backgroundColor": "#0d1512"
         }
       ],
       "expo-router",

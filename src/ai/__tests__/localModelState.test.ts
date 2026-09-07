@@ -3,6 +3,7 @@ import type { DeviceAssessment } from '@/attestation/client/deviceAssessment';
 import {
   getLocalModelReason,
   getLocalModelState,
+  initialAiMode,
 } from '@/ai/localModelState';
 
 const GIB = 1024 ** 3;
@@ -83,5 +84,47 @@ describe('honest local model state', () => {
     expect(getLocalModelReason(capableAndroid)).toBeNull();
     expect(getLocalModelReason(weakAndroid)).toMatch(/RAM/);
     expect(getLocalModelReason(unsupported)).toBe('no native probe');
+  });
+});
+describe('preselecting the AI mode', () => {
+  const settled = { deviceSettled: true, installSettled: true };
+
+  it('waits for the install check before deciding anything', () => {
+    // The assessment has landed and says the phone is capable; the file check
+    // has not, so `installed` is still false and localState still reads
+    // download_required. Deciding here is what preselects Cloud for a user
+    // whose weights are already on disk.
+    expect(
+      initialAiMode({
+        deviceSettled: true,
+        installSettled: false,
+        localState: getLocalModelState(capableAndroid, false),
+      }),
+    ).toBeNull();
+  });
+
+  it('waits for the device assessment too', () => {
+    expect(
+      initialAiMode({
+        deviceSettled: false,
+        installSettled: true,
+        localState: getLocalModelState(capableAndroid, true),
+      }),
+    ).toBeNull();
+  });
+
+  it('preselects local once both parts agree the weights are usable', () => {
+    expect(
+      initialAiMode({ ...settled, localState: getLocalModelState(capableAndroid, true) }),
+    ).toBe('local');
+  });
+
+  it('keeps cloud as the default when local cannot run or is not downloaded', () => {
+    expect(
+      initialAiMode({ ...settled, localState: getLocalModelState(capableAndroid, false) }),
+    ).toBe('cloud');
+    expect(
+      initialAiMode({ ...settled, localState: getLocalModelState(weakAndroid, true) }),
+    ).toBe('cloud');
   });
 });

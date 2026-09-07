@@ -4,7 +4,6 @@ import { useFocusEffect, useLocalSearchParams, useRouter } from 'expo-router';
 import {
   FlatList,
   KeyboardAvoidingView,
-  Platform,
   Pressable,
   StyleSheet,
   View,
@@ -397,9 +396,27 @@ export default function Chat() {
         </View>
       </View>
 
+      {/*
+        `behavior` on both platforms, not iOS only.
+        
+        `undefined` is not a no-op that lets Android handle itself: it falls
+        through KeyboardAvoidingView's switch to the default branch, which
+        renders a plain View and adjusts nothing. That worked while the window
+        shrank for the keyboard, and Android now draws edge-to-edge by default
+        in RN 0.86, so it does not — the composer stayed where it was and the
+        keyboard came up over it.
+        
+        Setting it is safe where the window *does* still resize: the view
+        measures its own already-shrunk frame against the reported keyboard
+        top, arrives at ~0, and adds nothing. `padding` rather than `height`
+        because `height` caches the frame height from before the first
+        keyboard and reuses it, which is wrong precisely when the window is
+        the thing that resized.
+      */}
       <KeyboardAvoidingView
         style={styles.flex}
-        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+        behavior="padding"
+        keyboardVerticalOffset={0}
       >
         <FlatList
           ref={listRef}

@@ -144,12 +144,28 @@ function protocolInstructions(input: AgentModelInput): string {
         ? (tool.inputSchema.required as string[])
         : [],
     );
+    /*
+     * One argument per line, not a `;`-separated run inside braces.
+     *
+     * `android.settings.open_app` rendered as a single 800-character line
+     * whose four arguments ran together, and one of the descriptions was 300
+     * characters and contained an example package id. The model filled it
+     * positionally: `{"connectionId":"android-device","target":
+     * "com.google.android.apps.gemini"}` — the package in the enum's slot and
+     * `packageName` missing altogether.
+     *
+     * That is a parsing failure, not a comprehension one. Each name sits at
+     * the start of its own line now, so a value cannot drift into the slot
+     * next to it. The newlines cost about 190 tokens across the whole
+     * registry, against a prompt already near 1,900.
+     */
     const args = Object.keys(properties)
-      .map((name) =>
-        describeArgument(name, properties[name], required.has(name)),
+      .map(
+        (name) =>
+          `    - ${describeArgument(name, properties[name], required.has(name))}`,
       )
-      .join('; ');
-    return `- ${tool.name}: ${tool.description} Arguments: { ${args} }`;
+      .join('\n');
+    return `- ${tool.name}: ${tool.description}\n  arguments:\n${args}`;
   });
 
   const connectionLines =

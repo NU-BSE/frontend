@@ -4,6 +4,7 @@ import { useAi } from '@/ai/AiProvider';
 import type { LlmCapabilities } from '@/ai/types';
 import { baseUrl, getToken, refreshAccessTokenOnce } from '@/api/client';
 import { useLocalDeviceConnectionSync } from '@/connections/android/useLocalDeviceConnectionSync';
+import { useEntitlementEnforcement } from '@/features/subscription/useEntitlementEnforcement';
 import { createDeterministicPlanner } from './models/deterministicPlanner';
 import { createStructuredPlanner } from './models/structuredPlanner';
 import { createRemoteAgentModel } from './models/remoteAgentModel';
@@ -42,6 +43,9 @@ export function AgentProvider({ children }: { children: React.ReactNode }) {
   // Permissions granted on a system screen must take effect on return, and
   // the return usually lands back in chat rather than on the settings screen.
   useLocalDeviceConnectionSync();
+  // Mounted here rather than on the connectors screen: a subscription lapses
+  // while the app is anywhere, and the accounts have to go with it.
+  useEntitlementEnforcement();
 
   const { engine, origin } = useAi();
 

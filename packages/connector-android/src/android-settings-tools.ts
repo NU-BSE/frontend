@@ -5,6 +5,7 @@ import type {
   AndroidSettingsBridge,
   AppSettingsTarget,
   BrightnessMode,
+  InstalledAppSummary,
 } from './android-settings-bridge';
 import { mapAndroidSettingsError } from './android-settings-errors';
 
@@ -139,6 +140,51 @@ const APP_TARGET_INPUT = z
     }
   });
 
+/**
+ * The message for a package that is not on this device.
+ *
+ * Package ids are not guessable and a model will guess anyway: asked to open
+ * Gemini it produced `com.google.android.apps.gemini`, which does not exist —
+ * the real one is `com.google.android.apps.bard`. Saying only that something
+ * was unavailable sent it looking for the wrong fault; it concluded the
+ * *destination* was unsupported, claimed to have opened the app by hand, and
+ * announced it would retry with the same invented id.
+ *
+ * So the error names the actual fault and the tool that fixes it, and lists
+ * what is installed under a similar name. The list is a list — nothing is
+ * chosen here, because choosing which app the user meant is exactly the
+ * decision that must not be made for them.
+ */
+function unknownPackageError(
+  bridge: AndroidSettingsBridge,
+  packageName: string,
+): ConnectorError {
+  // The last segment is the closest thing to an app name a package id
+  // carries: `com.google.android.apps.gemini` searches for "gemini".
+  const term = packageName.split('.').filter(Boolean).pop() ?? packageName;
+
+  let matches: InstalledAppSummary[] = [];
+  try {
+    matches = bridge.findApps(term, 5);
+  } catch {
+    // A failed search must not replace the real error with its own.
+  }
+
+  const suggestion = matches.length
+    ? ` Installed apps matching "${term}": ${matches
+        .map((app) => `${app.label} (${app.packageName})`)
+        .join(', ')}.`
+    : '';
+
+  return new ConnectorError(
+    `No app with package "${packageName}" is installed on this device. ` +
+      'Package ids cannot be guessed from an app name — call ' +
+      'android.apps.find and copy a packageName from its results.' +
+      suggestion,
+    'VALIDATION_FAILED',
+  );
+}
+
 const APP_SUMMARY_SCHEMA = z.object({
   packageName: z.string(),
   label: z.string(),
@@ -260,11 +306,23 @@ export function createAndroidSettingsTools(
       requiredScopes: ['android.settings.read'],
       implementationStatus: 'real',
       execute: async (input: { connectionId: string; packageName: string }) => {
+        let app;
         try {
-          return { app: bridge.getAppInfo(input.packageName) };
+          app = bridge.getAppInfo(input.packageName);
         } catch (error) {
           throw mapAndroidSettingsError(error, `reading app info for "${input.packageName}"`);
         }
+        /*
+         * A missing app is not a successful read.
+         *
+         * This returned `{ app: null }` and reported success, so the timeline
+         * said "android.apps.get_info — done" and the model took its invented
+         * package id as confirmed. "Success" and "there is no such app" have
+         * to be distinguishable, or every later step is built on the first
+         * wrong guess.
+         */
+        if (!app) throw unknownPackageError(bridge, input.packageName);
+        return { app };
       },
     },
 
@@ -585,6 +643,12 @@ export function createAndroidSettingsTools(
         channelId?: string;
       }) => {
         try {
+          // Before the destination is blamed for a package that is not there:
+          // "App Details is not available for this app" is what the model was
+          // told, and it means something quite different from "no such app".
+          if (!bridge.getAppInfo(input.packageName)) {
+            throw unknownPackageError(bridge, input.packageName);
+          }
           if (!bridge.canOpenAppSettings(input.target, input.packageName, input.channelId)) {
             throw new ConnectorError(
               `The "${input.target}" settings destination is unavailable for ${input.packageName} on this device.`,

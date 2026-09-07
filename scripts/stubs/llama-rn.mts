@@ -16,6 +16,8 @@ export interface StubContext {
   released: boolean;
   stopCalls: number;
   releaseCalls: number;
+  /** What the engine asked llama.cpp for, so callers can assert on it. */
+  contextSize?: number;
 }
 
 /**
@@ -35,11 +37,12 @@ const slot = globalThis as { __llamaStubContexts?: StubContext[] };
 slot.__llamaStubContexts ??= [];
 const contexts = slot.__llamaStubContexts;
 
-export function initLlama(_options: Record<string, unknown>): Promise<unknown> {
+export function initLlama(options: Record<string, unknown>): Promise<unknown> {
   const state: StubContext = {
     released: false,
     stopCalls: 0,
     releaseCalls: 0,
+    ...(typeof options?.n_ctx === 'number' ? { contextSize: options.n_ctx } : {}),
   };
   contexts.push(state);
 

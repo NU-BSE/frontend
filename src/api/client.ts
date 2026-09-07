@@ -479,6 +479,18 @@ export interface ModelBundleEntry {
   model: string;
   totalBytes: number;
   files: ModelFileEntry[];
+  /**
+   * The window this model was converted for, if the server says.
+   *
+   * Optional because the app must keep working against a server that does not
+   * send it, and because only the backend knows which model it published — the
+   * app used to carry one pair of numbers measured from the 2B teacher, which
+   * would be silently wrong the moment the served model changed. See
+   * `runtimeForModel`.
+   */
+  contextSize?: number;
+  /** Reply budget for that window, if the server says. */
+  maxTokens?: number;
 }
 
 export interface ModelCatalog {

@@ -65,7 +65,12 @@ export default function RootLayout() {
               <AgentProvider>
                 <AgentChatProvider>
                 <UsageNotifications />
-                <StatusBar style="dark" />
+                {/*
+                  Light glyphs, because the canvas is now near-black green.
+                  "dark" asks for dark icons, which is right on cream paper and
+                  invisible on this.
+                */}
+                <StatusBar style="light" />
                 <Stack
                   screenOptions={{
                     headerShown: false,

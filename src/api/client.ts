@@ -337,3 +337,37 @@ export async function getMySubscription(): Promise<{
 }> {
   return get('/subscriptions/me');
 }
+
+// --- Onboarding (custdev) ---
+//
+// These persist the user's onboarding answers. The backend endpoints are part
+// of the onboarding v2 contract and may not exist yet on a given deployment;
+// every caller treats them as best-effort (fire-and-forget) so a 404 or a
+// timeout never blocks the onboarding flow itself. Remove this note once the
+// endpoints ship.
+
+export interface OnboardingIntentsPayload {
+  intent_ids: string[];
+  custom_intent?: string;
+}
+
+/** Backed by `POST /onboarding/intents`. */
+export async function submitOnboardingIntents(
+  payload: OnboardingIntentsPayload,
+): Promise<void> {
+  await post('/onboarding/intents', payload as unknown as JsonObject);
+}
+
+export interface OnboardingFeedbackPayload {
+  result: 'yes' | 'partly' | 'no';
+  expectation?: string;
+  alternative?: string;
+  alternative_note?: string;
+}
+
+/** Backed by `POST /onboarding/feedback`. */
+export async function submitOnboardingFeedback(
+  payload: OnboardingFeedbackPayload,
+): Promise<void> {
+  await post('/onboarding/feedback', payload as unknown as JsonObject);
+}

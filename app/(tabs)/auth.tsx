@@ -63,7 +63,7 @@ export default function Account() {
       queryClient.removeQueries({ queryKey: ["authenticated-email"] });
       queryClient.removeQueries({ queryKey: ["memory-profile"] });
       queryClient.removeQueries({ queryKey: ["history"] });
-      router.replace("/onboarding");
+      router.replace("/onboarding/welcome");
     },
   });
 

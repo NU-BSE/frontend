@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useRef } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { useFocusEffect, useLocalSearchParams, useRouter } from 'expo-router';
 import {
@@ -11,6 +11,7 @@ import {
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
+import { track } from '@/analytics';
 import { Screen } from '@/components/Screen';
 import { Text } from '@/components/Text';
 import { useAi } from '@/ai/AiProvider';
@@ -35,6 +36,13 @@ import {
   GENERAL_SUGGESTIONS,
   getScenario,
 } from '@/features/scenarios/registry';
+import { TaskContinueBar, TaskFailureCard } from '@/features/onboarding/taskOutcome';
+import {
+  connectionActionForCode,
+  connectionActionLabel,
+  routeForConnectionAction,
+} from '@/features/onboarding/errors';
+import { setFirstTaskDone } from '@/storage/prefs';
 import { appendHistory } from '@/storage/history';
 import { gutter, palette, spacing } from '@/theme/tokens';
 
@@ -55,6 +63,12 @@ export default function Chat() {
   const { scenario: scenarioParam, prompt: promptParam } =
     useLocalSearchParams<{ scenario?: string; prompt?: string }>();
   const scenario = getScenario(scenarioParam);
+
+  const { source: sourceParam, task: taskParam } =
+    useLocalSearchParams<{ source?: string; task?: string }>();
+  const isOnboarding = sourceParam === 'onboarding';
+  const onboardingTaskId =
+    typeof taskParam === 'string' && taskParam ? taskParam : 'custom';
 
   const {
     mode,
@@ -165,9 +179,93 @@ export default function Chat() {
     const initial = promptParam?.trim();
     if (!initial) return;
     sentInitialPrompt.current = true;
+    if (isOnboarding) {
+      runStartedRef.current = true;
+      track('onboarding_first_task_started', {
+        suggested_task_id: onboardingTaskId,
+      });
+    }
     handleSendText(initial);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [promptParam]);
+
+  /*
+   * Onboarding first-task outcomes.
+   *
+   * The task runs through the real agent pipeline (approvals included). When
+   * the run finishes we never auto-close the chat — the user must be able to
+   * read the result — so a success shows a "Continue setup" bar and a failure
+   * shows retry options instead of dropping the user at the paywall.
+   */
+  const runStartedRef = useRef(false);
+  const completionRef = useRef<'idle' | 'success' | 'failed'>('idle');
+  const initialPromptRef = useRef<string>(promptParam?.trim() ?? '');
+
+  useEffect(() => {
+    if (!isOnboarding || !runStartedRef.current || isRunning) return;
+    if (completionRef.current !== 'idle') return;
+
+    if (runState.type === 'failed') {
+      completionRef.current = 'failed';
+      return;
+    }
+
+    const last = messages[messages.length - 1];
+    if (last && last.role === 'assistant' && last.content.trim()) {
+      completionRef.current = 'success';
+      void setFirstTaskDone();
+      const tools = messages
+        .filter((message) => message.role === 'tool')
+        .map((message) => message.toolName);
+      track('onboarding_first_task_completed', {
+        suggested_task_id: onboardingTaskId,
+        tool_used: tools.length > 0 ? tools : undefined,
+      });
+    }
+  }, [
+    isOnboarding,
+    isRunning,
+    messages,
+    onboardingTaskId,
+    runState,
+  ]);
+
+  // Derived purely from render state (no ref reads, no setState-in-effect).
+  // Anchored on messages added since this screen mounted: the app-wide chat
+  // runtime keeps `runState` across screens, so without the baseline a stale
+  // "responding"/"failed" from an earlier task would light the bar before the
+  // new prompt was even sent.
+  const initialMessageCount = useState(() => messages.length)[0];
+  const hasNewActivity = messages.length > initialMessageCount;
+  const last = messages[messages.length - 1];
+  const lastIsAssistantAnswer =
+    Boolean(last && last.role === 'assistant' && last.content.trim());
+  const taskOutcome: 'idle' | 'success' | 'failed' =
+    !isOnboarding || !hasNewActivity
+      ? 'idle'
+      : runState.type === 'failed'
+        ? 'failed'
+        : !isRunning &&
+            lastIsAssistantAnswer &&
+            (runState.type === 'responding' || runState.type === 'idle')
+          ? 'success'
+          : 'idle';
+
+  const connectAction =
+    runState.type === 'failed'
+      ? connectionActionForCode(runState.error.code)
+      : null;
+
+  const continueSetup = useCallback(() => {
+    router.replace('/onboarding/feedback');
+  }, [router]);
+
+  const retryTask = useCallback(() => {
+    const prompt = initialPromptRef.current;
+    if (!prompt) return;
+    completionRef.current = 'idle';
+    handleSendText(prompt);
+  }, [handleSendText]);
 
   /*
    * Settings shows no opening chips.
@@ -180,10 +278,12 @@ export default function Chat() {
    */
   const suggestions = useMemo(
     () =>
-      scenario?.id === 'settings'
+      isOnboarding
         ? []
-        : (scenario?.suggestions ?? GENERAL_SUGGESTIONS),
-    [scenario],
+        : scenario?.id === 'settings'
+          ? []
+          : (scenario?.suggestions ?? GENERAL_SUGGESTIONS),
+    [isOnboarding, scenario],
   );
 
   const agentStatusLine = useMemo(() => {
@@ -310,6 +410,22 @@ export default function Chat() {
               onApprove={approvePendingApproval}
               onReject={rejectPendingApproval}
             />
+          ) : taskOutcome === 'failed' ? (
+            <TaskFailureCard
+              onRetry={retryTask}
+              onChooseAnother={() => router.replace('/onboarding/try')}
+              onTellUs={continueSetup}
+              connectLabel={
+                connectAction ? connectionActionLabel(connectAction) : undefined
+              }
+              onConnect={
+                connectAction
+                  ? () => router.push(routeForConnectionAction(connectAction))
+                  : undefined
+              }
+            />
+          ) : taskOutcome === 'success' ? (
+            <TaskContinueBar onContinue={continueSetup} />
           ) : (
             <>
               <SuggestionChips

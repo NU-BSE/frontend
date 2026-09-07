@@ -9,6 +9,14 @@ const PENDING_EMAIL_AUTH_KEY = "creepyim.auth.pending-email.v1";
 const CATEGORIES_KEY = "creepyim.onboarding.categories.v1";
 const MEMORY_KEY = "creepyim.onboarding.memory.v1";
 const DEVICE_ASSESSMENT_KEY = "creepyim.onboarding.device-assessment.v1";
+const WELCOME_KEY = "creepyim.onboarding.welcome.v1";
+const INTENT_KEY = "creepyim.onboarding.intent.v1";
+const SELECTED_INTENTS_KEY = "creepyim.onboarding.intents.v1";
+const CUSTOM_INTENT_KEY = "creepyim.onboarding.custom-intent.v1";
+const CONNECTIONS_DONE_KEY = "creepyim.onboarding.connections-done.v1";
+const AI_MODE_KEY = "creepyim.onboarding.ai-mode.v1";
+const FIRST_TASK_KEY = "creepyim.onboarding.first-task.v1";
+const FEEDBACK_KEY = "creepyim.onboarding.feedback.v1";
 
 export type MemoryProfile = "efficient" | "balanced" | "performance" | "cloud";
 
@@ -49,6 +57,14 @@ export async function resetOnboarding(): Promise<void> {
       CATEGORIES_KEY,
       MEMORY_KEY,
       DEVICE_ASSESSMENT_KEY,
+      WELCOME_KEY,
+      INTENT_KEY,
+      SELECTED_INTENTS_KEY,
+      CUSTOM_INTENT_KEY,
+      CONNECTIONS_DONE_KEY,
+      AI_MODE_KEY,
+      FIRST_TASK_KEY,
+      FEEDBACK_KEY,
     ]);
   } catch {
     // Non-fatal.
@@ -176,4 +192,124 @@ export async function setDeviceAssessment(
   } catch {
     // The model selection screen will safely fall back to cloud-only.
   }
+}
+
+/**
+ * Onboarding v2 progress flags.
+ *
+ * Each step records its own "done" marker so onboarding can be resumed from
+ * the correct screen after a restart, process death, OAuth redirect, network
+ * error or local model download. Connections are optional, so `connections`
+ * being "done" means the step was seen and either connected or skipped.
+ */
+export const ONBOARDING_INTENT_IDS = [
+  "android_settings",
+  "messages",
+  "email",
+  "calendar",
+  "drive",
+] as const;
+
+export type OnboardingIntentId = (typeof ONBOARDING_INTENT_IDS)[number];
+
+const readBool = async (key: string): Promise<boolean> => {
+  try {
+    return (await AsyncStorage.getItem(key)) === "true";
+  } catch {
+    return false;
+  }
+};
+
+const writeBool = async (key: string): Promise<void> => {
+  try {
+    await AsyncStorage.setItem(key, "true");
+  } catch {
+    // Non-fatal — the flag can be written again on the next step.
+  }
+};
+
+export async function getWelcomeCompleted(): Promise<boolean> {
+  return readBool(WELCOME_KEY);
+}
+export async function setWelcomeCompleted(): Promise<void> {
+  return writeBool(WELCOME_KEY);
+}
+
+export async function getIntentCompleted(): Promise<boolean> {
+  return readBool(INTENT_KEY);
+}
+export async function setIntentCompleted(): Promise<void> {
+  return writeBool(INTENT_KEY);
+}
+
+export async function getSelectedIntents(): Promise<OnboardingIntentId[]> {
+  try {
+    const raw = await AsyncStorage.getItem(SELECTED_INTENTS_KEY);
+    if (!raw) return [];
+    const parsed: unknown = JSON.parse(raw);
+    if (!Array.isArray(parsed)) return [];
+    return parsed.filter((id): id is OnboardingIntentId =>
+      ONBOARDING_INTENT_IDS.includes(id as OnboardingIntentId),
+    );
+  } catch {
+    return [];
+  }
+}
+
+export async function setSelectedIntents(
+  ids: OnboardingIntentId[],
+): Promise<void> {
+  try {
+    await AsyncStorage.setItem(SELECTED_INTENTS_KEY, JSON.stringify(ids));
+  } catch {
+    // Non-fatal.
+  }
+}
+
+export async function getCustomIntent(): Promise<string | null> {
+  try {
+    return await AsyncStorage.getItem(CUSTOM_INTENT_KEY);
+  } catch {
+    return null;
+  }
+}
+
+export async function setCustomIntent(text: string | null): Promise<void> {
+  try {
+    if (text) {
+      await AsyncStorage.setItem(CUSTOM_INTENT_KEY, text);
+    } else {
+      await AsyncStorage.removeItem(CUSTOM_INTENT_KEY);
+    }
+  } catch {
+    // Non-fatal.
+  }
+}
+
+export async function getConnectionsDone(): Promise<boolean> {
+  return readBool(CONNECTIONS_DONE_KEY);
+}
+export async function setConnectionsDone(): Promise<void> {
+  return writeBool(CONNECTIONS_DONE_KEY);
+}
+
+export async function getAiModeDone(): Promise<boolean> {
+  return readBool(AI_MODE_KEY);
+}
+export async function setAiModeDone(): Promise<void> {
+  return writeBool(AI_MODE_KEY);
+}
+
+export async function getFirstTaskDone(): Promise<boolean> {
+  return readBool(FIRST_TASK_KEY);
+}
+export async function setFirstTaskDone(): Promise<void> {
+  return writeBool(FIRST_TASK_KEY);
+}
+
+export async function getFeedbackDone(): Promise<boolean> {
+  return readBool(FEEDBACK_KEY);
+}
+export async function setFeedbackDone(): Promise<void> {
+  return writeBool(FEEDBACK_KEY);
 }

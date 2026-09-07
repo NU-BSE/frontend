@@ -1,35 +1,258 @@
-import React from "react";
+import React, { useCallback, useEffect, useRef } from "react";
 import { useRouter } from "expo-router";
-import { ScrollView, StyleSheet, View } from "react-native";
+import { Pressable, ScrollView, StyleSheet, View } from "react-native";
+
+import { track } from "@/analytics";
+import { Button } from "@/components/Button";
 import { OnboardingNavBar } from "@/components/OnboardingNavBar";
+import { OnboardingProgress, progressFor } from "@/components/OnboardingProgress";
 import { Screen } from "@/components/Screen";
 import { Text } from "@/components/Text";
-import { ConnectorList } from "@/features/connections/ConnectorList";
-import { gutter, spacing } from "@/theme/tokens";
+import {
+  useConnectConnector,
+  useConnection,
+  useConnections,
+} from "@/connections/useConnections";
+import { getSelectedIntents, setConnectionsDone } from "@/storage/prefs";
+import { gutter, palette, radius, spacing } from "@/theme/tokens";
+import type { OnboardingIntentId } from "@/storage/prefs";
 
+const PROVIDER_FOR_CONNECTOR: Record<string, string> = {
+  android: "android",
+  "telegram-user": "telegram",
+  google: "google",
+};
+
+/**
+ * Connections during onboarding.
+ *
+ * Contextual, not a permission dump: This phone is always offered (its
+ * sensitive permissions are requested later, only when a feature needs them);
+ * Telegram appears for the Messages interest; Google for email/calendar/drive.
+ * Nothing here is required to continue.
+ */
 export default function OnboardingConnections() {
   const router = useRouter();
+  const connect = useConnectConnector();
+  const { connection: android } = useConnection("android");
+  const { connection: telegram } = useConnection("telegram-user");
+  const { connection: google } = useConnection("google");
+  const { data: connections } = useConnections();
+
+  const [intents, setIntents] = React.useState<OnboardingIntentId[]>([]);
+  useEffect(() => {
+    let cancelled = false;
+    void getSelectedIntents().then((ids) => {
+      if (!cancelled) setIntents(ids);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const viewedRef = useRef(false);
+  useEffect(() => {
+    if (viewedRef.current) return;
+    viewedRef.current = true;
+    track("onboarding_connections_viewed");
+  }, []);
+
+  // Telegram / Google only become connected via their real connect screens,
+  // so the first time we see them connected here is a completed connection.
+  const completedTracked = useRef<Set<string>>(new Set());
+  useEffect(() => {
+    for (const record of connections ?? []) {
+      if (record.status !== "connected") continue;
+      if (record.connectorId === "android") continue;
+      if (completedTracked.current.has(record.connectorId)) continue;
+      const provider = PROVIDER_FOR_CONNECTOR[record.connectorId];
+      if (!provider) continue;
+      completedTracked.current.add(record.connectorId);
+      track("onboarding_connection_completed", { provider });
+    }
+  }, [connections]);
+
+  const connectAndroid = useCallback(() => {
+    track("onboarding_connection_started", { provider: "android" });
+    void connect
+      .mutateAsync("android")
+      .then(() => {
+        completedTracked.current.add("android");
+        track("onboarding_connection_completed", { provider: "android" });
+      })
+      .catch(() => undefined);
+  }, [connect]);
+
+  const startTelegram = useCallback(() => {
+    track("onboarding_connection_started", { provider: "telegram" });
+    router.push("/connect/telegram");
+  }, [router]);
+
+  const startGoogle = useCallback(() => {
+    track("onboarding_connection_started", { provider: "google" });
+    router.push("/connect/google");
+  }, [router]);
+
+  const finish = useCallback(async () => {
+    await setConnectionsDone();
+    router.push("/onboarding/memory");
+  }, [router]);
+
+  const wantsTelegram = intents.includes("messages");
+  const wantsGoogle = ["email", "calendar", "drive"].some((id) =>
+    intents.includes(id as OnboardingIntentId),
+  );
 
   return (
     <Screen>
-      <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
+      <View style={styles.progressWrap}>
+        <OnboardingProgress fraction={progressFor("connections")} />
+      </View>
+      <ScrollView
+        contentContainerStyle={styles.content}
+        showsVerticalScrollIndicator={false}
+      >
         <View style={styles.intro}>
-          <Text variant="tag" tone="brand" uppercase>Optional</Text>
-          <Text variant="display" style={styles.heading}>Connect your services</Text>
+          <Text variant="display" style={styles.heading}>
+            Give Creepy something to work with
+          </Text>
           <Text variant="bodyLarge" tone="secondary" style={styles.body}>
-            Connect the services you want Creepy to work with. You can skip this step and add them later.
+            Creepy only gets access to what you connect. You can add or remove
+            access anytime.
           </Text>
         </View>
-        <ConnectorList />
+
+        <View style={styles.cards}>
+          <ConnectionCard
+            title="This phone"
+            badge="Recommended"
+            description="Open the right Android settings, understand your device and control supported options."
+            connected={android?.status === "connected"}
+            connectLabel="Connect this phone"
+            connecting={connect.isPending}
+            onConnect={connectAndroid}
+          />
+
+          {wantsTelegram ? (
+            <ConnectionCard
+              title="Telegram"
+              description="Find chats, catch up on messages and send replies.\n\nCreepy always asks before sending a message."
+              connected={telegram?.status === "connected"}
+              connectLabel="Connect Telegram"
+              onConnect={startTelegram}
+            />
+          ) : null}
+
+          {wantsGoogle ? (
+            <ConnectionCard
+              title="Google"
+              description="Calendar, Drive and Gmail.\n\nCalendar and Drive start read-only. Gmail access is requested only when you use an email feature."
+              connected={google?.status === "connected"}
+              connectLabel="Connect Google"
+              onConnect={startGoogle}
+            />
+          ) : null}
+        </View>
+
+        <Pressable
+          accessibilityRole="button"
+          onPress={() => void finish()}
+          style={({ pressed }) => [styles.skip, pressed && styles.pressed]}
+        >
+          <Text variant="label" tone="secondary">
+            I&apos;ll do this later
+          </Text>
+        </Pressable>
       </ScrollView>
-      <OnboardingNavBar onBack={() => router.back()} onAdvance={() => router.push("/onboarding/memory")} advanceLabel="Continue" />
+
+      <OnboardingNavBar
+        onBack={() => router.back()}
+        onAdvance={() => void finish()}
+        advanceLabel="Continue"
+      />
     </Screen>
   );
 }
 
+function ConnectionCard({
+  title,
+  badge,
+  description,
+  connected,
+  connectLabel,
+  connecting,
+  onConnect,
+}: {
+  title: string;
+  badge?: string;
+  description: string;
+  connected?: boolean;
+  connectLabel: string;
+  connecting?: boolean;
+  onConnect?: () => void;
+}) {
+  return (
+    <View style={styles.card}>
+      <View style={styles.cardHeader}>
+        <Text variant="cardTitle">{title}</Text>
+        {badge ? (
+          <Text variant="tag" tone="brand" uppercase>
+            {badge}
+          </Text>
+        ) : null}
+      </View>
+      <Text variant="bodySmall" tone="secondary">
+        {description}
+      </Text>
+      {connected ? (
+        <Text variant="label" tone="brand">
+          Connected
+        </Text>
+      ) : (
+        <Button
+          label={connectLabel}
+          variant="secondary"
+          loading={connecting}
+          disabled={connecting}
+          onPress={onConnect}
+        />
+      )}
+    </View>
+  );
+}
+
 const styles = StyleSheet.create({
-  content: { flexGrow: 1, justifyContent: "center", paddingHorizontal: gutter.screen, paddingVertical: spacing.xxxl },
-  intro: { alignItems: "center", marginBottom: spacing.xxxl },
-  heading: { marginTop: spacing.sm, marginBottom: spacing.lg, textAlign: "center" },
+  progressWrap: {
+    paddingHorizontal: gutter.screen,
+    paddingTop: spacing.lg,
+  },
+  content: {
+    paddingHorizontal: gutter.screen,
+    paddingTop: spacing.xl,
+    paddingBottom: spacing.xxl,
+  },
+  intro: { alignItems: "center", paddingBottom: spacing.xxl },
+  heading: { textAlign: "center", marginBottom: spacing.lg },
   body: { textAlign: "center" },
+  cards: { gap: spacing.lg },
+  card: {
+    gap: spacing.md,
+    padding: spacing.lg,
+    borderWidth: 1,
+    borderColor: palette.borderSoft,
+    borderRadius: radius.lg,
+    backgroundColor: palette.surface,
+  },
+  cardHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: spacing.md,
+  },
+  skip: {
+    alignSelf: "center",
+    marginTop: spacing.xl,
+    padding: spacing.md,
+  },
+  pressed: { opacity: 0.7 },
 });

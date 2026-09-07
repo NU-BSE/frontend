@@ -18,7 +18,25 @@ const AI_MODE_KEY = "creepyim.onboarding.ai-mode.v1";
 const FIRST_TASK_KEY = "creepyim.onboarding.first-task.v1";
 const FEEDBACK_KEY = "creepyim.onboarding.feedback.v1";
 
-export type MemoryProfile = "efficient" | "balanced" | "performance" | "cloud";
+/**
+ * Where inference runs.
+ *
+ * Was four values — three local size tiers plus cloud — when the app shipped
+ * 0.5B, 1B and 1.5B students. Only the 2B teacher remains, so there is one
+ * local option and one remote one. Three names for a single model would be a
+ * menu that misleads.
+ */
+export type MemoryProfile = "on-device" | "cloud";
+
+/**
+ * Tier names written by earlier builds.
+ *
+ * They map to on-device rather than to the default: someone who chose a local
+ * model should stay local across the upgrade. Falling through to the default
+ * would quietly move them to cloud inference, which is a different privacy
+ * posture than the one they picked.
+ */
+const RETIRED_LOCAL_PROFILES = ["efficient", "balanced", "performance"];
 
 export type UserProfile = {
   name: string;
@@ -149,14 +167,17 @@ export async function setSelectedCategories(ids: ScenarioId[]): Promise<void> {
 export async function getMemoryProfile(): Promise<MemoryProfile> {
   try {
     const raw = await AsyncStorage.getItem(MEMORY_KEY);
-    return raw === "efficient" ||
-      raw === "balanced" ||
-      raw === "performance" ||
-      raw === "cloud"
-      ? raw
-      : "efficient";
+    if (raw === "cloud" || raw === "on-device") return raw;
+    if (raw !== null && RETIRED_LOCAL_PROFILES.includes(raw)) return "on-device";
+    /*
+     * Nothing stored, or something unrecognisable. Cloud is the safe default
+     * for an unanswered question: it works on every device, whereas defaulting
+     * to on-device would promise local inference on hardware that may not be
+     * able to run it.
+     */
+    return "cloud";
   } catch {
-    return "efficient";
+    return "cloud";
   }
 }
 

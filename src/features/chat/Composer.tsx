@@ -1,7 +1,11 @@
 import React, { useCallback, useState } from 'react';
 import { Pressable, StyleSheet, TextInput, View } from 'react-native';
 
+import { Icon } from '@/components/Icon';
 import { Text } from '@/components/Text';
+import Paperclip from '@assets/icons/paperclip.svg';
+import Record from '@assets/icons/record.svg';
+import Send from '@assets/icons/send.svg';
 import type { AttachmentStatus, ChatAttachment, ChatSendInput } from '@/agent/types';
 import { MAX_ATTACHMENTS_PER_MESSAGE } from '@/files/attachmentPolicy';
 import { pickAttachments } from '@/files/attachments';
@@ -10,7 +14,6 @@ import {
   MIN_TOUCH_TARGET,
   palette,
   radius,
-  shadow,
   spacing,
   typography,
 } from '@/theme/tokens';
@@ -25,8 +28,8 @@ export function Composer({
   onStop,
   busy,
   disabled,
-  uploadFile,
   onVoice,
+  initialText,
 }: {
   /** Called with the final payload after any required upload has completed. */
   onSend: (input: ChatSendInput) => void;
@@ -34,26 +37,32 @@ export function Composer({
   busy: boolean;
   disabled?: boolean;
   /**
-   * Uploads a local attachment and returns the backend file id. Provided only
-   * in remote mode — local/text-only modes leave it undefined and never
-   * upload anything to a server.
-   */
-  uploadFile?: (attachment: ChatAttachment) => Promise<{ id: string }>;
-  /**
    * Opens the spoken conversation. Omitted when this build has no speech
    * recognition, in which case no mic is shown at all — an inert mic button
    * is worse than none.
    */
   onVoice?: () => void;
+  /**
+   * Text to place in the field without sending it.
+   *
+   * Used for a prompt that arrived from outside the app: it is offered for the
+   * user to review and send, never executed on their behalf.
+   */
+  initialText?: string;
 }) {
-  const [value, setValue] = useState('');
+  /*
+   * Seeded once. The caller keys this component on the suggestion, so a new
+   * one arrives as a fresh mount rather than as state synced in from an
+   * effect — which is both simpler and what React actually recommends for a
+   * field whose initial value can change.
+   */
+  const [value, setValue] = useState(initialText ?? '');
   const [drafts, setDrafts] = useState<DraftAttachment[]>([]);
   const [notice, setNotice] = useState<string | null>(null);
-  const [sending, setSending] = useState(false);
 
   const trimmed = value.trim();
   const canSend =
-    (trimmed.length > 0 || drafts.length > 0) && !busy && !disabled && !sending;
+    (trimmed.length > 0 || drafts.length > 0) && !busy && !disabled;
 
   const pick = useCallback(async () => {
     setNotice(null);
@@ -86,93 +95,21 @@ export function Composer({
     setDrafts((current) => current.filter((d) => d.attachment.id !== id));
   }, []);
 
-  const uploadDraft = useCallback(
-    async (draft: DraftAttachment): Promise<DraftAttachment> => {
-      if (!uploadFile || draft.attachment.remoteId) return draft;
-      setDrafts((current) =>
-        current.map((d) =>
-          d.attachment.id === draft.attachment.id
-            ? { ...d, status: 'uploading' }
-            : d,
-        ),
-      );
-      // Privacy: dev logs carry name + size only — never file content, base64
-      // or an authorization token.
-      if (typeof __DEV__ === 'boolean' && __DEV__) {
-        console.log(
-          `[attachments] uploading name=${draft.attachment.name} size=${draft.attachment.size}`,
-        );
-      }
-      try {
-        const uploaded = await uploadFile(draft.attachment);
-        if (typeof __DEV__ === 'boolean' && __DEV__) {
-          console.log(`[attachments] uploaded id=${uploaded.id}`);
-        }
-        return {
-          attachment: { ...draft.attachment, remoteId: uploaded.id },
-          status: 'uploaded',
-        };
-      } catch {
-        return { ...draft, status: 'failed' };
-      }
-    },
-    [uploadFile],
-  );
-
-  const retry = useCallback(
-    async (id: string) => {
-      if (!uploadFile) return;
-      const target = drafts.find((d) => d.attachment.id === id);
-      if (!target) return;
-      const next = await uploadDraft({ ...target, status: 'ready' });
-      setDrafts((current) =>
-        current.map((d) => (d.attachment.id === id ? next : d)),
-      );
-    },
-    [drafts, uploadDraft, uploadFile],
-  );
-
-  const send = useCallback(async () => {
+  /**
+   * Hands the typed text and the local attachments to the chat layer.
+   *
+   * Nothing is uploaded. The chat layer reads each file on the device and
+   * folds its text into the message, so there is no upload to await, fail or
+   * retry here — which is why this is synchronous where it used to have an
+   * upload phase, a failure notice and a per-file Retry.
+   */
+  const send = useCallback(() => {
     if (!canSend) return;
     setNotice(null);
-
-    if (drafts.length === 0) {
-      onSend({ text: trimmed, attachments: [] });
-      setValue('');
-      return;
-    }
-
-    if (!uploadFile) {
-      // Local/text-only runtime: hand over the local attachments unchanged.
-      // The agent layer decides whether the model can actually read them and
-      // surfaces a clear error when it cannot — it never silently drops them.
-      onSend({
-        text: trimmed,
-        attachments: drafts.map((d) => d.attachment),
-      });
-      setValue('');
-      setDrafts([]);
-      return;
-    }
-
-    setSending(true);
-    const uploaded: DraftAttachment[] = [];
-    for (const draft of drafts) {
-      uploaded.push(await uploadDraft(draft));
-    }
-    setDrafts(uploaded);
-    setSending(false);
-
-    const failed = uploaded.some((d) => d.status === 'failed');
-    if (failed) {
-      setNotice('Some files could not be uploaded. Retry or remove them.');
-      return;
-    }
-
-    onSend({ text: trimmed, attachments: uploaded.map((d) => d.attachment) });
+    onSend({ text: trimmed, attachments: drafts.map((d) => d.attachment) });
     setValue('');
     setDrafts([]);
-  }, [canSend, drafts, onSend, trimmed, uploadDraft, uploadFile]);
+  }, [canSend, drafts, onSend, trimmed]);
 
   return (
     <View style={styles.root}>
@@ -184,11 +121,6 @@ export function Composer({
               attachment={draft.attachment}
               status={draft.status}
               onRemove={() => remove(draft.attachment.id)}
-              onRetry={
-                uploadFile && draft.status === 'failed'
-                  ? () => void retry(draft.attachment.id)
-                  : undefined
-              }
             />
           ))}
         </View>
@@ -206,47 +138,57 @@ export function Composer({
             accessibilityRole="button"
             accessibilityLabel="Speak to Creepy"
             onPress={onVoice}
-            disabled={disabled || sending}
+            disabled={disabled}
             style={({ pressed }) => [
-              styles.attach,
-              (disabled || sending) && styles.actionDisabled,
+              styles.control,
+              disabled && styles.actionDisabled,
               pressed && styles.pressed,
             ]}
           >
-            <Text variant="headline" tone="brand">
-              ◉
-            </Text>
+            <Icon source={Record} size={26} color={palette.brand} />
           </Pressable>
         ) : null}
-        <Pressable
-          accessibilityRole="button"
-          accessibilityLabel="Attach files"
-          onPress={() => void pick()}
-          disabled={disabled || sending}
-          style={({ pressed }) => [
-            styles.attach,
-            (disabled || sending) && styles.actionDisabled,
-            pressed && styles.pressed,
-          ]}
-        >
-          <Text variant="headline" tone="brand">
-            +
-          </Text>
-        </Pressable>
 
-        <TextInput
-          style={styles.input}
-          value={value}
-          onChangeText={setValue}
-          placeholder="Say something…"
-          placeholderTextColor={palette.textMuted}
-          multiline
-          maxLength={2000}
-          editable={!disabled}
-          onSubmitEditing={() => void send()}
-          submitBehavior="submit"
-          returnKeyType="send"
-        />
+        {/*
+          The field and the attach control share one bordered box, so "+" reads
+          as part of the input rather than as a third button competing with the
+          two round ones beside it.
+        */}
+        <View style={styles.field}>
+          <TextInput
+            style={styles.input}
+            value={value}
+            onChangeText={setValue}
+            placeholder="Say something…"
+            placeholderTextColor={palette.textMuted}
+            multiline
+            maxLength={2000}
+            editable={!disabled}
+            onSubmitEditing={() => void send()}
+            submitBehavior="submit"
+            returnKeyType="send"
+          />
+
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel="Attach files"
+            onPress={() => void pick()}
+            disabled={disabled}
+            // The glyph is small; the touch target must not be.
+            hitSlop={8}
+            style={({ pressed }) => [
+              styles.attachInline,
+              disabled && styles.actionDisabled,
+              pressed && styles.pressed,
+            ]}
+          >
+            {/*
+              Not square: the export is 110.27 × 122.88, so width and height
+              are both given rather than letting a square box squash it.
+            */}
+            <Icon source={Paperclip} size={16} height={18} color={palette.textMuted} />
+          </Pressable>
+        </View>
 
         <Pressable
           accessibilityRole="button"
@@ -254,20 +196,31 @@ export function Composer({
           onPress={busy ? onStop : () => void send()}
           disabled={!busy && !canSend}
           style={({ pressed }) => [
-            styles.action,
-            busy ? styles.stop : styles.send,
+            styles.control,
             !busy && !canSend && styles.actionDisabled,
             pressed && styles.pressed,
           ]}
         >
-          <Text variant="labelSmall" tone="inverse">
-            {busy ? 'Stop' : 'Send'}
-          </Text>
+          {busy ? (
+            // A square reads as "stop" at this size where a glyph would not.
+            <View style={styles.stopMark} />
+          ) : (
+            <Icon source={Send} size={24} color={palette.brand} />
+          )}
         </Pressable>
       </View>
     </View>
   );
 }
+
+/**
+ * Vertical padding on the first line of the input.
+ *
+ * (MIN_TOUCH_TARGET - body line height) / 2 — so the field is exactly one
+ * touch target tall with one line in it, and the first line's centre lands on
+ * the centre of the "+" beside it.
+ */
+const FIRST_LINE_PADDING = (MIN_TOUCH_TARGET - typography.body.lineHeight) / 2;
 
 const styles = StyleSheet.create({
   root: {
@@ -293,38 +246,70 @@ const styles = StyleSheet.create({
     paddingBottom: spacing.md,
     backgroundColor: palette.surface,
   },
-  attach: {
+  /**
+   * The two controls beside the field.
+   *
+   * No background and no shadow: the icons are the controls. A disc behind
+   * them added a second shape competing with the field for attention, and at
+   * this size the icon alone is unambiguous. The box stays a full touch
+   * target so the tappable area does not shrink to the size of the glyph.
+   */
+  control: {
     width: MIN_TOUCH_TARGET,
     height: MIN_TOUCH_TARGET,
-    borderRadius: radius.md,
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: palette.brandWash,
+  },
+  stopMark: {
+    width: 18,
+    height: 18,
+    borderRadius: radius.xs,
+    backgroundColor: palette.brand,
+  },
+  /** The bordered box that holds "+" and the text together. */
+  field: {
+    flex: 1,
+    flexDirection: 'row',
+    /*
+     * Pinned to the top so "+" stays on the first line as the field grows,
+     * rather than sliding down to sit beside the last line the user typed.
+     */
+    alignItems: 'flex-start',
+    minHeight: MIN_TOUCH_TARGET,
+    maxHeight: 132,
+    backgroundColor: palette.canvas,
+    borderRadius: radius.lg,
+    borderWidth: 1,
+    borderColor: palette.borderFaint,
+    paddingLeft: spacing.md,
+  },
+  attachInline: {
+    // Narrower than a full target, since hitSlop carries the touch area and a
+    // 48pt column would push the text noticeably off-centre in the field.
+    width: 36,
+    /*
+     * A full touch target tall, and the same height the first line occupies —
+     * FIRST_LINE_HEIGHT below is the input's own first line, so the glyph and
+     * the first character share a centre line instead of being a few pixels
+     * apart.
+     */
+    height: MIN_TOUCH_TARGET,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   input: {
     flex: 1,
-    minHeight: MIN_TOUCH_TARGET,
-    // Caps growth at roughly five lines so the transcript is never squeezed out.
+    // Growth is capped by the field; the input itself must be free to fill it.
     maxHeight: 132,
     color: palette.textPrimary,
-    backgroundColor: palette.canvas,
-    borderRadius: radius.md,
-    borderWidth: 1,
-    borderColor: palette.borderFaint,
-    paddingHorizontal: spacing.md,
-    paddingVertical: spacing.md,
+    /*
+     * Chosen, not guessed: this plus half the body line height puts the first
+     * line's centre exactly on the "+" glyph's centre, and twice this plus the
+     * line height is the 48pt touch target the field starts at.
+     */
+    paddingVertical: FIRST_LINE_PADDING,
     ...typography.body,
   },
-  action: {
-    height: MIN_TOUCH_TARGET,
-    paddingHorizontal: spacing.lg,
-    borderRadius: radius.md,
-    alignItems: 'center',
-    justifyContent: 'center',
-    ...shadow.card,
-  },
-  send: { backgroundColor: palette.brand },
-  stop: { backgroundColor: palette.textSecondary },
   actionDisabled: { opacity: 0.4 },
   pressed: { opacity: 0.75 },
 });

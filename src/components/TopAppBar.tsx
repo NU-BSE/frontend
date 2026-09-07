@@ -20,6 +20,9 @@ import {
  * The pill is the primary entry into the chat, so it lives here rather than
  * on any one screen — Home and History both show it.
  */
+/** Gap between the mascot and the pill's edge, on three sides. */
+const MASCOT_INSET = 6;
+
 export function TopAppBar({ scenarioId }: { scenarioId?: string }) {
   const router = useRouter();
 
@@ -78,14 +81,28 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
+  /*
+   * The inset around the mascot is uniform — 6pt left, top and bottom — so its
+   * rounded corner sits concentric with the pill's rather than floating inside
+   * it. Two rounded rectangles nest only when the gap between them is equal on
+   * both axes and the outer radius is the inner radius plus that gap; at
+   * radius.lg (12) over a mascot rounded to about 6, that gap is 6.
+   *
+   * It was `spacing.lg` (16) horizontally against 6 vertically, which both
+   * broke the nesting and made the pill wider than its content needed.
+   */
   askPill: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: spacing.sm,
     backgroundColor: palette.brand,
     borderRadius: radius.lg,
-    paddingHorizontal: spacing.lg,
-    paddingVertical: 6,
+    paddingLeft: MASCOT_INSET,
+    // More on the right than the left: the mascot is a solid shape that fills
+    // its box, while text has its own optical sidebearing, so equal padding
+    // would read as tighter on the text side.
+    paddingRight: MASCOT_INSET,
+    paddingVertical: MASCOT_INSET,
     ...shadow.raised,
   },
   // The mascot sits directly on the pill so the blue background stays seamless.

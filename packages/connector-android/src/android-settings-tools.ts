@@ -9,14 +9,34 @@ import type {
 import { mapAndroidSettingsError } from './android-settings-errors';
 
 /**
- * Agent-facing global Settings screens. Permission-granting destinations
- * (`overlay`, `writeSettings`, `batteryOptimization`, `unknownSources`) remain
- * deliberately excluded: those grants belong to the user-owned connector UI.
+ * Agent-facing Settings destinations. Opening any of these screens changes
+ * nothing by itself; the user owns the system UI and confirms the action.
+ *
+ * `writeSettings` and `overlay` are the two exceptions to keeping
+ * Creepy-specific grants out of a model-facing list, and they are here for a
+ * reason the list itself creates: they gate this connector's own tools, so
+ * excluding them leaves the agent able to fail on a missing scope and unable
+ * to do anything about it. `SCOPE_REMEDIES` in the app names both by screen,
+ * and `verify:agent` asserts every remedy names a screen this list accepts —
+ * advice pointing at a door that is not there is worse than no advice.
+ *
+ * That was not theoretical: asked to dim the screen, the agent failed with
+ * "missing required scopes: android.settings.write" and nothing in the app
+ * could reach the toggle. The report was "it wasn't prompted and it's not
+ * present in permissions".
+ *
+ * The unknown-sources grant does stay out. It gates nothing this connector
+ * does, so there is no failure to recover from, and it is the toggle that
+ * permits sideloading. Battery optimization is different again: a normal
+ * troubleshooting destination used to review optimization/exemption state, so
+ * the agent may open it while the user still decides in Android Settings.
  */
-const OPEN_SCREENS = [
+export const OPEN_SCREENS = [
   'settings',
+  'settingsSearch',
   'appDetails',
   'wifi',
+  'wifiIp',
   'bluetooth',
   'wireless',
   'location',
@@ -27,6 +47,14 @@ const OPEN_SCREENS = [
   'assistant',
   'usageAccess',
   'notificationListener',
+  /*
+   * Special access that gates this connector's own tools. Opening either puts
+   * Android's own toggle in front of the user, switched off; nothing is
+   * granted here, and nothing can be granted without them acting on it.
+   */
+  'writeSettings',
+  'overlay',
+  'batteryOptimization',
   'security',
   'privacy',
   'vpn',
@@ -40,11 +68,13 @@ const OPEN_SCREENS = [
   'defaultApps',
   'home',
   'batterySaver',
+  'batteryUsage',
   'dataUsage',
   'airplaneMode',
   'apn',
   'roaming',
   'doNotDisturb',
+  'doNotDisturbPriority',
   'storage',
   'deviceInfo',
   'systemUpdate',
@@ -72,12 +102,25 @@ const APP_TARGETS = [
   'appLocale',
   'appUsage',
   'backgroundData',
+  'exactAlarm',
+  'fullScreenIntent',
 ] as const satisfies readonly AppSettingsTarget[];
 
 const OPEN_PANELS = ['internet', 'wifi', 'volume', 'nfc'] as const;
-
 const CONNECTION_ID = z.string().min(1);
-const PACKAGE_NAME = z.string().trim().min(1).max(255);
+
+const PACKAGE_NAME = z
+  .string()
+  .trim()
+  .min(1)
+  .max(255)
+  .describe(
+    'Exact Android package id, e.g. "com.google.android.apps.bard". It MUST ' +
+      'be a packageName returned by android.apps.find — never a display ' +
+      'name like "Gemini" and never invented. If only the app\'s name is ' +
+      'known, call android.apps.find with that name first and copy the ' +
+      'chosen result\'s packageName verbatim.',
+  );
 
 const APP_TARGET_INPUT = z
   .object({
@@ -481,7 +524,11 @@ export function createAndroidSettingsTools(
       name: 'android.settings.open',
       title: 'Open Android settings screen',
       description:
-        'Open a global Android Settings screen. Permission-granting special-access screens are not available here.',
+        'Open an allow-listed global Android Settings destination. Use ' +
+        'batteryUsage for battery-use details, batteryOptimization for ' +
+        'optimization exemptions, wifiIp for Wi-Fi IP configuration, ' +
+        'doNotDisturbPriority for priority-mode rules, and settingsSearch ' +
+        'when Android exposes no stable direct destination for an OEM-specific setting.',
       inputSchema: z.object({ connectionId: CONNECTION_ID, screen: z.enum(OPEN_SCREENS) }),
       outputSchema: z.object({ opened: z.literal(true), screen: z.string() }),
       risk: 'external_side_effect',
@@ -514,7 +561,12 @@ export function createAndroidSettingsTools(
       name: 'android.settings.open_app',
       title: 'Open settings for an app',
       description:
-        'Open a package-scoped Android Settings destination such as App info, notifications, a notification channel, Open by default, language, usage or background data.',
+        'Open one app\'s Android Settings destination. Use appDetails as the ' +
+        'safe public fallback for permissions, Force stop, cache/storage, ' +
+        'uninstall/disable and OEM-specific app battery controls; the USER ' +
+        'must tap those controls. Use appNotifications or notificationChannel ' +
+        'for alerts, exactAlarm for Android 12+ exact-alarm access, and ' +
+        'fullScreenIntent for Android 14+ full-screen notification access.',
       inputSchema: APP_TARGET_INPUT,
       outputSchema: z.object({
         opened: z.literal(true),

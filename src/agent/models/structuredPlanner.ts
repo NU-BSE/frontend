@@ -6,6 +6,7 @@ import type {
   AgentModel,
   AgentModelInput,
   AgentModelResult,
+  AgentToolDefinition,
 } from '../types';
 
 const plannerReasoningSchema = z
@@ -71,21 +72,82 @@ const plannerResponseSchema =
 
 const MAX_TOOL_RESULT_CHARS = 2000;
 
+/**
+ * The most values an enum may spell out in the prompt.
+ *
+ * The largest today is `android.settings.open`'s 47 screens, about 570
+ * characters — worth every one of them, because a screen name is copied
+ * verbatim or the call fails. The cap exists so a future enum of hundreds
+ * cannot quietly eat the window; when it bites, the prompt says so rather
+ * than presenting a truncated list as if it were the whole set.
+ */
+const MAX_ENUM_VALUES = 60;
+
+/**
+ * How one argument is described to the model.
+ *
+ * An enum is rendered as its values, not as `string`. Dropping them was the
+ * same mistake as making the model transcribe a connectionId: it was asked for
+ * one of eight exact strings — `appDetails`, `appNotifications`, … — while the
+ * prompt said only `target: string`. It guessed, and MCP rejected the call
+ * with "target: Invalid option", a validation error for a choice it had no way
+ * to make. The values are in `inputSchema` already; this stops throwing them
+ * away.
+ */
+function describeArgument(
+  name: string,
+  property: unknown,
+  required: boolean,
+): string {
+  const spec = property as {
+    description?: string;
+    type?: string;
+    enum?: unknown[];
+  };
+
+  const values = Array.isArray(spec?.enum) ? spec.enum : null;
+  let type: string;
+  if (values && values.length > 0) {
+    const shown = values.slice(0, MAX_ENUM_VALUES).map((v) => JSON.stringify(v));
+    type =
+      values.length > MAX_ENUM_VALUES
+        ? `one of ${shown.join('|')} (and ${values.length - MAX_ENUM_VALUES} more not listed)`
+        : `one of ${shown.join('|')}`;
+  } else {
+    type = spec?.type ?? 'value';
+  }
+
+  /*
+   * Optional is marked; required is the default and costs nothing to say.
+   *
+   * `android.settings.open_app` was called with connectionId and target and
+   * no `packageName` at all. The schema's `required` list had it and the
+   * prompt rendered every argument the same way, so there was nothing to tell
+   * a model which of the four it could leave out. Most arguments are
+   * required, so marking the exceptions is the cheaper half — and the rule
+   * that makes an unmarked argument mean "required" is stated in the protocol
+   * section rather than left to be inferred.
+   */
+  const suffix = required ? '' : ' (optional)';
+  return `${name}: ${type}${suffix}${
+    spec?.description ? ` — ${spec.description}` : ''
+  }`;
+}
+
 function protocolInstructions(input: AgentModelInput): string {
   const toolLines = input.tools.map((tool) => {
     const properties =
       (tool.inputSchema.properties as Record<string, unknown> | undefined) ??
       {};
+    const required = new Set(
+      Array.isArray(tool.inputSchema.required)
+        ? (tool.inputSchema.required as string[])
+        : [],
+    );
     const args = Object.keys(properties)
-      .map((name) => {
-        const property = properties[name] as {
-          description?: string;
-          type?: string;
-        };
-        return `${name}: ${property?.type ?? 'value'}${
-          property?.description ? ` — ${property.description}` : ''
-        }`;
-      })
+      .map((name) =>
+        describeArgument(name, properties[name], required.has(name)),
+      )
       .join('; ');
     return `- ${tool.name}: ${tool.description} Arguments: { ${args} }`;
   });
@@ -103,14 +165,49 @@ function protocolInstructions(input: AgentModelInput): string {
       : '- none — no external service is connected';
 
   return [
-    'You are the action planner of a mobile assistant.',
+    /*
+     * The product is named here on purpose. Without it the planner treated
+     * "make this the digital assistant" as a question about themes and
+     * personas, because it had no way to know it *was* the thing being
+     * referred to.
+     */
+    'You are Creepy, the assistant inside the Creepy.IM app (package',
+    'im.creepy.app) on the user\'s Android phone. You are the app the user is',
+    'talking to right now, not a generic assistant inside someone else\'s',
+    'product.',
+    'When the user says "this", "this app", "you" or "Creepy" they mean this',
+    'app. "Make this the digital assistant" means make Creepy the phone\'s',
+    'assistant — it is not about a theme or a persona. Do not ask which',
+    'product they mean.',
     'Reply with EXACTLY ONE JSON object. No markdown fences, no commentary.',
     'To call one tool: {"type":"tool_call","tool":"<name>","arguments":{...}}',
     'To answer the user: {"type":"final","content":"<text>"}',
+    /*
+     * The worked example is here because the abstract shape was not enough.
+     * A local 2B twice produced `{"connectionId":"android-device", ...}` —
+     * `connectionId` hoisted to the top level, the envelope lost — after
+     * being told only to "always pass the connectionId", which says what to
+     * send and not where it goes. Showing one filled-in object costs a few
+     * tokens and removes the ambiguity.
+     */
+    'The object has exactly these top-level keys and no others. Example:',
+    /*
+     * The example carries a real connection id rather than a placeholder.
+     * A model that copies the example verbatim then copies something that
+     * works — and copying is what small models do. The observed failure was
+     * `"connectionId":"android"`, the namespace every tool name starts with,
+     * against an account actually called `android-device`.
+     */
+    `{"type":"tool_call","tool":"<name>","arguments":{"connectionId":"${
+      input.connections[0]?.id ?? '<id from the list below>'
+    }"}}`,
     'Rules:',
+    '- Every argument listed for a tool is required unless marked (optional).',
     '- Call one tool at a time, then wait for the tool result shown in the conversation.',
     '- Never invent tool names, connection ids or chat ids — use only values present in this prompt or in tool results.',
+    '- connectionId is a tool argument: put it INSIDE "arguments", never at the top level.',
     '- Always pass the connectionId of a connected account from the list below.',
+    '- "content" is plain text for the user to read. Never put JSON in it.',
     '- Actions with side effects (sending messages, creating events) require user approval; just call the tool, the app handles confirmation.',
     '- If the needed service is not connected, reply with {"type":"final"} saying so.',
     '- You may include an optional "reasoning" object describing the reasoning required for the current task.',
@@ -212,6 +309,126 @@ function extractJsonObject(text: string): string | null {
   return null;
 }
 
+/**
+ * The protocol's own vocabulary: the keys this planner asks the model to emit.
+ *
+ * Content carrying these is describing a tool call, not answering a user. No
+ * ordinary reply says `"tool":` or `"connectionId":` — those are words this
+ * file put in the model's mouth.
+ */
+const PROTOCOL_KEYS =
+  /"(?:type|tool|arguments|connectionId|content)"\s*:/u;
+
+/**
+ * A `final` whose whole content is a protocol fragment is a failure, not an
+ * answer.
+ *
+ * The schema only asks that `content` be a non-empty string, and a small model
+ * asked to emit JSON will emit JSON there too. Twice now this reached a user
+ * asking "Open Digital Assistant App setting and change it to Creepy":
+ *
+ *     {"connectionId":"android-device"}
+ *
+ *     {"connectionId":"android-device","arguments":{""assistant":{"type":
+ *      "tool_call","tool":"android.assistant.request_role","connectionId":
+ *      "android-device"}
+ *
+ * Both are the tool call the model meant to make, mangled and wrapped in a
+ * `final` the parser accepted. `android.assistant.request_role` was available
+ * throughout and was never called.
+ *
+ * The second one is why this cannot simply require valid JSON, which is what
+ * the first version of this check did. Debris is *usually* malformed — being
+ * malformed is often why the model ended up putting it in a string — so
+ * `JSON.parse` throwing is evidence for a fragment, not against one. What
+ * separates the two cases is vocabulary: valid JSON standing alone is treated
+ * as a fragment, and malformed JSON only when it also names the protocol's own
+ * keys.
+ *
+ * Text that merely quotes JSON is a legitimate answer — explaining a tool
+ * result is exactly what the assistant should be able to do — so the check
+ * still requires the content to be structural end to end.
+ *
+ * The residual cost is a user who genuinely asks for a bare JSON document
+ * containing one of those key names. They get the retry, and then an honest
+ * failure rather than a wrong answer.
+ */
+function isRawProtocolFragment(content: string): boolean {
+  const trimmed = content.trim();
+  const looksStructural =
+    (trimmed.startsWith('{') && trimmed.endsWith('}')) ||
+    (trimmed.startsWith('[') && trimmed.endsWith(']'));
+  if (!looksStructural) return false;
+
+  try {
+    const value: unknown = JSON.parse(trimmed);
+    if (typeof value === 'object' && value !== null) return true;
+  } catch {
+    // Malformed. Decided by vocabulary below rather than dismissed.
+  }
+
+  return PROTOCOL_KEYS.test(trimmed);
+}
+
+/**
+ * The tool names worth showing a model that just invented one.
+ *
+ * Not all of them. The failure this replaces pasted every registered tool into
+ * the chat, and the same list in a correction prompt would be no better for a
+ * 2B: the useful signal is which real names are close to the one it reached
+ * for. `android.settings.get_app_info` is one edit-distance idea away from
+ * `android.apps.get_info`, and seeing the two side by side is what makes the
+ * second attempt land.
+ *
+ * Ranked by shared name parts — namespace first, then the words after it —
+ * with anything from the same namespace preferred, since a model that got the
+ * namespace right usually has the right area and the wrong verb.
+ */
+function nearestToolNames(
+  invented: string,
+  tools: readonly AgentToolDefinition[],
+  limit = 8,
+): string[] {
+  const parts = new Set(invented.split(/[._]/u).filter(Boolean));
+  const namespace = invented.split('.')[0] ?? '';
+
+  return [...tools]
+    .map((tool) => {
+      const overlap = tool.name
+        .split(/[._]/u)
+        .filter((part: string) => parts.has(part)).length;
+      const sameNamespace = tool.name.startsWith(`${namespace}.`) ? 1 : 0;
+      return { name: tool.name, score: overlap + sameNamespace * 2 };
+    })
+    .sort((a, b) => b.score - a.score || a.name.localeCompare(b.name))
+    .slice(0, limit)
+    .map((entry) => entry.name);
+}
+
+function unknownToolHint(
+  invented: string,
+  tools: readonly AgentToolDefinition[],
+): string {
+  if (tools.length === 0) {
+    return (
+      `There is no tool named "${invented}", and no tools are available at ` +
+      'all. Reply with {"type":"final","content":"<plain sentence saying you ' +
+      'cannot do this>"}.'
+    );
+  }
+
+  return (
+    `There is no tool named "${invented}". Use one of these exact names, or ` +
+    'say you cannot do it:\n' +
+    nearestToolNames(invented, tools)
+      .map((name) => `- ${name}`)
+      .join('\n') +
+    '\nReply with EXACTLY ONE JSON object: ' +
+    '{"type":"tool_call","tool":"<exact name>","arguments":{...}} or ' +
+    '{"type":"final","content":"<plain sentence for the user>"}.'
+  );
+}
+
 function parsePlannerResponse(
   text: string,
 ): z.infer<typeof plannerResponseSchema> | null {
@@ -219,11 +436,20 @@ function parsePlannerResponse(
   const candidate = extractJsonObject(cleaned);
   if (!candidate) return null;
 
+  let parsed: z.infer<typeof plannerResponseSchema>;
   try {
-    return plannerResponseSchema.parse(JSON.parse(candidate));
+    parsed = plannerResponseSchema.parse(JSON.parse(candidate));
   } catch {
     return null;
   }
+
+  // Treated as unparseable, so the caller's correction retry gets a chance
+  // and, failing that, the honest degradation message is what the user sees.
+  if (parsed.type === 'final' && isRawProtocolFragment(parsed.content)) {
+    return null;
+  }
+
+  return parsed;
 }
 
 export function createStructuredPlanner(engine: LlmEngine): AgentModel {
@@ -260,10 +486,40 @@ export function createStructuredPlanner(engine: LlmEngine): AgentModel {
         },
       ];
 
+      const PROTOCOL_HINT =
+        'That was not valid protocol output. Reply with EXACTLY ONE ' +
+        'JSON object having a top-level "type". Either\n' +
+        '{"type":"tool_call","tool":"<one of the tool names above>",' +
+        '"arguments":{"connectionId":"<id>", ...}}\n' +
+        'or\n' +
+        '{"type":"final","content":"<plain sentence for the user>"}\n' +
+        'Do not put JSON inside "content". Do not put "connectionId" ' +
+        'at the top level. No other text.';
+
       let completion = await generateOnce(basePrompts, input.signal);
       let parsed = parsePlannerResponse(completion);
 
-      if (!parsed && !input.signal?.aborted) {
+      /*
+       * An invented tool name is a protocol failure and gets the same retry as
+       * malformed output, rather than ending the run.
+       *
+       * It used to return a `final`, so "Turn off Gemini app" was answered
+       * with "I wanted to use a tool named android.settings.get_app_info, but
+       * it is not available. Available tools: system.health,
+       * calendar.list_events, …" — the whole registry pasted into a chat
+       * bubble. That text was written for the model and handed to the user
+       * instead, and the model, which could have picked the real
+       * `android.apps.get_info` on a second look, never got one.
+       */
+      const requestedTool =
+        parsed?.type === 'tool_call' ? parsed.tool : null;
+      const unknownTool =
+        requestedTool !== null &&
+        !input.tools.some((tool) => tool.name === requestedTool)
+          ? requestedTool
+          : null;
+
+      if ((!parsed || unknownTool) && !input.signal?.aborted) {
         // One strict retry with a correction hint; then give up gracefully.
         const retryPrompts: EnginePrompt[] = [
           ...basePrompts,
@@ -273,10 +529,16 @@ export function createStructuredPlanner(engine: LlmEngine): AgentModel {
           },
           {
             role: 'user',
-            content:
-              'That was not valid protocol output. Reply with EXACTLY ONE ' +
-              'JSON object: {"type":"tool_call","tool":...,"arguments":{...}} ' +
-              'or {"type":"final","content":"..."}.',
+            /*
+             * Concrete, because the generic version of this hint did not
+             * recover a single one of the failures seen on device. The model
+             * that lost the envelope needs to be shown the envelope, and the
+             * model that invented a name needs the names that nearly match it
+             * rather than all of them.
+             */
+            content: unknownTool
+              ? unknownToolHint(unknownTool, input.tools)
+              : PROTOCOL_HINT,
           },
         ];
         completion = await generateOnce(retryPrompts, input.signal);
@@ -284,13 +546,25 @@ export function createStructuredPlanner(engine: LlmEngine): AgentModel {
       }
 
       if (!parsed) {
-        // Never fabricate a tool call from prose. The raw completion (if any
-        // readable text exists) becomes the answer; otherwise admit failure.
-        const fallback = completion.trim();
+        /*
+         * Never fabricate a tool call from prose. Whatever readable text the
+         * model produced becomes the answer; otherwise admit failure.
+         *
+         * "Readable" excludes protocol leftovers. A completion like
+         * `Sure. {"connectionId":"android-device"}` has a real sentence and a
+         * fragment of a tool call stuck to it, and only the sentence is for
+         * the user. Nothing that parses reaches here, so trimming a trailing
+         * JSON object can only remove debris.
+         */
+        const fallback = completion
+          .trim()
+          .replace(/\s*(\{[\s\S]*\}|\[[\s\S]*\])\s*$/u, '')
+          .trim();
+
         return {
           kind: 'final',
           text:
-            fallback.length > 0 && !fallback.startsWith('{')
+            fallback.length > 0
               ? fallback
               : 'I could not form a valid plan for that request. Please rephrase.',
         };
@@ -302,15 +576,18 @@ export function createStructuredPlanner(engine: LlmEngine): AgentModel {
 
       const known = input.tools.some((tool) => tool.name === parsed.tool);
       if (!known) {
+        /*
+         * Still invented after the retry. What the user gets is a sentence
+         * about their request, not a catalogue: the tool list is this file's
+         * problem and means nothing to them.
+         */
         return {
           kind: 'final',
-          text: `I wanted to use a tool named "${parsed.tool}", but it is not available. ${
+          text:
             input.tools.length === 0
-              ? 'No external services are connected right now.'
-              : 'Available tools: ' +
-                input.tools.map((tool) => tool.name).join(', ') +
-                '.'
-          }`,
+              ? 'I cannot do that yet — nothing is connected for me to act ' +
+                'through. Connect an account in Settings and ask again.'
+              : 'I do not have a way to do that on this device.',
         };
       }
 

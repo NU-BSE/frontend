@@ -24,15 +24,17 @@ import {
 import { resolvePricing } from "@/features/subscription/pricing";
 import { shouldShowPaywall } from "@/features/onboarding/subscriptionDecision";
 import { getMySubscription, verifyPlayPurchase } from "@/api/client";
+import { getInstalledModel, verifyInstalled } from "@/ai/modelInstall";
 import { getMemoryProfile, setOnboardingComplete } from "@/storage/prefs";
 import { gutter, palette, radius, spacing } from "@/theme/tokens";
 
 /**
  * The paywall, shown only after the first real Creepy task and the feedback
- * that follows it — never before. Skipping is deliberately available and
- * plainly worded, and its copy is honest about what actually runs on this
- * phone: it says "keep using Creepy on this phone" only when the on-device
- * engine was really chosen and is really available, and otherwise says Cloud.
+ * that follows it — never before. Skipping is deliberately available, and its
+ * copy is honest about what actually runs on this phone: it promises "keep
+ * using Creepy on this phone" only when on-device inference was chosen AND the
+ * model is really downloaded. Otherwise it says Cloud — the on-device engine
+ * would only be the stub until the weights are there.
  */
 export default function OnboardingSubscription() {
   const router = useRouter();
@@ -50,7 +52,15 @@ export default function OnboardingSubscription() {
     queryFn: getMemoryProfile,
     staleTime: Infinity,
   });
-  const onDevice = memoryProfile !== "cloud";
+  const { data: modelReady } = useQuery({
+    queryKey: ["on-device-model-ready"],
+    queryFn: async () => {
+      const installed = await getInstalledModel();
+      return installed ? verifyInstalled(installed) : false;
+    },
+    staleTime: Infinity,
+  });
+  const onDevice = memoryProfile !== "cloud" && modelReady === true;
 
   const paywallViewed = useRef(false);
   useEffect(() => {

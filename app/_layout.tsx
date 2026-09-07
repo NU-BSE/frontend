@@ -13,6 +13,8 @@ import { SafeAreaProvider } from "react-native-safe-area-context";
 import { AiProvider } from "@/ai/AiProvider";
 import { AgentProvider } from "@/agent/AgentProvider";
 import { AgentChatProvider } from "@/agent/AgentChatProvider";
+import { loadModelBundle } from "@/prediction/bundle";
+import { useUsageNotifications } from "@/prediction/useUsageNotifications";
 import { AuthRouteGuard } from "@/auth/AuthRouteGuard";
 import { registerAppMcpDependencies } from "@/mcp/app-dependencies";
 import { palette } from "@/theme/tokens";
@@ -62,6 +64,7 @@ export default function RootLayout() {
             <AiProvider>
               <AgentProvider>
                 <AgentChatProvider>
+                <UsageNotifications />
                 <StatusBar style="dark" />
                 <Stack
                   screenOptions={{
@@ -89,4 +92,16 @@ export default function RootLayout() {
       </SafeAreaProvider>
     </GestureHandlerRootView>
   );
+}
+
+/**
+ * Mounts the usage-driven suggestion notification.
+ *
+ * A component rather than a hook call in RootLayout so it sits inside the
+ * providers and re-evaluates with them, and renders nothing — the effect is a
+ * notification, not UI.
+ */
+function UsageNotifications() {
+  useUsageNotifications({ bundle: loadModelBundle() });
+  return null;
 }

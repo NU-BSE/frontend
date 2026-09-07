@@ -6,10 +6,12 @@ import { ActivityIndicator, Pressable, ScrollView, StyleSheet, View } from 'reac
 import { track } from '@/analytics';
 import { useAi } from '@/ai/AiProvider';
 import {
-  getLocalModelReason,
-  getLocalModelState,
-  getRecommendedLocalProfile,
-} from '@/ai/localModelState';
+  getModelOptionSupport,
+  getRecommendedMemoryProfile,
+} from '@/ai/deviceModelSelection';
+import { getLocalModelReason, getLocalModelState } from '@/ai/localModelState';
+import { useModelInstall } from '@/features/model/useModelInstall';
+import { Button } from '@/components/Button';
 import { Icon } from '@/components/Icon';
 import { OnboardingNavBar } from '@/components/OnboardingNavBar';
 import { OnboardingProgress, progressFor } from '@/components/OnboardingProgress';
@@ -26,14 +28,20 @@ import { gutter, palette, radius, spacing } from '@/theme/tokens';
 
 type AiMode = 'local' | 'cloud';
 
+const formatBytes = (bytes: number): string => {
+  if (bytes >= 1024 ** 3) return `${(bytes / 1024 ** 3).toFixed(1)} GB`;
+  if (bytes >= 1024 ** 2) return `${Math.round(bytes / 1024 ** 2)} MB`;
+  return `${Math.round(bytes / 1024)} KB`;
+};
+
 /**
  * Where should Creepy think?
  *
- * Two big choices — on this phone or cloud — with the technical detail that
- * used to clutter this screen (ABI, core count, StrongBox, integrity flags)
- * moved out of the main flow. Local availability is shown honestly: a device
- * that cannot run local inference, or that has no model weights on it, cannot
- * pick "On this phone" and sees why.
+ * Two big choices — on this phone or cloud — shown honestly. "On this phone"
+ * is selectable only when it can really run: the device must support local
+ * inference AND the weights must be here (or downloadable). A subscription
+ * gate on the download is stated plainly, and the user is never led to believe
+ * local inference is running when it is not.
  */
 export default function OnboardingMemory() {
   const router = useRouter();
@@ -48,14 +56,22 @@ export default function OnboardingMemory() {
     staleTime: Infinity,
   });
 
-  const localState = useMemo(() => getLocalModelState(assessment ?? null), [assessment]);
-  const localReason = useMemo(() => getLocalModelReason(assessment ?? null), [assessment]);
-  const recommendedLocal = useMemo(
-    () => getRecommendedLocalProfile(assessment ?? null),
+  const { state: install, start, stop } = useModelInstall('on-device');
+
+  const support = useMemo(
+    () => getModelOptionSupport(assessment ?? null),
     [assessment],
   );
+  const deviceSupported =
+    support.find((option) => option.profile === 'on-device')?.supported ?? false;
+  const localReason = useMemo(
+    () => getLocalModelReason(assessment ?? null),
+    [assessment],
+  );
+  const installed = install.phase === 'installed';
+  const localState = getLocalModelState(assessment ?? null, installed);
 
-  // Cloud is the safe default unless this device is genuinely capable.
+  // Cloud is the safe default unless this device can actually run on-device.
   useEffect(() => {
     if (!isPending && !initializedChoice.current) {
       initializedChoice.current = true;
@@ -63,39 +79,60 @@ export default function OnboardingMemory() {
     }
   }, [isPending, localState]);
 
-  const localAvailable = localState === 'available' && recommendedLocal !== null;
+  const downloadable =
+    install.downloadAllowed && install.bundle != null;
+  const subscriptionBlocked = install.blocker.kind === 'subscription';
+  const offlineMessage =
+    install.blocker.kind === 'offline' ? install.blocker.message : null;
 
-  const profileForChoice = useCallback((): MemoryProfile => {
-    if (choice === 'cloud') return 'cloud';
-    return recommendedLocal ?? 'balanced';
-  }, [choice, recommendedLocal]);
+  const localCardEnabled =
+    deviceSupported && (installed || downloadable);
 
   const finish = useCallback(async () => {
     if (saving) return;
+    if (choice === 'local' && !installed) return;
     setSaving(true);
 
-    const profile = profileForChoice();
+    const profile: MemoryProfile = choice === 'local' ? 'on-device' : 'cloud';
     await setMemoryProfile(profile);
     await setAiModeDone();
     void activateSelectedEngine(profile, assessment ?? null);
 
-    track('onboarding_ai_mode_selected', {
-      ai_mode: choice === 'cloud' ? 'cloud' : 'local',
-    });
+    track('onboarding_ai_mode_selected', { ai_mode: choice });
 
     setSaving(false);
     router.push('/onboarding/try');
-  }, [activateSelectedEngine, assessment, choice, profileForChoice, router, saving]);
+  }, [
+    activateSelectedEngine,
+    assessment,
+    choice,
+    installed,
+    router,
+    saving,
+  ]);
 
   const localSupportLine = isPending
     ? 'Checking this device…'
     : localState === 'available'
       ? 'Recommended for this device'
-      : localState === 'download_required'
-        ? "The local model isn't downloaded. Download the local model to use Creepy on this phone."
-        : 'Not available on this device';
+      : localState === 'download_required' && subscriptionBlocked
+        ? 'An active subscription is required to download the model.'
+        : localState === 'download_required' && install.phase === 'downloading'
+          ? 'Downloading…'
+          : localState === 'download_required'
+            ? 'Download the model to use Creepy on this phone.'
+            : 'Not available on this device';
 
-  const localTone = localAvailable ? 'brand' : 'danger';
+  const localTone =
+    localState === 'available'
+      ? 'brand'
+      : localState === 'download_required'
+        ? 'secondary'
+        : 'danger';
+
+  const percent = install.progress
+    ? Math.round(install.progress.fraction * 100)
+    : 0;
 
   return (
     <Screen>
@@ -128,14 +165,14 @@ export default function OnboardingMemory() {
         <View style={styles.cards}>
           <Pressable
             accessibilityRole="radio"
-            accessibilityState={{ selected: choice === 'local', disabled: !localAvailable }}
+            accessibilityState={{ selected: choice === 'local', disabled: !localCardEnabled }}
             accessibilityLabel="On this phone. AI runs directly on your Android."
-            disabled={!localAvailable || saving}
+            disabled={!localCardEnabled || saving}
             onPress={() => setChoice('local')}
             style={({ pressed }) => [
               styles.card,
               choice === 'local' && styles.cardActive,
-              !localAvailable && styles.cardDisabled,
+              !localCardEnabled && styles.cardDisabled,
               pressed && styles.pressed,
             ]}
           >
@@ -149,11 +186,59 @@ export default function OnboardingMemory() {
               AI runs directly on your Android. No AI request needs to leave
               your phone.
             </Text>
-            {!localAvailable && localReason ? (
+            {!deviceSupported && localReason ? (
               <Text variant="bodySmall" tone="danger">
                 {localReason}
               </Text>
             ) : null}
+            {deviceSupported && !installed && subscriptionBlocked ? (
+              <Text variant="bodySmall" tone="secondary">
+                {install.bundle
+                  ? `${formatBytes(install.bundle.totalBytes)} to download.`
+                  : null}{' '}
+                You&apos;ll be able to subscribe on the next screen.
+              </Text>
+            ) : null}
+            {offlineMessage ? (
+              <Text variant="bodySmall" tone="secondary">
+                {offlineMessage}
+              </Text>
+            ) : null}
+
+            {deviceSupported && !installed && downloadable && choice === 'local' ? (
+              install.phase === 'downloading' ? (
+                <View style={styles.downloadBox}>
+                  <View style={styles.downloadRow}>
+                    <Text variant="bodySmall" tone="secondary">
+                      {install.progress
+                        ? `${formatBytes(install.progress.receivedBytes)} of ${formatBytes(
+                            install.progress.totalBytes,
+                          )}`
+                        : 'Downloading…'}
+                    </Text>
+                    <Text variant="bodySmall" tone="secondary">
+                      {percent}%
+                    </Text>
+                  </View>
+                  <View style={styles.progressTrack}>
+                    <View style={[styles.progressFill, { width: `${percent}%` }]} />
+                  </View>
+                  <Button label="Stop download" variant="ghost" onPress={stop} />
+                </View>
+              ) : (
+                <Button
+                  label={`Download (${formatBytes(install.bundle!.totalBytes)})`}
+                  onPress={start}
+                />
+              )
+            ) : null}
+
+            {install.phase === 'failed' ? (
+              <Text variant="bodySmall" tone="danger">
+                The download failed. Check your connection and try again.
+              </Text>
+            ) : null}
+
             <View style={styles.cardFooter}>
               <Text variant="label" tone={localTone}>
                 {localSupportLine}
@@ -206,7 +291,9 @@ export default function OnboardingMemory() {
         onBack={() => router.back()}
         onAdvance={() => void finish()}
         advanceLabel={saving ? 'Saving' : 'Continue'}
-        advanceDisabled={saving || isPending}
+        advanceDisabled={
+          saving || isPending || (choice === 'local' && !installed)
+        }
       />
     </Screen>
   );
@@ -262,6 +349,22 @@ const styles = StyleSheet.create({
     borderRadius: 999,
     borderWidth: 1.5,
     borderColor: palette.border,
+  },
+  downloadBox: { gap: spacing.md },
+  downloadRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+  },
+  progressTrack: {
+    height: 6,
+    borderRadius: radius.pill,
+    backgroundColor: palette.neutralWash,
+    overflow: 'hidden',
+  },
+  progressFill: {
+    height: '100%',
+    borderRadius: radius.pill,
+    backgroundColor: palette.brand,
   },
   pressed: { opacity: 0.85 },
 });

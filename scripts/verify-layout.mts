@@ -21,7 +21,7 @@ import Yoga, {
 
 import { chunkRows } from '../src/features/scenarios/chunkRows.js';
 import { ONBOARDING_SCENARIOS } from '../src/features/scenarios/registry.js';
-import { CONNECTOR_CATALOG } from '../src/features/connections/catalog.js';
+import { buildConnectorCatalog } from '../src/features/connections/catalog.js';
 
 const GUTTER = 24;
 const GAP = 16;
@@ -244,10 +244,32 @@ const CONNECTOR_MIN_HEIGHT = 104;
  * Read from the catalogue, not restated. Hardcoded, this measured a synthetic
  * fourteen-cell grid and kept passing while the real screen rendered a
  * different number — the same drift already fixed for the category grid.
+ *
+ * Both shapes the screen can render are measured. The custom-server tile
+ * appears only when a resolver host is configured, which takes the grid from
+ * one full row to two — and the second shape is the riskier one, because its
+ * final row is a single real cell beside two spacers.
  */
-const CONNECTOR_COUNT = CONNECTOR_CATALOG.length;
+/*
+ * Only the tiles are laid out three across. A full-width entry gets an
+ * unpadded row of its own, checked separately below — counting it here would
+ * assert the very padding that stops it spanning the width.
+ */
+const CONNECTOR_SHAPES = [
+  {
+    label: 'no resolver host',
+    count: buildConnectorCatalog({ customServers: false }).filter((e) => !e.fullWidth).length,
+  },
+  {
+    label: 'with custom servers',
+    count: buildConnectorCatalog({ customServers: true }).filter((e) => !e.fullWidth).length,
+  },
+];
 
-console.log('\nyoga layout — connectors grid, three across:');
+for (const shape of CONNECTOR_SHAPES) {
+const CONNECTOR_COUNT = shape.count;
+
+console.log(`\nyoga layout — connectors grid, three across (${shape.label}, ${CONNECTOR_COUNT} tiles):`);
 
 for (const windowWidth of [320, 360, 390, 393, 411, 412, 480, 600]) {
   const frames = layoutGrid(
@@ -293,6 +315,25 @@ for (const windowWidth of [320, 360, 390, 393, 411, 412, 480, 600]) {
   assert(
     Math.abs(lastRow[0]!.width - a!.width) <= 1.01,
     `${windowWidth}pt: padded final row keeps cell width (${lastRow[0]!.width.toFixed(1)}pt)`,
+  );
+}
+}
+
+
+/*
+ * The full-width row. A single cell in an unpadded row must reach the whole
+ * content box: if a spacer ever crept back in, the tile would sit at a third
+ * of the width and look like a connector that failed to load.
+ */
+console.log('\nyoga layout — full-width connector row:');
+
+for (const windowWidth of [320, 360, 390, 393, 411, 412, 480, 600]) {
+  const [row] = layoutGrid(windowWidth, 1, 1, CONNECTOR_GAP, CONNECTOR_MIN_HEIGHT);
+  const cell = row![0]!;
+  const contentWidth = windowWidth - GUTTER * 2;
+  assert(
+    Math.abs(cell.width - contentWidth) <= 0.01,
+    `${windowWidth}pt: the row spans the full ${contentWidth}pt (got ${cell.width.toFixed(1)}pt)`,
   );
 }
 
@@ -413,5 +454,286 @@ assert(
   beside < stacked,
   `beside-the-text is shorter than stacked (${beside.toFixed(0)}pt vs ${stacked}pt) — three of these fit without scrolling`,
 );
+
+/*
+ * The chat composer.
+ *
+ * The claims are positional, so they are measured rather than read off the
+ * styles: the clip must sit on the FIRST line of the field and at its right
+ * edge, and the two controls flanking it must be circles, not the rounded
+ * rectangles they replaced.
+ */
+console.log('\ncomposer:');
+
+const TOUCH = 48;
+const BODY_LINE_HEIGHT = 20;
+const FIRST_LINE_PADDING = (TOUCH - BODY_LINE_HEIGHT) / 2;
+const CLIP_WIDTH = 36;
+const ROW_GAP_C = 8;
+
+function layoutComposer(windowWidth: number, lines: number) {
+  const root = Yoga.Node.create();
+  root.setWidth(windowWidth);
+  root.setPadding(Edge.Horizontal, 16);
+
+  const row = Yoga.Node.create();
+  row.setFlexDirection(FlexDirection.Row);
+  row.setAlignItems(Align.FlexEnd);
+  row.setGap(Gutter.All, ROW_GAP_C);
+  root.insertChild(row, 0);
+
+  const mic = Yoga.Node.create();
+  mic.setWidth(TOUCH);
+  mic.setHeight(TOUCH);
+  row.insertChild(mic, 0);
+
+  const field = Yoga.Node.create();
+  field.setFlexGrow(1);
+  field.setFlexShrink(1);
+  field.setFlexBasis(0);
+  field.setMinWidth(0);
+  field.setFlexDirection(FlexDirection.Row);
+  // Pinned to the top: this is what keeps the clip on the first line.
+  field.setAlignItems(Align.FlexStart);
+  field.setMinHeight(TOUCH);
+  field.setPadding(Edge.Left, 12);
+  row.insertChild(field, 1);
+
+  const input = Yoga.Node.create();
+  input.setFlexGrow(1);
+  input.setFlexShrink(1);
+  input.setFlexBasis(0);
+  input.setMinWidth(0);
+  input.setPadding(Edge.Vertical, FIRST_LINE_PADDING);
+  input.setHeight(FIRST_LINE_PADDING * 2 + BODY_LINE_HEIGHT * lines);
+  field.insertChild(input, 0);
+
+  const clip = Yoga.Node.create();
+  clip.setWidth(CLIP_WIDTH);
+  clip.setHeight(TOUCH);
+  field.insertChild(clip, 1);
+
+  const send = Yoga.Node.create();
+  send.setWidth(TOUCH);
+  send.setHeight(TOUCH);
+  row.insertChild(send, 2);
+
+  root.calculateLayout(windowWidth, undefined, Direction.LTR);
+  const frameOf = (node: ReturnType<typeof Yoga.Node.create>): Frame => {
+    const c = node.getComputedLayout();
+    return { left: c.left, top: c.top, width: c.width, height: c.height };
+  };
+  return {
+    row: frameOf(row),
+    mic: frameOf(mic),
+    field: frameOf(field),
+    input: frameOf(input),
+    clip: frameOf(clip),
+    send: frameOf(send),
+  };
+}
+
+for (const windowWidth of [360, 390, 412]) {
+  const one = layoutComposer(windowWidth, 1);
+
+  assert(
+    one.field.height === TOUCH,
+    `${windowWidth}pt: a single-line field is exactly one touch target tall (${one.field.height})`,
+  );
+  // The clip's centre and the first line's centre must coincide, or the glyph
+  // sits visibly above or below the text it belongs to.
+  const firstLineCentre = one.input.top + FIRST_LINE_PADDING + BODY_LINE_HEIGHT / 2;
+  const clipCentre = one.clip.top + one.clip.height / 2;
+  assert(
+    Math.abs(firstLineCentre - clipCentre) < 0.01,
+    `${windowWidth}pt: the clip is centred on the first line (${clipCentre} vs ${firstLineCentre})`,
+  );
+  assert(
+    one.clip.left >= one.input.left + one.input.width - 0.01,
+    `${windowWidth}pt: the clip sits to the right of the text`,
+  );
+  assert(
+    one.mic.left < one.field.left && one.send.left > one.field.left + one.field.width - 0.01,
+    `${windowWidth}pt: the field sits between the two controls`,
+  );
+  /*
+   * The controls carry no background, so what matters is that the tappable
+   * box stays a full touch target — the icon inside is only ~24pt, and
+   * letting the box shrink to the glyph would make them hard to hit.
+   */
+  assert(
+    one.mic.width === TOUCH && one.mic.height === TOUCH,
+    `${windowWidth}pt: the mic keeps a full touch target behind its icon`,
+  );
+  assert(
+    one.send.width === TOUCH && one.send.height === TOUCH,
+    `${windowWidth}pt: the send control keeps a full touch target behind its icon`,
+  );
+
+  // The clip must not drift down as the field grows.
+  const four = layoutComposer(windowWidth, 4);
+  const grownClipCentre = four.clip.top + four.clip.height / 2;
+  assert(
+    Math.abs(grownClipCentre - clipCentre) < 0.01,
+    `${windowWidth}pt: the clip stays on the first line when the field grows`,
+  );
+  assert(
+    four.field.height > one.field.height,
+    `${windowWidth}pt: the field does grow with the text`,
+  );
+}
+
+console.log('\nchat header:');
+
+/*
+ * The chat header is a row: a text column (title + status line, and sometimes
+ * a "Retry tools" button) and, at the right, "Close".
+ *
+ * It shipped with the text column unsized — no `flex`, no `flexShrink` — so
+ * Yoga sized it by content. A one-word status line ("ON THIS DEVICE") fits and
+ * the bug is invisible. An engine failure does not: "On-device inference
+ * unavailable: the prompt is larger than the model's context window — too many
+ * tools or too long a conversation for on-device inference" wraps to four
+ * lines, and the column claiming that intrinsic width pushed "Close" past the
+ * right edge of the screen. `alignItems: 'center'` then floated the half-
+ * visible button down the middle of the block.
+ *
+ * Both symptoms are geometry, so both are checkable here. The long line is the
+ * real string from onDeviceEngine's describeCompletionFailure, uppercased as
+ * the `tag` variant renders it.
+ */
+const HEADER_GUTTER = 16; // gutter.home
+const HEADER_GAP = 12; // spacing.md — headerActions' paddingLeft
+const HEADLINE_LINE_HEIGHT = 26; // typography.headline
+const TAG_LINE_HEIGHT = 14; // typography.tag
+const HEADER_TEXT_GAP = 4; // spacing.xs
+const CLOSE_WIDTH = 44; // "Close" at typography.label
+const CLOSE_HEIGHT = 20; // typography.label lineHeight
+
+function layoutChatHeader(
+  windowWidth: number,
+  statusLines: number,
+  variant: 'fixed' | 'broken' = 'fixed',
+) {
+  const broken = variant === 'broken';
+
+  const root = Yoga.Node.create();
+  root.setWidth(windowWidth);
+
+  const header = Yoga.Node.create();
+  header.setFlexDirection(FlexDirection.Row);
+  header.setAlignItems(broken ? Align.Center : Align.FlexStart);
+  header.setJustifyContent(Justify.SpaceBetween);
+  header.setPadding(Edge.Horizontal, HEADER_GUTTER);
+  root.insertChild(header, 0);
+
+  const text = Yoga.Node.create();
+  if (!broken) {
+    // The whole fix: an unsized column takes its intrinsic width.
+    text.setFlexGrow(1);
+    text.setFlexShrink(1);
+    text.setFlexBasis(0);
+    text.setMinWidth(0);
+  }
+  text.setGap(Gutter.All, HEADER_TEXT_GAP);
+  header.insertChild(text, 0);
+
+  const title = Yoga.Node.create();
+  title.setHeight(HEADLINE_LINE_HEIGHT);
+  // A title is a single line and never widens the column past what is offered.
+  title.setWidth(120);
+  text.insertChild(title, 0);
+
+  const status = Yoga.Node.create();
+  status.setHeight(TAG_LINE_HEIGHT * statusLines);
+  // What an unsized column measures: the status line's *unwrapped* width. Four
+  // wrapped lines at 360pt is roughly 1,100pt of text laid end to end.
+  if (broken) status.setWidth(TAG_LINE_HEIGHT * statusLines * 20);
+  text.insertChild(status, 1);
+
+  const actions = Yoga.Node.create();
+  actions.setFlexDirection(FlexDirection.Row);
+  actions.setAlignItems(Align.Center);
+  if (!broken) {
+    actions.setFlexShrink(0);
+    actions.setPadding(Edge.Left, HEADER_GAP);
+  }
+  header.insertChild(actions, 1);
+
+  const close = Yoga.Node.create();
+  close.setWidth(CLOSE_WIDTH);
+  close.setHeight(CLOSE_HEIGHT);
+  actions.insertChild(close, 0);
+
+  header.calculateLayout(windowWidth, undefined, Direction.LTR);
+  const frameOf = (node: ReturnType<typeof Yoga.Node.create>): Frame => {
+    const c = node.getComputedLayout();
+    return { left: c.left, top: c.top, width: c.width, height: c.height };
+  };
+  // Frames are relative to the header, whose own left edge is 0.
+  return {
+    header: frameOf(header),
+    text: frameOf(text),
+    title: frameOf(title),
+    actions: frameOf(actions),
+    close: frameOf(close),
+  };
+}
+
+for (const windowWidth of [360, 390, 412]) {
+  // Four lines is what the on-device context-window failure wraps to at 360pt.
+  for (const statusLines of [1, 4]) {
+    const frames = layoutChatHeader(windowWidth, statusLines);
+    const closeRight =
+      frames.actions.left + frames.close.left + frames.close.width;
+
+    assert(
+      closeRight <= windowWidth - HEADER_GUTTER + 0.01,
+      `${windowWidth}pt/${statusLines}-line status: Close stays inside the gutter (right edge ${closeRight})`,
+    );
+    assert(
+      frames.close.width === CLOSE_WIDTH,
+      `${windowWidth}pt/${statusLines}-line status: Close is not shrunk to fit (${frames.close.width})`,
+    );
+    assert(
+      frames.actions.left >= frames.text.left + frames.text.width - 0.01,
+      `${windowWidth}pt/${statusLines}-line status: Close does not overlap the text column`,
+    );
+  }
+
+  // Vertical: the button belongs to the title, not to the middle of a tall
+  // error block. Their centres coincide however long the status line grows.
+  const tall = layoutChatHeader(windowWidth, 4);
+  const titleCentre = tall.text.top + tall.title.top + tall.title.height / 2;
+  const closeCentre = tall.actions.top + tall.close.top + tall.close.height / 2;
+  assert(
+    Math.abs(titleCentre - closeCentre) <= HEADLINE_LINE_HEIGHT / 2,
+    `${windowWidth}pt: Close sits level with the title, not the middle of the error (${closeCentre} vs ${titleCentre})`,
+  );
+}
+
+console.log('\ncontrol — the header that shipped broken:');
+{
+  const brokenFrames = layoutChatHeader(360, 4, 'broken');
+  const closeRight =
+    brokenFrames.actions.left +
+    brokenFrames.close.left +
+    brokenFrames.close.width;
+  assert(
+    closeRight > 360 - HEADER_GUTTER,
+    `an unsized text column really does push Close past the screen edge (right edge ${closeRight.toFixed(0)} of 360)`,
+  );
+
+  const titleCentre =
+    brokenFrames.text.top + brokenFrames.title.top + brokenFrames.title.height / 2;
+  const closeCentre =
+    brokenFrames.actions.top +
+    brokenFrames.close.top +
+    brokenFrames.close.height / 2;
+  assert(
+    closeCentre - titleCentre > HEADLINE_LINE_HEIGHT / 2,
+    `centre alignment really does drop Close below the title (${closeCentre} vs ${titleCentre})`,
+  );
+}
 
 console.log('\nlayout verified.');

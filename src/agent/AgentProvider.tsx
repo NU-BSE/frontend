@@ -2,7 +2,8 @@ import React, { createContext, useContext, useMemo } from 'react';
 
 import { useAi } from '@/ai/AiProvider';
 import type { LlmCapabilities } from '@/ai/types';
-import { baseUrl, getToken } from '@/api/client';
+import { baseUrl, getToken, refreshAccessTokenOnce } from '@/api/client';
+import { useLocalDeviceConnectionSync } from '@/connections/android/useLocalDeviceConnectionSync';
 import { createDeterministicPlanner } from './models/deterministicPlanner';
 import { createStructuredPlanner } from './models/structuredPlanner';
 import { createRemoteAgentModel } from './models/remoteAgentModel';
@@ -38,6 +39,10 @@ const TEXT_ONLY_CAPABILITIES: LlmCapabilities = {
  *   response Zod-validated before MCP).
  */
 export function AgentProvider({ children }: { children: React.ReactNode }) {
+  // Permissions granted on a system screen must take effect on return, and
+  // the return usually lands back in chat rather than on the settings screen.
+  useLocalDeviceConnectionSync();
+
   const { engine, origin } = useAi();
 
   const value = useMemo<AgentContextValue>(() => {
@@ -48,6 +53,7 @@ export function AgentProvider({ children }: { children: React.ReactNode }) {
       const model = createRemoteAgentModel({
         baseUrl: baseUrl(),
         getAccessToken: () => getToken(),
+        refreshAccessToken: () => refreshAccessTokenOnce(),
       });
 
       return {

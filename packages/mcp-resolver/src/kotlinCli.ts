@@ -61,7 +61,46 @@ interface CliErrorEnvelope {
  *  4. `resolver-cli` on PATH.
  */
 export function locateCli(): CliInvocation | null {
-  return listCliCandidates()[0] ?? null;
+  /*
+   * Only a candidate that actually exists counts. `listCliCandidates()` always
+   * appends the bare PATH candidate as a last resort, so taking its first
+   * entry made this function incapable of returning null: callers that use it
+   * as an availability probe — `verify:resolver` skips on null, and the README
+   * promises that skip — instead ran on and died with a spawn ENOENT on every
+   * machine without a JVM build. The PATH entry has to be probed rather than
+   * assumed.
+   */
+  for (const candidate of listCliCandidates()) {
+    if (isRunnable(candidate)) return candidate;
+  }
+  return null;
+}
+
+/**
+ * Whether a candidate names something that exists.
+ *
+ * Absolute and relative paths are checked directly; a bare command name is
+ * looked up across PATH. This is a file-existence check, not an execution
+ * check — a present-but-broken binary still fails at spawn, which is the right
+ * place for that to surface with the process's own error.
+ */
+function isRunnable(candidate: CliInvocation): boolean {
+  const { command } = candidate;
+  if (command.includes('/') || command.includes('\\')) return existsSync(command);
+
+  // `java` and `wsl` come from candidates whose jar was already confirmed to
+  // exist, so the interpreter itself is what is looked up here.
+  const isWindows = process.platform === 'win32';
+  const pathValue = process.env.PATH ?? process.env.Path ?? '';
+  const directories = pathValue.split(isWindows ? ';' : ':').filter(Boolean);
+  const suffixes = isWindows ? ['', '.exe', '.cmd', '.bat'] : [''];
+
+  for (const directory of directories) {
+    for (const suffix of suffixes) {
+      if (existsSync(path.join(directory, command + suffix))) return true;
+    }
+  }
+  return false;
 }
 
 /**

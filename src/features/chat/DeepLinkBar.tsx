@@ -63,7 +63,9 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: spacing.xs,
-    backgroundColor: palette.brandWash,
+    // Opaque, not `brandWash`: this button has elevation, and Android draws an
+    // elevation shadow through a translucent fill. See palette.brandChip.
+    backgroundColor: palette.brandChip,
     borderRadius: radius.lg,
     paddingHorizontal: spacing.md,
     paddingVertical: spacing.sm,

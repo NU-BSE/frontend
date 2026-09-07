@@ -100,8 +100,9 @@ export function createAssistantTools({
       name: 'android.assistant.open_settings',
       title: 'Open assistant settings',
       description:
-        'Open the Android screen holding the default digital assistant app and ' +
-        'the toggles for sending screen text and screenshots to it.',
+        'Open Android Default apps, where the user can choose the digital ' +
+        'assistant. Android does not expose a public intent for the assistant ' +
+        'sub-page itself; use request_role when the goal is to make Creepy the assistant.',
       inputSchema: z.object({ connectionId: CONNECTION_ID }),
       outputSchema: z.object({ opened: z.boolean() }),
       risk: 'write',

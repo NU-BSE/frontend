@@ -141,7 +141,7 @@ async function main(): Promise<void> {
       'built-in system.health is available',
     );
     assert(
-      !names.some((name) => /^(telegram|google|android|slack)\./u.test(name)),
+      !names.some((name) => /^(telegram|google|android)\./u.test(name)),
       'no external account tools are exposed on a fresh install',
     );
     assert(
@@ -286,8 +286,15 @@ async function main(): Promise<void> {
     const store = getConnectionStore();
     const vault = getCredentialVault();
 
-    // Two accounts with secrets, plus the device connection that is always
-    // present and has none.
+    /*
+     * Two accounts with secrets, and nothing else.
+     *
+     * This asserted `>= 3` and passed on a development fixture the runtime no
+     * longer seeds. The comment claimed the third was the local device
+     * connection, which is not created in Node at all — there is no native
+     * bridge here. It was `google-default`: a record marked connected with no
+     * credentials behind it, which is the bug that seeding is gone for.
+     */
     const now = Date.now();
     for (const [id, connectorId] of [
       ['telegram-user:signout', 'telegram-user'],
@@ -307,7 +314,10 @@ async function main(): Promise<void> {
       await vault.save(`secret:${id}`, { kind: 'static_token', token: 'x' });
     }
 
-    assert((await store.list()).length >= 3, 'connections exist before sign-out');
+    assert(
+      (await store.list()).length === 2,
+      'exactly the two connections this test created exist before sign-out',
+    );
 
     await disconnectEverything();
 
@@ -516,6 +526,103 @@ async function main(): Promise<void> {
     assert(
       active.some(({ tool }) => tool.name === 'google.calendar.list_events'),
       'the partial Google connector exposes real read-only tools',
+    );
+  }
+
+  /**
+   * The mock connectors are gone in *both* modes, not just production.
+   *
+   * The `!development` guard in the registry factory was doing its job and was
+   * still not enough: a development build is what runs on a phone during a
+   * demo, and there Microsoft, Slack, Notion, Todoist, GitHub, Dropbox,
+   * Discord, Spotify and the Telegram bot registered and answered from
+   * fixtures. They also dominated the planner's prompt — most of 103 tools and
+   * ~7,000 tokens, more than a local 2B's whole context window.
+   *
+   * A regex over tool names would be a list to forget to update, so this asks
+   * the connectors what they are. Anything self-declaring as a mock fails,
+   * whichever mode registered it.
+   */
+  /*
+   * A fresh launch signs nobody in.
+   *
+   * Development seeded eleven fixtures marked `connected` with no credentials,
+   * so Google showed as signed in on a phone that had never authorised
+   * anything — and `toolsForConnections` follows the connection record, so all
+   * sixteen Google tools were in the planner's prompt too.
+   */
+  console.log('a fresh runtime has no connected account:');
+  {
+    await closeLocalMcpRuntime();
+    const runtime = await getLocalMcpRuntime({ mode: 'development' });
+    const connections = await getConnectionStore().list();
+
+    assert(
+      connections.every((record) => record.status !== 'connected'),
+      `nothing is connected before the user signs in (found ${
+        connections
+          .filter((record) => record.status === 'connected')
+          .map((record) => record.id)
+          .join(', ') || 'none'
+      })`,
+    );
+
+    const names = (await runtime.mcp.listTools()).map((tool) => tool.name);
+    assert(
+      !names.some((name) => /^(google|telegram)\./u.test(name)),
+      'and no account tools are offered',
+    );
+    await closeLocalMcpRuntime();
+  }
+
+  /*
+   * The demotion has to catch a record that never had a credential, not only
+   * one whose credential has vanished. The seeded fixtures had no
+   * `credentialReference` at all and sailed past the old check, which
+   * `continue`d on exactly that case.
+   */
+  console.log('a connected account without a credential is demoted:');
+  {
+    await closeLocalMcpRuntime();
+    const store = getConnectionStore();
+    const now = Date.now();
+    await store.save({
+      id: 'google-no-credential',
+      connectorId: 'google',
+      displayName: 'Google',
+      status: 'connected',
+      scopes: [],
+      capabilities: [],
+      createdAt: now,
+      updatedAt: now,
+    });
+
+    await getLocalMcpRuntime({ mode: 'development' });
+
+    assert(
+      (await store.get('google-no-credential'))?.status === 'reconnect_required',
+      'an account with no credential reference is not left marked connected',
+    );
+    await store.remove('google-no-credential');
+    await closeLocalMcpRuntime();
+  }
+
+  console.log('no mock connector registers in either mode:');
+  for (const mode of ['development', 'production'] as const) {
+    const registry = createConnectorRegistry({
+      mode,
+      connectionStore: new InMemoryConnectionStore(),
+      credentialVault: new InMemoryCredentialVault(),
+    });
+
+    const mocks = registry
+      .listConnectors()
+      .filter((connector) => connector.implementationStatus === 'mock')
+      .map((connector) => connector.id);
+
+    assert(
+      mocks.length === 0,
+      `${mode} registers no mock connector${mocks.length ? ` (found ${mocks.join(', ')})` : ''}`,
     );
   }
 

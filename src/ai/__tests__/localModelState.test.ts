@@ -3,7 +3,6 @@ import type { DeviceAssessment } from '@/attestation/client/deviceAssessment';
 import {
   getLocalModelReason,
   getLocalModelState,
-  getRecommendedLocalProfile,
 } from '@/ai/localModelState';
 
 const GIB = 1024 ** 3;
@@ -67,13 +66,13 @@ const unsupported: DeviceAssessment = {
 describe('honest local model state', () => {
   it('10. reports unsupported when the device cannot run local inference', () => {
     expect(getLocalModelState(weakAndroid, true)).toBe('unsupported');
+    expect(getLocalModelState(weakAndroid, false)).toBe('unsupported');
     expect(getLocalModelState(unsupported, true)).toBe('unsupported');
     expect(getLocalModelState(null, true)).toBe('unsupported');
   });
 
-  it('9. reports available and recommends a profile for a capable device', () => {
+  it('9. reports available when capable and the weights are installed', () => {
     expect(getLocalModelState(capableAndroid, true)).toBe('available');
-    expect(getRecommendedLocalProfile(capableAndroid)).toBe('performance');
   });
 
   it('11. reports download_required when capable but no weights are on device', () => {

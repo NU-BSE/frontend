@@ -21,9 +21,8 @@ import {
 
 import { createConnectorRegistry } from './create-connector-registry';
 import type { ConnectorRegistry } from '@mobile-agent/connector-registry';
-import { seedDevelopmentConnections, removeDevelopmentConnections } from './dev-seed';
+import { removeDevelopmentConnections } from './dev-seed';
 import { resolveDefaultRuntimeMode, type McpRuntimeMode } from './runtime-mode';
-import { resolveTelegramAdapterMode } from './telegram-adapter-mode';
 
 export interface AppMcpDependencies {
   connectionStore: ConnectionStore;
@@ -39,7 +38,6 @@ let runtimeMode: McpRuntimeMode | null = null;
 let currentRegistry: ConnectorRegistry | null = null;
 let approvalStore: InMemoryApprovalStore | null = null;
 let approvalService: InMemoryApprovalService | null = null;
-let devConnectionsSeeded = false;
 
 export function configureAppDependencies(deps: AppMcpDependencies): void {
   appDependencies = deps;
@@ -51,15 +49,40 @@ export function getConnectionStore(): ConnectionStore {
   return fallbackStore;
 }
 
+/**
+ * Connectors that are the device itself, and so have nothing to authenticate.
+ *
+ * Everything else is an account somewhere, and an account with no credential
+ * is not connected however the record reads.
+ */
+const LOCAL_DEVICE_CONNECTORS = ['android', 'intent'] as const;
+
 async function reconcileConnectionCredentials(
   connectionStore: ConnectionStore,
   credentialVault: CredentialVault,
 ): Promise<void> {
+  const local = new Set<string>(LOCAL_DEVICE_CONNECTORS);
   const connections = await connectionStore.list();
+
   for (const connection of connections) {
     if (connection.status !== 'connected') continue;
-    if (!connection.credentialReference) continue;
-    const credential = await credentialVault.get(connection.credentialReference);
+    if (local.has(connection.connectorId)) continue;
+
+    /*
+     * A missing reference is the failure, not a reason to skip.
+     *
+     * This used to `continue` when `credentialReference` was absent, so it
+     * only ever caught a reference pointing at a vanished credential. A record
+     * that never had one sailed through — which is exactly the shape the
+     * development seed wrote, and why Google showed as connected on a fresh
+     * launch with no sign-in. The tools follow the connection, so those 16
+     * Google tools were in every planner prompt too, ready to be called
+     * against an account that does not exist.
+     */
+    const credential = connection.credentialReference
+      ? await credentialVault.get(connection.credentialReference)
+      : null;
+
     if (!credential) {
       await connectionStore.save({
         ...connection,
@@ -118,22 +141,29 @@ export function getLocalMcpRuntime(
     const connectionStore = getConnectionStore();
 
     runtimePromise = (async () => {
-      if (mode === 'production') {
-        await removeDevelopmentConnections(connectionStore);
-        await reconcileConnectionCredentials(
-          connectionStore,
-          getCredentialVault(),
-        );
-      } else if (!devConnectionsSeeded) {
-        const telegramMode = resolveTelegramAdapterMode(mode);
-        await seedDevelopmentConnections(connectionStore, {
-          skipTelegramSeed: telegramMode === 'native',
-        });
-        if (telegramMode === 'native') {
-          await connectionStore.remove('telegram-user-default');
-        }
-        devConnectionsSeeded = true;
-      }
+      /*
+       * No seeded accounts, in either mode.
+       *
+       * Development used to write eleven fixture connections marked
+       * `connected` with no credentials behind any of them, so a fresh
+       * install showed Google as signed in before the user had done
+       * anything — and `toolsForConnections`, which follows the connection
+       * record, put all sixteen Google tools in the planner's prompt.
+       *
+       * Eight of those fixtures name connectors this branch no longer
+       * registers at all, so they were orphaned records claiming accounts
+       * nothing could serve. Same reason the catalogue and the registry were
+       * cut: a build must not claim what it cannot honour, and a development
+       * build is what runs on a phone during a demo.
+       *
+       * The removal runs every launch, not once, so a device already carrying
+       * the fixtures is cleaned the next time it starts.
+       */
+      await removeDevelopmentConnections(connectionStore);
+      await reconcileConnectionCredentials(
+        connectionStore,
+        getCredentialVault(),
+      );
 
       const registry = createConnectorRegistry({
         mode,
@@ -190,6 +220,26 @@ export async function getRegisteredConnectorIds(): Promise<Set<string>> {
   const registry = getCurrentRegistry();
   if (!registry) return new Set();
   return new Set(registry.listConnectors().map((connector) => connector.id));
+}
+
+/**
+ * Re-derive the local device connections' scopes.
+ *
+ * `AndroidConnector.connect()` reads WRITE_SETTINGS and overlay access at the
+ * moment it runs and writes the resulting scopes onto the connection record.
+ * Those grants are made on a system screen, outside this app, so a record
+ * created before the grant keeps saying the permission is absent — and
+ * `android.settings.set_brightness` keeps failing with "missing required
+ * scopes: android.settings.write" long after the user has granted it. Until
+ * now only a restart fixed that.
+ *
+ * Cheap enough to call whenever the app returns to the foreground: it touches
+ * the two local connectors, and each writes only if something changed.
+ */
+export async function refreshLocalDeviceConnections(): Promise<void> {
+  const registry = getCurrentRegistry();
+  if (!registry) return;
+  await ensureLocalDeviceConnections(registry);
 }
 
 export async function restartLocalMcpRuntime(): Promise<LocalMcpRuntime> {

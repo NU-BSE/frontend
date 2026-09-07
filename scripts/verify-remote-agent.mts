@@ -519,6 +519,100 @@ async function main(): Promise<void> {
     );
   }
 
+  // -------------------------------------------------------------------
+  // Z. Expiry — a 401 is retried once with a refreshed token
+  // -------------------------------------------------------------------
+  console.log('\nexpired access token:');
+  {
+    const bearers: (string | null)[] = [];
+    let refreshes = 0;
+
+    const mockFetch: FetchMock = async (_url, init) => {
+      const headers = (init?.headers ?? {}) as Record<string, string>;
+      const auth = headers['Authorization'] ?? null;
+      bearers.push(auth);
+      // The first token is stale; the refreshed one is accepted.
+      if (auth === 'Bearer stale') {
+        return new Response(
+          JSON.stringify({ message: 'Token is invalid or expired' }),
+          { status: 401 },
+        );
+      }
+      return new Response(successBody({ kind: 'final', text: 'ok' }), { status: 200 });
+    };
+
+    const model = createRemoteAgentModel({
+      baseUrl: 'http://test',
+      getAccessToken: () => Promise.resolve('stale'),
+      refreshAccessToken: () => {
+        refreshes += 1;
+        return Promise.resolve('fresh');
+      },
+    });
+
+    const result = await withFetch(mockFetch, () => model.run(baseInput()));
+
+    assertEq(refreshes, 1, 'the token is refreshed exactly once');
+    assertEq(bearers.length, 2, 'the request is retried once');
+    assertEq(bearers[0], 'Bearer stale', 'the first attempt carries the stale token');
+    assertEq(bearers[1], 'Bearer fresh', 'the retry carries the refreshed token');
+    assertEq(result.kind, 'final', 'the run succeeds after the refresh');
+  }
+
+  console.log('\nrefresh that cannot help:');
+  {
+    let attempts = 0;
+    const mockFetch: FetchMock = async () => {
+      attempts += 1;
+      return new Response(
+        JSON.stringify({ message: 'Token is invalid or expired' }),
+        { status: 401 },
+      );
+    };
+
+    // A refresh that yields nothing means the session is genuinely over. The
+    // 401 must surface rather than being retried into a loop.
+    const model = createRemoteAgentModel({
+      baseUrl: 'http://test',
+      getAccessToken: () => Promise.resolve('stale'),
+      refreshAccessToken: () => Promise.resolve(null),
+    });
+
+    let code: string | null = null;
+    try {
+      await withFetch(mockFetch, () => model.run(baseInput()));
+    } catch (error) {
+      code = error instanceof AgentError ? error.code : 'unknown';
+    }
+    assertEq(code, 'AUTH_REQUIRED', 'a failed refresh still reports AUTH_REQUIRED');
+    assertEq(attempts, 1, 'no retry is attempted when the refresh yields nothing');
+  }
+
+  console.log('\nunauthenticated 401:');
+  {
+    let refreshes = 0;
+    const mockFetch: FetchMock = async () =>
+      new Response(JSON.stringify({ message: 'Unauthorized' }), { status: 401 });
+
+    // No token was sent, so there is nothing to refresh; refreshing here would
+    // burn the refresh token on a request that was never authenticated.
+    const model = createRemoteAgentModel({
+      baseUrl: 'http://test',
+      getAccessToken: () => Promise.resolve(null),
+      refreshAccessToken: () => {
+        refreshes += 1;
+        return Promise.resolve('fresh');
+      },
+    });
+
+    try {
+      await withFetch(mockFetch, () => model.run(baseInput()));
+    } catch {
+      // Expected.
+    }
+    assertEq(refreshes, 0, 'a 401 without a token does not trigger a refresh');
+  }
+
   console.log('verify:remote-agent — all checks passed');
 }
 

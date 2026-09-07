@@ -25,8 +25,18 @@ function makeBridge(
       canWriteSystemSettings: true,
       canDrawOverlays: false,
       settingsPanelsSupported: true,
-      supportedScreens: { wifi: true, bluetooth: true },
-      supportedAppTargets: { appDetails: true, appNotifications: true },
+      supportedScreens: {
+        wifi: true,
+        bluetooth: true,
+        batteryUsage: true,
+        settingsSearch: true,
+      },
+      supportedAppTargets: {
+        appDetails: true,
+        appNotifications: true,
+        exactAlarm: true,
+        fullScreenIntent: true,
+      },
     }),
     canWriteSystemSettings: () => true,
     requestWriteSystemSettingsPermission: async () => true,
@@ -130,7 +140,6 @@ describe('AndroidConnector.connect', () => {
   it('creates a single android-device connection', async () => {
     const store = new InMemoryConnectionStore();
     const connector = makeConnector(makeBridge(), store);
-
     const record = await connector.connect();
 
     expect(record.id).toBe(ANDROID_CONNECTION_ID);
@@ -255,8 +264,9 @@ describe('AndroidConnector tools', () => {
 
   it('opens package-scoped settings with package and channel arguments', async () => {
     const openAppSettings = jest.fn(async () => true);
-    const bridge = makeBridge({ openAppSettings });
-    const tools = createAndroidSettingsTools({ bridge });
+    const tools = createAndroidSettingsTools({
+      bridge: makeBridge({ openAppSettings }),
+    });
 
     expect(
       await executeTool(tools, 'android.settings.open_app', {
@@ -278,7 +288,23 @@ describe('AndroidConnector tools', () => {
     );
   });
 
-  it('requires channelId for notificationChannel at schema validation', () => {
+  it('accepts exact-alarm and full-screen-intent app destinations', () => {
+    const tools = createAndroidSettingsTools({ bridge: makeBridge() });
+    const tool = tools.find((candidate) => candidate.name === 'android.settings.open_app');
+    if (!tool) throw new Error('tool not found');
+
+    for (const target of ['exactAlarm', 'fullScreenIntent']) {
+      expect(
+        tool.inputSchema.safeParse({
+          connectionId: 'x',
+          target,
+          packageName: 'com.example.alarm',
+        }).success,
+      ).toBe(true);
+    }
+  });
+
+  it('requires channelId only for notificationChannel', () => {
     const tools = createAndroidSettingsTools({ bridge: makeBridge() });
     const tool = tools.find((candidate) => candidate.name === 'android.settings.open_app');
     if (!tool) throw new Error('tool not found');
@@ -323,17 +349,25 @@ describe('AndroidConnector tools', () => {
     expect(timeout.inputSchema.safeParse({ connectionId: 'x', milliseconds: 30000 }).success).toBe(true);
   });
 
-  it('keeps special-access permission screens out of the global open allowlist', () => {
+  it('exposes guide destinations but keeps connector grant screens out', () => {
     const tools = createAndroidSettingsTools({ bridge: makeBridge() });
     const tool = tools.find((candidate) => candidate.name === 'android.settings.open');
     if (!tool) throw new Error('tool not found');
 
-    expect(tool.inputSchema.safeParse({ connectionId: 'x', screen: 'batterySaver' }).success).toBe(true);
-    expect(tool.inputSchema.safeParse({ connectionId: 'x', screen: 'assistant' }).success).toBe(true);
-    expect(tool.inputSchema.safeParse({ connectionId: 'x', screen: 'writeSettings' }).success).toBe(false);
-    expect(tool.inputSchema.safeParse({ connectionId: 'x', screen: 'overlay' }).success).toBe(false);
-    expect(tool.inputSchema.safeParse({ connectionId: 'x', screen: 'unknownSources' }).success).toBe(false);
-    expect(tool.inputSchema.safeParse({ connectionId: 'x', screen: 'batteryOptimization' }).success).toBe(false);
+    for (const screen of [
+      'assistant',
+      'batteryOptimization',
+      'batteryUsage',
+      'wifiIp',
+      'doNotDisturbPriority',
+      'settingsSearch',
+    ]) {
+      expect(tool.inputSchema.safeParse({ connectionId: 'x', screen }).success).toBe(true);
+    }
+
+    for (const screen of ['writeSettings', 'overlay', 'unknownSources']) {
+      expect(tool.inputSchema.safeParse({ connectionId: 'x', screen }).success).toBe(false);
+    }
   });
 
   it('open panel accepts only the official panels', () => {

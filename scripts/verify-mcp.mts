@@ -12,6 +12,7 @@ import {
   approveConnectorTool,
   closeLocalMcpRuntime,
   getConnectionStore,
+  getCredentialVault,
   getLocalMcpRuntime,
   restartLocalMcpRuntime,
 } from '../src/mcp/runtime-singleton.js';
@@ -64,19 +65,16 @@ function assertQuiet(condition: unknown, message: string): asserts condition {
 
 process.env.EXPO_PUBLIC_TELEGRAM_ADAPTER = 'mock';
 
-/** Account/mock namespaces that are intentionally available in Node development. */
-const CONNECTOR_NAMESPACES = [
-  'google',
-  'telegram',
-  'microsoft',
-  'slack',
-  'notion',
-  'todoist',
-  'github',
-  'dropbox',
-  'discord',
-  'spotify',
-];
+/**
+ * Account namespaces available in Node development.
+ *
+ * This list used to carry eight more — microsoft, slack, notion, todoist,
+ * github, dropbox, discord, spotify — and they have been deleted from
+ * `create-connector-registry.ts`, mock implementations that answered from
+ * fixtures and cost the local planner most of a 7,000-token prompt. Android
+ * and Intent are real but native-bridge-gated, so they never register here.
+ */
+const CONNECTOR_NAMESPACES = ['google', 'telegram'];
 
 async function callAndCatch(
   call: () => Promise<unknown>,
@@ -110,6 +108,7 @@ async function main(): Promise<void> {
   console.log('connector tools:');
 
   const connectionStore = getConnectionStore();
+  const credentialVault = getCredentialVault();
   for (const namespace of CONNECTOR_NAMESPACES) {
     const connectorId = namespace === 'telegram' ? 'telegram-user' : namespace;
     const now = Date.now();
@@ -117,6 +116,20 @@ async function main(): Promise<void> {
       connectorId === 'telegram-user'
         ? [...TELEGRAM_USER_SCOPES]
         : [`${connectorId}.read`, `${connectorId}.write`];
+
+    /*
+     * With a credential, because the runtime now demotes any external account
+     * marked `connected` that has none. These records used to have none and
+     * kept their tools, which is exactly how a seeded fixture made Google look
+     * signed in on a fresh install. A test connection has to be as real as the
+     * thing it stands in for.
+     */
+    const credentialReference = `secret:${connectorId}-verify`;
+    await credentialVault.save(credentialReference, {
+      kind: 'static_token',
+      token: 'verification',
+    });
+
     await connectionStore.save({
       id: `${connectorId}-verify`,
       connectorId: connectorId as never,
@@ -124,6 +137,7 @@ async function main(): Promise<void> {
       status: 'connected',
       scopes,
       capabilities: scopes,
+      credentialReference,
       createdAt: now,
       updatedAt: now,
     });
@@ -147,28 +161,34 @@ async function main(): Promise<void> {
 
   assert(new Set(toolNames).size === toolNames.length, 'no duplicate tool names are registered');
 
+  // Notion used to be the vehicle for the approval round-trip below. It was a
+  // mock connector and is gone; Telegram over the mock TDLib adapter carries
+  // the same shape — a `read` tool and an `external_side_effect` tool — and is
+  // a connector the app actually ships.
+  const TELEGRAM_CONNECTION = 'telegram-user-verify';
+
   console.log('read tools need no approval:');
 
-  const page = await runtimeWithConnectors.mcp.callTool({
-    name: 'notion.pages.get',
-    arguments: { connectionId: 'notion-default' },
+  const chats = await runtimeWithConnectors.mcp.callTool({
+    name: 'telegram.user.search_chats',
+    arguments: { connectionId: TELEGRAM_CONNECTION, query: 'a' },
   });
 
   assert(
-    (page.structuredContent as { status?: string })?.status === 'success',
-    'notion.pages.get executes without an approval',
+    (chats.structuredContent as { status?: string })?.status === 'success',
+    'telegram.user.search_chats executes without an approval',
   );
 
   console.log('write tools enforce the approval round-trip:');
 
   const writeArgs = {
-    connectionId: 'notion-default',
-    parentId: 'p1',
-    title: 'approved page',
+    connectionId: TELEGRAM_CONNECTION,
+    chatId: '1',
+    text: 'approved message',
   };
 
   const firstCall = await runtimeWithConnectors.mcp.callTool({
-    name: 'notion.pages.create',
+    name: 'telegram.user.send_message',
     arguments: writeArgs,
   });
 
@@ -177,7 +197,10 @@ async function main(): Promise<void> {
     approvalId?: string;
   };
 
-  assert(pending?.status === 'approval_required', 'notion.pages.create first returns approval_required');
+  assert(
+    pending?.status === 'approval_required',
+    'telegram.user.send_message first returns approval_required',
+  );
   assert(
     typeof pending.approvalId === 'string' && pending.approvalId.length > 0,
     'approval_required carries an approvalId for the UI',
@@ -187,7 +210,7 @@ async function main(): Promise<void> {
 
   const unapproved = await callAndCatch(() =>
     runtimeWithConnectors.mcp.callTool({
-      name: 'notion.pages.create',
+      name: 'telegram.user.send_message',
       arguments: { ...writeArgs, approvalId },
     }),
   );
@@ -197,10 +220,10 @@ async function main(): Promise<void> {
 
   const tampered = await callAndCatch(() =>
     runtimeWithConnectors.mcp.callTool({
-      name: 'notion.pages.create',
+      name: 'telegram.user.send_message',
       arguments: {
         ...writeArgs,
-        title: 'something the user never saw',
+        text: 'something the user never saw',
         approvalId,
       },
     }),
@@ -208,14 +231,14 @@ async function main(): Promise<void> {
   assert(tampered !== null && /do not match/iu.test(tampered), 'arguments altered after approval are rejected');
 
   const executed = await runtimeWithConnectors.mcp.callTool({
-    name: 'notion.pages.create',
+    name: 'telegram.user.send_message',
     arguments: { ...writeArgs, approvalId },
   });
   assert((executed.structuredContent as { status?: string })?.status === 'success', 'the approved payload executes');
 
   const replayed = await callAndCatch(() =>
     runtimeWithConnectors.mcp.callTool({
-      name: 'notion.pages.create',
+      name: 'telegram.user.send_message',
       arguments: { ...writeArgs, approvalId },
     }),
   );
@@ -244,9 +267,9 @@ async function main(): Promise<void> {
 
   for (const tool of gated) {
     const args: Record<string, unknown> = {
-      connectionId: tool.name.startsWith('telegram.bot')
-        ? 'telegram-bot-default'
-        : 'telegram-user-default',
+      // The connection this test created, not a fixture the runtime used to
+      // seed. `telegram-user-default` was one of those and is gone.
+      connectionId: 'telegram-user-verify',
       chatId: '1',
       text: 'x',
       messageId: 1,

@@ -6,12 +6,14 @@ import {
 
 describe('SettingsScreen mapping', () => {
   it('exposes the global screen registry', () => {
-    expect(SETTINGS_SCREENS).toHaveLength(49);
+    expect(SETTINGS_SCREENS).toHaveLength(53);
 
     for (const screen of [
       'settings',
+      'settingsSearch',
       'appDetails',
       'wifi',
+      'wifiIp',
       'bluetooth',
       'wireless',
       'location',
@@ -39,11 +41,13 @@ describe('SettingsScreen mapping', () => {
       'defaultApps',
       'home',
       'batterySaver',
+      'batteryUsage',
       'dataUsage',
       'airplaneMode',
       'apn',
       'roaming',
       'doNotDisturb',
+      'doNotDisturbPriority',
       'storage',
       'deviceInfo',
       'systemUpdate',
@@ -79,6 +83,8 @@ describe('AppSettingsTarget mapping', () => {
       'appLocale',
       'appUsage',
       'backgroundData',
+      'exactAlarm',
+      'fullScreenIntent',
     ]);
     expect(new Set(APP_SETTINGS_TARGETS).size).toBe(APP_SETTINGS_TARGETS.length);
   });

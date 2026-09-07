@@ -33,6 +33,24 @@ export interface ConnectorCatalogEntry {
   connectorId?: ConnectorId;
   /** Shown instead of the summary when there is nothing to connect to. */
   note?: string;
+  /**
+   * Route to open instead of running a connector's auth flow.
+   *
+   * An entry with a route is always tappable: availability for a connector is
+   * derived from the live registry, but a screen has no registry entry and
+   * would otherwise render as "Coming soon".
+   */
+  route?: string;
+  /**
+   * Give this entry a row to itself, spanning the full content width.
+   *
+   * The grid is three columns and a short final row is padded with spacers so
+   * its cells keep the width they have in a full row. That is right for a
+   * connector — a lone tile stretched across the screen reads as a different
+   * kind of thing from the ones above it — and wrong for an entry that *is* a
+   * different kind of thing.
+   */
+  fullWidth?: boolean;
 }
 
 export const CONNECTOR_CATALOG: ConnectorCatalogEntry[] = [
@@ -40,3 +58,46 @@ export const CONNECTOR_CATALOG: ConnectorCatalogEntry[] = [
   { key: 'telegram-user', label: 'Telegram', summary: 'Personal account', connectorId: 'telegram-user' },
   { key: 'google', label: 'Google', summary: 'Calendar, Gmail, Drive', connectorId: 'google' },
 ];
+
+/**
+ * User-added MCP servers.
+ *
+ * Not a connector: there is no id, no registry entry and no auth flow, just a
+ * screen. It carries a `route` for that reason.
+ */
+/**
+ * The custom tile's label, which carries its count.
+ *
+ * Lives here with the entry rather than in the grid, so the copy for a tile
+ * and the tile itself stay in one place.
+ */
+export function customServersLabel(count: number): string {
+  return `Custom (${count} added)`;
+}
+
+export const CUSTOM_SERVERS_ENTRY: ConnectorCatalogEntry = {
+  key: 'custom-mcp',
+  label: 'Custom',
+  summary: 'Your own MCP servers',
+  route: '/connect/custom',
+  fullWidth: true,
+};
+
+/**
+ * The catalogue as rendered.
+ *
+ * The custom-server tile appears only when a backend is configured, because
+ * translating a server needs one. Without it the screen behind the tile can do
+ * nothing but explain why, and this catalogue's whole reason for being short
+ * is that a shipping app should not advertise what it cannot honour.
+ *
+ * Adding the tile also changes the grid from one row of three to two rows, so
+ * `verify:layout` runs Yoga over both shapes rather than only the shorter one.
+ */
+export function buildConnectorCatalog(options: {
+  customServers: boolean;
+}): ConnectorCatalogEntry[] {
+  return options.customServers
+    ? [...CONNECTOR_CATALOG, CUSTOM_SERVERS_ENTRY]
+    : [...CONNECTOR_CATALOG];
+}

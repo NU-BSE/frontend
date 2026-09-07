@@ -33,6 +33,16 @@ export interface EngineConfigOverrides {
   forcedEngine?: '' | 'on-device' | 'remote' | 'stub';
   /** Raw backend origin (EXPO_PUBLIC_API_URL). Injected for tests. */
   backendApiUrl?: string;
+  /**
+   * Weights downloaded to this device, if any.
+   *
+   * The model is not in the APK — a gigabyte inside a Play download is a
+   * gigabyte every user pays for, including those who pick cloud inference —
+   * so the usual source of a local model is an install, not a build-time
+   * constant. `EXPO_PUBLIC_LLM_MODEL_PATH` remains as an override for a
+   * developer who has pushed weights to a device by hand.
+   */
+  installedModelPath?: string | null;
 }
 
 export function resolveEngine(
@@ -61,7 +71,10 @@ export function resolveEngine(
     return { origin: 'remote', engine: createStubEngine() };
   }
 
-  const modelPath = LOCAL_MODEL_PATHS[profile];
+  // A downloaded model wins over the build-time path: the env var is a
+  // developer's override, and a user who has just waited for a download should
+  // get what they downloaded.
+  const modelPath = config.installedModelPath || LOCAL_MODEL_PATHS[profile];
   const assessmentAllowsLocal = canUseLocalProfile(
     profile,
     selection.assessment,
@@ -83,7 +96,7 @@ export function resolveEngine(
   const degradedReason = !assessmentAllowsLocal
     ? 'The selected local profile is not supported by the attested device.'
     : !modelPath
-      ? `No GGUF path is configured for the ${profile} profile.`
+      ? 'The on-device model has not been downloaded yet.'
       : !isOnDeviceSupported()
         ? 'The llama.rn native module is not present in this build.'
         : 'Local inference was not selected.';

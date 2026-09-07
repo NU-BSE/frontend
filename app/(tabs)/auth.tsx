@@ -5,6 +5,7 @@ import { ScrollView, StyleSheet, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { clearAuthSession, getAuthenticatedEmail } from "@/auth/emailAuth";
 import { useAi } from "@/ai/AiProvider";
+import { ModelDownloadCard } from "@/features/model/ModelDownloadCard";
 import { Button } from "@/components/Button";
 import { Screen } from "@/components/Screen";
 import { Text } from "@/components/Text";
@@ -12,7 +13,7 @@ import { TopAppBar } from "@/components/TopAppBar";
 import { ConnectorList } from "@/features/connections/ConnectorList";
 import { disconnectEverything } from "@/connections/connectionService";
 import { CONNECTIONS_QUERY_KEY } from "@/connections/useConnections";
-import { getMemoryProfile, resetOnboarding } from "@/storage/prefs";
+import { resetOnboarding } from "@/storage/prefs";
 import { clearHistory } from "@/storage/history";
 import { gutter, palette, radius, shadow, spacing } from "@/theme/tokens";
 
@@ -20,17 +21,12 @@ export default function Account() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
   const queryClient = useQueryClient();
-  const { origin, status, degradedReason, deactivateEngine } = useAi();
+  const { deactivateEngine } = useAi();
 
   const { data: email } = useQuery({
     queryKey: ["authenticated-email"],
     queryFn: getAuthenticatedEmail,
   });
-  const { data: memoryProfile } = useQuery({
-    queryKey: ["memory-profile"],
-    queryFn: getMemoryProfile,
-  });
-
   /**
    * Sign out leaves nothing behind.
    *
@@ -92,14 +88,23 @@ export default function Account() {
           <ConnectorList />
         </View>
 
+        {/*
+          The download, and nothing else.
+          
+          There used to be a card above this one reporting the engine's origin
+          ("stub"), its status ("degraded") and the memory profile — internal
+          vocabulary describing machinery the reader has no way to act on, and
+          sitting directly above the one control that does something about it.
+          A degraded engine still says so where it matters: the chat header
+          carries the reason on the screen where a reply failed to arrive.
+
+          Shown whatever the current profile is. Someone on cloud inference
+          deciding whether to switch needs to see the download size first —
+          that is the whole reason the weights are not in the APK.
+        */}
         <View style={styles.section}>
           <Text variant="headline">Intelligence</Text>
-          <View style={styles.card}>
-            <Row label="Runs" value={origin} highlight={origin === "on-device"} />
-            <Row label="Status" value={status} danger={status === "degraded"} />
-            <Row label="Memory profile" value={memoryProfile ?? "—"} />
-            {degradedReason ? <Text variant="bodySmall" tone="danger">{degradedReason}</Text> : null}
-          </View>
+          <ModelDownloadCard profile="on-device" />
         </View>
 
         <View style={styles.section}>

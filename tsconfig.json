@@ -26,6 +26,8 @@
     "scripts/**/*.mts"
   ],
   "exclude": [
-    "src/attestation/**"
+    "src/attestation/**",
+    "src/**/__tests__/**",
+    "test/**"
   ]
 }

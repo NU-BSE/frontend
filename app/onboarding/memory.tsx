@@ -1,72 +1,53 @@
-import React, {
-  useCallback,
-  useEffect,
-  useMemo,
-  useRef,
-  useState,
-} from 'react';
-import { useQuery, useQueryClient } from '@tanstack/react-query';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useQuery } from '@tanstack/react-query';
 import { useRouter } from 'expo-router';
-import {
-  ActivityIndicator,
-  Pressable,
-  ScrollView,
-  StyleSheet,
-  View,
-} from 'react-native';
+import { ActivityIndicator, Pressable, ScrollView, StyleSheet, View } from 'react-native';
 
+import { track } from '@/analytics';
 import { useAi } from '@/ai/AiProvider';
 import {
   getModelOptionSupport,
   getRecommendedMemoryProfile,
 } from '@/ai/deviceModelSelection';
+import { getLocalModelReason, getLocalModelState } from '@/ai/localModelState';
+import { useModelInstall } from '@/features/model/useModelInstall';
+import { Button } from '@/components/Button';
 import { Icon } from '@/components/Icon';
 import { OnboardingNavBar } from '@/components/OnboardingNavBar';
+import { OnboardingProgress, progressFor } from '@/components/OnboardingProgress';
 import { Screen } from '@/components/Screen';
 import { Text } from '@/components/Text';
 import CheckCircle from '@assets/icons/check-circle-filled.svg';
 import {
   getDeviceAssessment,
+  setAiModeDone,
   setMemoryProfile,
-  setOnboardingComplete,
   type MemoryProfile,
 } from '@/storage/prefs';
 import { gutter, palette, radius, spacing } from '@/theme/tokens';
 
-const OPTIONS: {
-  id: MemoryProfile;
-  label: string;
-  value: string;
-}[] = [
-  // One local option and one remote one. The three size tiers this replaced
-  // each ran a different student model; only the 2B teacher remains, and three
-  // names for a single model would be a menu that misleads.
-  { id: 'on-device', label: 'On this device', value: '2B (private, offline)' },
-  { id: 'cloud', label: 'Cloud only', value: 'Nothing is downloaded' },
-];
+type AiMode = 'local' | 'cloud';
 
-const formatBytes = (bytes?: number): string => {
-  if (typeof bytes !== 'number') return 'Unknown';
-  return `${(bytes / 1024 ** 3).toFixed(1)} GB`;
+const formatBytes = (bytes: number): string => {
+  if (bytes >= 1024 ** 3) return `${(bytes / 1024 ** 3).toFixed(1)} GB`;
+  if (bytes >= 1024 ** 2) return `${Math.round(bytes / 1024 ** 2)} MB`;
+  return `${Math.round(bytes / 1024)} KB`;
 };
 
 /**
- * Processor description from what Android actually exposes: core count and the
- * primary ABI. Both gate local execution — cores set the speed floor, and a
- * non-arm64 ABI rules local models out entirely — so the screen that disables
- * profiles should show the numbers that did the disabling.
+ * Where should Creepy think?
+ *
+ * Two big choices — on this phone or cloud — shown honestly. "On this phone"
+ * is selectable only when it can really run: the device must support local
+ * inference AND the weights must be here (or downloadable). A subscription
+ * gate on the download is stated plainly, and the user is never led to believe
+ * local inference is running when it is not.
  */
-const formatProcessor = (cores?: number, abis?: string[]): string => {
-  const arch = abis?.find((abi) => /arm64|aarch64/iu.test(abi)) ?? abis?.[0];
-  if (typeof cores !== 'number') return arch ?? 'Unknown CPU';
-  return arch ? `${cores}-core ${arch}` : `${cores}-core CPU`;
-};
-
 export default function OnboardingMemory() {
   const router = useRouter();
-  const queryClient = useQueryClient();
   const { activateSelectedEngine } = useAi();
-  const [choice, setChoice] = useState<MemoryProfile>('cloud');
+  const [choice, setChoice] = useState<AiMode>('cloud');
+  const [saving, setSaving] = useState(false);
   const initializedChoice = useRef(false);
 
   const { data: assessment, isPending } = useQuery({
@@ -75,164 +56,243 @@ export default function OnboardingMemory() {
     staleTime: Infinity,
   });
 
+  const { state: install, start, stop } = useModelInstall('on-device');
+
   const support = useMemo(
     () => getModelOptionSupport(assessment ?? null),
     [assessment],
   );
+  const deviceSupported =
+    support.find((option) => option.profile === 'on-device')?.supported ?? false;
+  const localReason = useMemo(
+    () => getLocalModelReason(assessment ?? null),
+    [assessment],
+  );
+  const installed = install.phase === 'installed';
+  const localState = getLocalModelState(assessment ?? null, installed);
 
+  // Cloud is the safe default unless this device can actually run on-device.
   useEffect(() => {
     if (!isPending && !initializedChoice.current) {
       initializedChoice.current = true;
-      setChoice(getRecommendedMemoryProfile(assessment ?? null));
+      setChoice(localState === 'available' ? 'local' : 'cloud');
     }
-  }, [assessment, isPending]);
+  }, [isPending, localState]);
+
+  const downloadable =
+    install.downloadAllowed && install.bundle != null;
+  const subscriptionBlocked = install.blocker.kind === 'subscription';
+  const offlineMessage =
+    install.blocker.kind === 'offline' ? install.blocker.message : null;
+
+  const localCardEnabled =
+    deviceSupported && (installed || downloadable);
 
   const finish = useCallback(async () => {
-    const selectedSupport = support.find((option) => option.profile === choice);
-    if (!selectedSupport?.supported) return;
+    if (saving) return;
+    if (choice === 'local' && !installed) return;
+    setSaving(true);
 
-    await setMemoryProfile(choice);
-    void activateSelectedEngine(choice, assessment ?? null);
-    /*
-     * Onboarding is completed by the subscription step, not here — marking it
-     * done now would let the guard treat the run as finished and skip the
-     * paywall on the next launch.
-     */
-    router.push('/onboarding/subscription');
-  }, [activateSelectedEngine, assessment, choice, queryClient, router, support]);
+    const profile: MemoryProfile = choice === 'local' ? 'on-device' : 'cloud';
+    await setMemoryProfile(profile);
+    await setAiModeDone();
+    void activateSelectedEngine(profile, assessment ?? null);
 
-  const summary =
-    assessment?.platform === 'android'
-      ? `${assessment.hardware.model ?? 'Android device'} · ${formatProcessor(
-          assessment.hardware.cpuCoreCount,
-          assessment.hardware.supportedAbis,
-        )} · ${formatBytes(
-          assessment.hardware.totalMemoryBytes,
-        )} RAM · ${formatBytes(
-          assessment.hardware.availableStorageBytes,
-        )} free`
-      : 'The native device assessment was unavailable.';
+    track('onboarding_ai_mode_selected', { ai_mode: choice });
+
+    setSaving(false);
+    router.push('/onboarding/try');
+  }, [
+    activateSelectedEngine,
+    assessment,
+    choice,
+    installed,
+    router,
+    saving,
+  ]);
+
+  const localSupportLine = isPending
+    ? 'Checking this device…'
+    : localState === 'available'
+      ? 'Recommended for this device'
+      : localState === 'download_required' && subscriptionBlocked
+        ? 'An active subscription is required to download the model.'
+        : localState === 'download_required' && install.phase === 'downloading'
+          ? 'Downloading…'
+          : localState === 'download_required'
+            ? 'Download the model to use Creepy on this phone.'
+            : 'Not available on this device';
+
+  const localTone =
+    localState === 'available'
+      ? 'brand'
+      : localState === 'download_required'
+        ? 'secondary'
+        : 'danger';
+
+  const percent = install.progress
+    ? Math.round(install.progress.fraction * 100)
+    : 0;
 
   return (
     <Screen>
+      <View style={styles.progressWrap}>
+        <OnboardingProgress fraction={progressFor('ai-mode')} />
+      </View>
       <ScrollView
         contentContainerStyle={styles.content}
         showsVerticalScrollIndicator={false}
       >
-        <Text variant="display" style={styles.heading}>
-          Configure Local Intelligence
-        </Text>
-        <Text variant="bodyLarge" tone="secondary" style={styles.description}>
-          Choose a model profile after the device integrity and capacity check.
-          Unsupported profiles are disabled automatically.
-        </Text>
-
-        <View style={styles.deviceCard} accessibilityLiveRegion="polite">
-          {isPending ? (
-            <ActivityIndicator color={palette.brand} />
-          ) : (
-            <>
-              <View style={styles.deviceCardHeader}>
-                <Text variant="label">Device assessment</Text>
-                <Text
-                  variant="tag"
-                  tone={
-                    assessment?.platform === 'android' &&
-                    assessment.integrity.status === 'trusted'
-                      ? 'brand'
-                      : 'danger'
-                  }
-                  uppercase
-                >
-                  {assessment?.platform === 'android'
-                    ? assessment.integrity.status
-                    : 'unavailable'}
-                </Text>
-              </View>
-              <Text variant="bodySmall" tone="secondary">
-                {summary}
-              </Text>
-              {assessment?.platform === 'android' ? (
-                <Text variant="bodySmall" tone="secondary">
-                  {assessment.keystore.hardwareBacked
-                    ? assessment.keystore.strongBoxBacked
-                      ? 'StrongBox-backed key attestation passed.'
-                      : 'Hardware-backed Android Keystore attestation passed.'
-                    : 'Hardware key attestation was unavailable.'}
-                </Text>
-              ) : null}
-            </>
-          )}
+        <View style={styles.intro}>
+          <Text variant="display" style={styles.heading}>
+            Where should Creepy think?
+          </Text>
+          <Text variant="bodyLarge" tone="secondary" style={styles.body}>
+            Choose how Creepy processes your requests. You can change this
+            later.
+          </Text>
         </View>
 
-        <View style={styles.options}>
-          {OPTIONS.map((option) => {
-            const optionSupport = support.find(
-              (candidate) => candidate.profile === option.id,
-            );
-            const supported = optionSupport?.supported ?? false;
-            const active = option.id === choice;
-            return (
-              <Pressable
-                key={option.id}
-                accessibilityRole="radio"
-                accessibilityState={{ selected: active, disabled: !supported }}
-                accessibilityLabel={`${option.label}, ${option.value}. ${
-                  optionSupport?.reason ?? ''
-                }`}
-                disabled={!supported || isPending}
-                onPress={() => setChoice(option.id)}
-                style={({ pressed }) => [
-                  styles.row,
-                  active && styles.rowActive,
-                  !supported && styles.rowDisabled,
-                  pressed && styles.pressed,
-                ]}
-              >
-                <View style={styles.rowText}>
-                  <View style={styles.optionHeading}>
-                    <Text variant="overline" tone="secondary" uppercase>
-                      {option.label}
-                    </Text>
-                    {optionSupport?.recommended ? (
-                      <Text variant="tag" tone="brand" uppercase>
-                        Recommended
-                      </Text>
-                    ) : null}
-                  </View>
-                  <Text
-                    variant="optionValue"
-                    tone={supported ? 'primary' : 'faint'}
-                  >
-                    {option.value}
-                  </Text>
-                  <Text
-                    variant="bodySmall"
-                    tone={supported ? 'secondary' : 'danger'}
-                  >
-                    {optionSupport?.reason ?? 'Checking device support…'}
-                  </Text>
-                </View>
+        {isPending ? (
+          <View style={styles.checking}>
+            <ActivityIndicator color={palette.brand} />
+            <Text variant="body" tone="secondary">
+              Checking what this phone can run…
+            </Text>
+          </View>
+        ) : null}
 
-                {active ? (
-                  <Icon source={CheckCircle} size={20} color={palette.brand} />
-                ) : (
-                  <View style={styles.radioEmpty} />
-                )}
-              </Pressable>
-            );
-          })}
+        <View style={styles.cards}>
+          <Pressable
+            accessibilityRole="radio"
+            accessibilityState={{ selected: choice === 'local', disabled: !localCardEnabled }}
+            accessibilityLabel="On this phone. AI runs directly on your Android."
+            disabled={!localCardEnabled || saving}
+            onPress={() => setChoice('local')}
+            style={({ pressed }) => [
+              styles.card,
+              choice === 'local' && styles.cardActive,
+              !localCardEnabled && styles.cardDisabled,
+              pressed && styles.pressed,
+            ]}
+          >
+            <View style={styles.cardHeader}>
+              <Text variant="cardTitle">On this phone</Text>
+              <Text variant="tag" tone="brand" uppercase>
+                Private &amp; offline
+              </Text>
+            </View>
+            <Text variant="body" tone="secondary">
+              AI runs directly on your Android. No AI request needs to leave
+              your phone.
+            </Text>
+            {!deviceSupported && localReason ? (
+              <Text variant="bodySmall" tone="danger">
+                {localReason}
+              </Text>
+            ) : null}
+            {deviceSupported && !installed && subscriptionBlocked ? (
+              <Text variant="bodySmall" tone="secondary">
+                {install.bundle
+                  ? `${formatBytes(install.bundle.totalBytes)} to download.`
+                  : null}{' '}
+                You&apos;ll be able to subscribe on the next screen.
+              </Text>
+            ) : null}
+            {offlineMessage ? (
+              <Text variant="bodySmall" tone="secondary">
+                {offlineMessage}
+              </Text>
+            ) : null}
+
+            {deviceSupported && !installed && downloadable && choice === 'local' ? (
+              install.phase === 'downloading' ? (
+                <View style={styles.downloadBox}>
+                  <View style={styles.downloadRow}>
+                    <Text variant="bodySmall" tone="secondary">
+                      {install.progress
+                        ? `${formatBytes(install.progress.receivedBytes)} of ${formatBytes(
+                            install.progress.totalBytes,
+                          )}`
+                        : 'Downloading…'}
+                    </Text>
+                    <Text variant="bodySmall" tone="secondary">
+                      {percent}%
+                    </Text>
+                  </View>
+                  <View style={styles.progressTrack}>
+                    <View style={[styles.progressFill, { width: `${percent}%` }]} />
+                  </View>
+                  <Button label="Stop download" variant="ghost" onPress={stop} />
+                </View>
+              ) : (
+                <Button
+                  label={`Download (${formatBytes(install.bundle!.totalBytes)})`}
+                  onPress={start}
+                />
+              )
+            ) : null}
+
+            {install.phase === 'failed' ? (
+              <Text variant="bodySmall" tone="danger">
+                The download failed. Check your connection and try again.
+              </Text>
+            ) : null}
+
+            <View style={styles.cardFooter}>
+              <Text variant="label" tone={localTone}>
+                {localSupportLine}
+              </Text>
+              {choice === 'local' ? (
+                <Icon source={CheckCircle} size={20} color={palette.brand} />
+              ) : (
+                <View style={styles.radioEmpty} />
+              )}
+            </View>
+          </Pressable>
+
+          <Pressable
+            accessibilityRole="radio"
+            accessibilityState={{ selected: choice === 'cloud' }}
+            accessibilityLabel="Cloud. Uses Creepy's cloud AI."
+            disabled={saving}
+            onPress={() => setChoice('cloud')}
+            style={({ pressed }) => [
+              styles.card,
+              choice === 'cloud' && styles.cardActive,
+              pressed && styles.pressed,
+            ]}
+          >
+            <View style={styles.cardHeader}>
+              <Text variant="cardTitle">Cloud</Text>
+              <Text variant="tag" tone="brand" uppercase>
+                No download
+              </Text>
+            </View>
+            <Text variant="body" tone="secondary">
+              Uses Creepy&apos;s cloud AI. Works without downloading the local
+              model.
+            </Text>
+            <View style={styles.cardFooter}>
+              <Text variant="label" tone="secondary">
+                Always available
+              </Text>
+              {choice === 'cloud' ? (
+                <Icon source={CheckCircle} size={20} color={palette.brand} />
+              ) : (
+                <View style={styles.radioEmpty} />
+              )}
+            </View>
+          </Pressable>
         </View>
       </ScrollView>
 
       <OnboardingNavBar
         onBack={() => router.back()}
         onAdvance={() => void finish()}
-        advanceLabel="Finish"
-        advanceIcon="check"
+        advanceLabel={saving ? 'Saving' : 'Continue'}
         advanceDisabled={
-          isPending ||
-          !support.find((option) => option.profile === choice)?.supported
+          saving || isPending || (choice === 'local' && !installed)
         }
       />
     </Screen>
@@ -240,56 +300,71 @@ export default function OnboardingMemory() {
 }
 
 const styles = StyleSheet.create({
+  progressWrap: {
+    paddingHorizontal: gutter.screen,
+    paddingTop: spacing.lg,
+  },
   content: {
     paddingHorizontal: gutter.screen,
-    paddingTop: spacing.xxxl,
+    paddingTop: spacing.xl,
     paddingBottom: spacing.xxl,
   },
+  intro: { alignItems: 'center', paddingBottom: spacing.xxl },
   heading: { textAlign: 'center', marginBottom: spacing.lg },
-  description: { textAlign: 'center', marginBottom: spacing.xxl },
-  deviceCard: {
-    gap: spacing.sm,
+  body: { textAlign: 'center' },
+  checking: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: spacing.md,
+    paddingBottom: spacing.xxl,
+  },
+  cards: { gap: spacing.lg },
+  card: {
+    gap: spacing.md,
     padding: spacing.lg,
-    marginBottom: spacing.xxl,
-    borderRadius: radius.md,
     borderWidth: 1,
-    borderColor: palette.borderSoft,
+    borderColor: palette.border,
+    borderRadius: radius.lg,
     backgroundColor: palette.surface,
   },
-  deviceCardHeader: {
+  cardActive: { borderColor: palette.brand, backgroundColor: palette.brandWash },
+  cardDisabled: { opacity: 0.55 },
+  cardHeader: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
     gap: spacing.md,
   },
-  options: { gap: spacing.lg },
-  row: {
+  cardFooter: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    gap: spacing.lg,
-    paddingVertical: 13,
-    paddingHorizontal: 25,
-    borderRadius: radius.md,
-    borderWidth: 1,
-    borderColor: palette.border,
-    backgroundColor: palette.canvas,
-  },
-  rowActive: { borderColor: palette.brand, backgroundColor: palette.surface },
-  rowDisabled: { opacity: 0.55 },
-  rowText: { flex: 1, gap: spacing.xs },
-  optionHeading: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    gap: spacing.sm,
+    gap: spacing.md,
+    marginTop: spacing.sm,
   },
   radioEmpty: {
     width: 20,
     height: 20,
-    borderRadius: radius.pill,
+    borderRadius: 999,
     borderWidth: 1.5,
     borderColor: palette.border,
+  },
+  downloadBox: { gap: spacing.md },
+  downloadRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+  },
+  progressTrack: {
+    height: 6,
+    borderRadius: radius.pill,
+    backgroundColor: palette.neutralWash,
+    overflow: 'hidden',
+  },
+  progressFill: {
+    height: '100%',
+    borderRadius: radius.pill,
+    backgroundColor: palette.brand,
   },
   pressed: { opacity: 0.85 },
 });

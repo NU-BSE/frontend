@@ -9,7 +9,8 @@ import android.provider.Settings
 
 /**
  * Opens Android Settings screens and app-scoped Settings destinations through
- * public Settings.ACTION_* / Settings.Panel.* intents only.
+ * stable framework intents. Every destination is resolved before launch so an
+ * OEM that omits a screen reports it unavailable instead of throwing.
  *
  * Global screens stay as a small enum. Anything that addresses a particular
  * application is parameterized explicitly with a package name (and channel id
@@ -28,13 +29,10 @@ class SettingsNavigator(private val context: Context) {
          * and this module compiles against compileSdk 36 — which is why it
          * failed alongside the other two rather than on its own.
          *
-         * The actions themselves are real: all three resolve on device (they
-         * are present in the framework image, and the names follow the same
-         * android.settings.<NAME> form as every public constant here). Naming
-         * them literally is the only way to reference them, and it is safe
-         * because screenAction's result is always passed through isResolvable
-         * before it is fired — an OEM that ships no such screen reports
-         * canOpenScreen == false instead of throwing.
+         * The actions themselves are real framework actions. Naming them
+         * literally is safe here because screenAction's result is always
+         * passed through isResolvable before it is fired — an OEM that ships
+         * no such screen reports canOpenScreen == false instead of throwing.
          */
         private const val ACTION_NOTIFICATION_SETTINGS =
             "android.settings.NOTIFICATION_SETTINGS"
@@ -44,8 +42,10 @@ class SettingsNavigator(private val context: Context) {
 
         val SCREENS: List<String> = listOf(
             "settings",
+            "settingsSearch",
             "appDetails",
             "wifi",
+            "wifiIp",
             "bluetooth",
             "wireless",
             "location",
@@ -73,11 +73,13 @@ class SettingsNavigator(private val context: Context) {
             "defaultApps",
             "home",
             "batterySaver",
+            "batteryUsage",
             "dataUsage",
             "airplaneMode",
             "apn",
             "roaming",
             "doNotDisturb",
+            "doNotDisturbPriority",
             "storage",
             "deviceInfo",
             "systemUpdate",
@@ -103,6 +105,8 @@ class SettingsNavigator(private val context: Context) {
             "appLocale",
             "appUsage",
             "backgroundData",
+            "exactAlarm",
+            "fullScreenIntent",
         )
 
         val PANELS: List<String> = listOf("internet", "wifi", "volume", "nfc")
@@ -256,6 +260,14 @@ class SettingsNavigator(private val context: Context) {
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
                     Intent(Settings.ACTION_IGNORE_BACKGROUND_DATA_RESTRICTIONS_SETTINGS, packageUri)
                 } else null
+            "exactAlarm" ->
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                    Intent(Settings.ACTION_REQUEST_SCHEDULE_EXACT_ALARM, packageUri)
+                } else null
+            "fullScreenIntent" ->
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
+                    Intent(Settings.ACTION_MANAGE_APP_USE_FULL_SCREEN_INTENT, packageUri)
+                } else null
             else -> null
         }
     }
@@ -280,8 +292,11 @@ class SettingsNavigator(private val context: Context) {
 
     private fun screenAction(screen: String): String? = when (screen) {
         "settings" -> Settings.ACTION_SETTINGS
+        "settingsSearch" ->
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) Settings.ACTION_APP_SEARCH_SETTINGS else null
         "appDetails" -> Settings.ACTION_APPLICATION_DETAILS_SETTINGS
         "wifi" -> Settings.ACTION_WIFI_SETTINGS
+        "wifiIp" -> Settings.ACTION_WIFI_IP_SETTINGS
         "bluetooth" -> Settings.ACTION_BLUETOOTH_SETTINGS
         "wireless" -> Settings.ACTION_WIRELESS_SETTINGS
         "location" -> Settings.ACTION_LOCATION_SOURCE_SETTINGS
@@ -291,14 +306,17 @@ class SettingsNavigator(private val context: Context) {
         "notifications" -> ACTION_NOTIFICATION_SETTINGS
         "accessibility" -> Settings.ACTION_ACCESSIBILITY_SETTINGS
         /*
-         * The screen holding "Default digital assistant app", plus the two
-         * toggles that decide whether an assist session receives screen text
-         * and a screenshot at all. Named "assistant" rather than after the
-         * action because that is what a caller asks for; without it the
-         * nearest match was "apps", which opens the all-apps list and looks
-         * like the request simply went to the wrong place.
+         * There is no public intent for the Digital assistant sub-page itself.
+         * Default apps is the public user-facing destination that contains the
+         * digital-assistant selection on current Android. ROLE_ASSISTANT is
+         * handled separately when Creepy itself wants to request the role.
          */
-        "assistant" -> Settings.ACTION_VOICE_INPUT_SETTINGS
+        "assistant" ->
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
+                Settings.ACTION_MANAGE_DEFAULT_APPS_SETTINGS
+            } else {
+                Settings.ACTION_APPLICATION_SETTINGS
+            }
         "usageAccess" -> Settings.ACTION_USAGE_ACCESS_SETTINGS
         "notificationListener" -> Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS
         "overlay" -> Settings.ACTION_MANAGE_OVERLAY_PERMISSION
@@ -322,6 +340,7 @@ class SettingsNavigator(private val context: Context) {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) Settings.ACTION_HOME_SETTINGS else null
         "batterySaver" ->
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP_MR1) Settings.ACTION_BATTERY_SAVER_SETTINGS else null
+        "batteryUsage" -> Intent.ACTION_POWER_USAGE_SUMMARY
         "dataUsage" ->
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) Settings.ACTION_DATA_USAGE_SETTINGS else null
         "airplaneMode" -> Settings.ACTION_AIRPLANE_MODE_SETTINGS
@@ -329,6 +348,8 @@ class SettingsNavigator(private val context: Context) {
         "roaming" -> Settings.ACTION_DATA_ROAMING_SETTINGS
         "doNotDisturb" ->
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) ACTION_ZEN_MODE_SETTINGS else null
+        "doNotDisturbPriority" ->
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) Settings.ACTION_ZEN_MODE_PRIORITY_SETTINGS else null
         "storage" -> Settings.ACTION_INTERNAL_STORAGE_SETTINGS
         "deviceInfo" -> Settings.ACTION_DEVICE_INFO_SETTINGS
         "systemUpdate" -> ACTION_SYSTEM_UPDATE_SETTINGS

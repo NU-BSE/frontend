@@ -3,8 +3,9 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { ActivityIndicator, Pressable, ScrollView, StyleSheet, View } from "react-native";
 
-import { useAi } from "@/ai/AiProvider";
+import { track } from "@/analytics";
 import { OnboardingNavBar } from "@/components/OnboardingNavBar";
+import { OnboardingProgress, progressFor } from "@/components/OnboardingProgress";
 import { Screen } from "@/components/Screen";
 import { Text } from "@/components/Text";
 import {
@@ -21,23 +22,24 @@ import {
   type BillingPeriod,
 } from "@/features/subscription/plans";
 import { resolvePricing } from "@/features/subscription/pricing";
+import { shouldShowPaywall } from "@/features/onboarding/subscriptionDecision";
 import { getMySubscription, verifyPlayPurchase } from "@/api/client";
-import { setOnboardingComplete } from "@/storage/prefs";
 import { ENTITLEMENTS_QUERY_KEY } from "@/features/subscription/useEntitlements";
+import { getInstalledModel, verifyInstalled } from "@/ai/modelInstall";
+import { getMemoryProfile, setOnboardingComplete } from "@/storage/prefs";
 import { gutter, palette, radius, spacing } from "@/theme/tokens";
 
 /**
- * The paywall, shown after the on-device model size is chosen.
- *
- * Skipping is deliberately available and plainly worded. The trial is free and
- * the app is usable on-device without Pro, so a paywall that traps the user
- * mid-onboarding would cost more installs than it converts — and the local
- * agent is the product's whole privacy argument.
+ * The paywall, shown only after the first real Creepy task and the feedback
+ * that follows it — never before. Skipping is deliberately available, and its
+ * copy is honest about what actually runs on this phone: it promises "keep
+ * using Creepy on this phone" only when on-device inference was chosen AND the
+ * model is really downloaded. Otherwise it says Cloud — the on-device engine
+ * would only be the stub until the weights are there.
  */
 export default function OnboardingSubscription() {
   const router = useRouter();
   const queryClient = useQueryClient();
-  const { activateSelectedEngine } = useAi();
 
   const [period, setPeriod] = useState<BillingPeriod>("annual");
   const [storePrices, setStorePrices] = useState<
@@ -45,6 +47,28 @@ export default function OnboardingSubscription() {
   >({});
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  const { data: memoryProfile } = useQuery({
+    queryKey: ["memory-profile"],
+    queryFn: getMemoryProfile,
+    staleTime: Infinity,
+  });
+  const { data: modelReady } = useQuery({
+    queryKey: ["on-device-model-ready"],
+    queryFn: async () => {
+      const installed = await getInstalledModel();
+      return installed ? verifyInstalled(installed) : false;
+    },
+    staleTime: Infinity,
+  });
+  const onDevice = memoryProfile !== "cloud" && modelReady === true;
+
+  const paywallViewed = useRef(false);
+  useEffect(() => {
+    if (paywallViewed.current) return;
+    paywallViewed.current = true;
+    track("onboarding_paywall_viewed");
+  }, []);
 
   /*
    * Some accounts are not billed at all — today that means the credentials
@@ -57,7 +81,7 @@ export default function OnboardingSubscription() {
     queryKey: ["subscription-required"],
     queryFn: async () => {
       const { entitlements } = await getMySubscription();
-      return entitlements.subscriptionRequired === false;
+      return !shouldShowPaywall(entitlements.subscriptionRequired);
     },
     // The paywall is the safe outcome, so a failure to ask is not retried into
     // a long spinner — one attempt, then show the offer.
@@ -102,6 +126,7 @@ export default function OnboardingSubscription() {
     }
     await setOnboardingComplete();
     await queryClient.invalidateQueries({ queryKey: ["onboarding-status"] });
+    track("onboarding_completed");
     router.replace("/(tabs)/feed");
   }, [isUpgrade, queryClient, router]);
 
@@ -111,6 +136,12 @@ export default function OnboardingSubscription() {
     setError(null);
     try {
       const result = await purchase(period);
+      track(
+        period === "annual"
+          ? "onboarding_trial_started"
+          : "onboarding_subscription_started",
+        { period },
+      );
       /*
        * Still no local "subscribed" flag. The purchase token proves payment to
        * Play, not entitlement to this app: the backend resolves it against the
@@ -187,6 +218,9 @@ export default function OnboardingSubscription() {
 
   return (
     <Screen>
+      <View style={styles.progressWrap}>
+        <OnboardingProgress fraction={progressFor("subscription")} />
+      </View>
       <ScrollView
         contentContainerStyle={styles.content}
         showsVerticalScrollIndicator={false}
@@ -196,11 +230,10 @@ export default function OnboardingSubscription() {
             Creepy Pro
           </Text>
           <Text variant="display" style={styles.heading}>
-            One plan. Two ways to pay.
+            Keep Creepy working for you
           </Text>
           <Text variant="bodyLarge" tone="secondary" style={styles.body}>
-            Everything Creepy does is in a single plan. Annual comes with{" "}
-            {TRIAL_DAYS} days free.
+            Full access to Creepy, connected apps and local AI.
           </Text>
         </View>
 
@@ -289,7 +322,11 @@ export default function OnboardingSubscription() {
           style={({ pressed }) => [styles.skip, pressed && styles.pressed]}
         >
           <Text variant="label" tone="secondary">
-            {isUpgrade ? "Not now" : "Not now — keep the on-device agent"}
+            {isUpgrade
+              ? "Not now"
+              : onDevice
+                ? "Not now — keep using Creepy on this phone"
+                : "Not now — continue with Cloud"}
           </Text>
         </Pressable>
       </ScrollView>
@@ -310,6 +347,10 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     paddingHorizontal: gutter.screen,
     paddingVertical: spacing.xxxl,
+  },
+  progressWrap: {
+    paddingHorizontal: gutter.screen,
+    paddingTop: spacing.lg,
   },
   intro: { alignItems: "center", marginBottom: spacing.xxl },
   heading: {

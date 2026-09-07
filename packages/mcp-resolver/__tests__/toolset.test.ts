@@ -87,6 +87,19 @@ describe('createMcpToolset (framework adapter over a real stdio server)', () => 
     expect((error as McpResolutionError).message).toContain('GITHUB_TOKEN');
   });
 
+  it('rejects a missing executable with RuntimeNotInstalled', async () => {
+    const resolved = fixtureResolved();
+    resolved.command = 'definitely-not-a-real-command-xyz-12345';
+
+    const error = await createMcpToolset(resolved)
+      .then(() => null)
+      .catch((err: unknown) => err);
+
+    expect(error).toBeInstanceOf(McpResolutionError);
+    expect((error as McpResolutionError).type).toBe('RuntimeNotInstalled');
+    expect((error as McpResolutionError).message).toContain('definitely-not-a-real-command-xyz-12345');
+  });
+
   it('manager reuses one process per key and closes all on shutdown', async () => {
     const manager = new McpToolsetManager({ logger: () => undefined });
     const resolved = fixtureResolved();

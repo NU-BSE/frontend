@@ -60,7 +60,7 @@ export const SUBSCRIPTION_PLANS: SubscriptionPlan[] = [
     perMonth: '$12.90',
     caption: 'per month',
     hasFreeTrial: false,
-    cta: 'Start',
+    cta: 'Continue monthly',
     terms:
       'Billed $12.90 today and every month after. Cancel anytime. The free ' +
       'trial is on the annual plan.',
@@ -74,7 +74,7 @@ export const SUBSCRIPTION_PLANS: SubscriptionPlan[] = [
     caption: 'per month, billed annually',
     badge: 'Save $36',
     hasFreeTrial: true,
-    cta: 'Start free',
+    cta: 'Start 7-day free trial',
     terms:
       'Free for 7 days, then $118.80 once per year — $9.90 per month, saving ' +
       '$36 against monthly. Cancel anytime before the trial ends and you are ' +

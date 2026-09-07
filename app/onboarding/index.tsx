@@ -1,4 +1,4 @@
-import React, { useCallback, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { useRouter } from "expo-router";
 import {
@@ -11,6 +11,7 @@ import {
   View,
 } from "react-native";
 
+import { track } from "@/analytics";
 import { requestEmailCode } from "@/auth/emailAuth";
 import {
   canonicalName,
@@ -18,10 +19,15 @@ import {
   NAME_MIN_LENGTH,
 } from "@/features/onboarding/name";
 import { OnboardingNavBar } from "@/components/OnboardingNavBar";
+import { OnboardingProgress, progressFor } from "@/components/OnboardingProgress";
 import { Screen } from "@/components/Screen";
 import { Text } from "@/components/Text";
 import CreepyMascot from "@assets/icons/creepy-mascot.svg";
-import { setPendingEmailAuth, setUserProfile } from "@/storage/prefs";
+import {
+  getPendingEmailAuth,
+  setPendingEmailAuth,
+  setUserProfile,
+} from "@/storage/prefs";
 import { gutter, palette, radius, shadow, spacing } from "@/theme/tokens";
 
 const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
@@ -33,6 +39,23 @@ export default function OnboardingProfile() {
   const [email, setEmail] = useState("");
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  /*
+   * A user who already requested a code (process death, network error mid-flow)
+   * returns to the code screen instead of being asked for a code they already
+   * have. The pending request is a registration in progress, not a login.
+   */
+  useEffect(() => {
+    let cancelled = false;
+    void getPendingEmailAuth().then((pending) => {
+      if (!cancelled && pending?.purpose === "registration") {
+        router.replace("/onboarding/auth");
+      }
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [router]);
 
   const normalizedName = useMemo(() => canonicalName(name), [name]);
   const normalizedEmail = email.trim().toLowerCase();
@@ -82,6 +105,7 @@ export default function OnboardingProfile() {
       if (challenge.autoVerified) {
         await setUserProfile({ name: normalizedName, email: normalizedEmail });
         await queryClient.invalidateQueries({ queryKey: ["auth-session"] });
+        track("onboarding_auth_completed");
         router.replace("/onboarding/features");
         return;
       }
@@ -112,6 +136,9 @@ export default function OnboardingProfile() {
 
   return (
     <Screen>
+      <View style={styles.progressWrap}>
+        <OnboardingProgress fraction={progressFor("auth")} />
+      </View>
       <KeyboardAvoidingView
         behavior={Platform.OS === "ios" ? "padding" : undefined}
         style={styles.flex}
@@ -126,10 +153,11 @@ export default function OnboardingProfile() {
               <CreepyMascot width={64} height={64} color={palette.brand} />
             </View>
             <Text variant="display" style={styles.heading}>
-              Let&apos;s get acquainted
+              Create your Creepy account
             </Text>
             <Text variant="bodyLarge" tone="secondary" style={styles.body}>
-              Tell us how to address you and where to send account updates.
+              Your account keeps your Creepy setup available and lets us manage
+              your subscription.
             </Text>
           </View>
 
@@ -219,6 +247,10 @@ export default function OnboardingProfile() {
 
 const styles = StyleSheet.create({
   flex: { flex: 1 },
+  progressWrap: {
+    paddingHorizontal: gutter.screen,
+    paddingTop: spacing.lg,
+  },
   content: {
     flexGrow: 1,
     justifyContent: "center",

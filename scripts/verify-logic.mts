@@ -360,10 +360,13 @@ console.log('\nsubscription plans:');
     'monthly carries no free trial',
   );
   assert(planFor('annual').hasFreeTrial === true, 'annual carries the trial');
-  assert(planFor('monthly').cta === 'Start', 'monthly button reads Start');
   assert(
-    planFor('annual').cta === 'Start free',
-    'annual button reads Start free',
+    planFor('monthly').cta === 'Continue monthly',
+    'monthly button reads Continue monthly',
+  );
+  assert(
+    planFor('annual').cta === 'Start 7-day free trial',
+    'annual button reads Start 7-day free trial',
   );
   assert(
     !/free|trial/iu.test(planFor('monthly').terms.split('The free trial')[0]),

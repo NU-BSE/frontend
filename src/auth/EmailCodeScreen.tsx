@@ -12,6 +12,7 @@ import {
 } from "react-native";
 
 import { requestEmailCode, verifyEmailCode } from "./emailAuth";
+import { track } from "@/analytics";
 import { OnboardingNavBar } from "@/components/OnboardingNavBar";
 import { Screen } from "@/components/Screen";
 import { Text } from "@/components/Text";
@@ -60,6 +61,7 @@ export function EmailCodeScreen({ mode }: { mode: "registration" | "login" }) {
       await queryClient.invalidateQueries({ queryKey: ["auth-session"] });
 
       if (mode === "registration") {
+        track("onboarding_auth_completed");
         router.replace("/onboarding/features");
         return;
       }

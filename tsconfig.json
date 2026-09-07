@@ -25,7 +25,13 @@
     "scripts/**/*.ts",
     "scripts/**/*.mts"
   ],
+  "_excludeReason": "src/attestation/** used to be excluded wholesale, so nothing in it was typechecked - an undefined import in AttestationDebugPanel.tsx passed a green build. What remains out is the part this app does not run: server/** is a Node service needing express, pg, redis, google-auth-library and @simplewebauthn/server, none of which belong in a mobile dependency tree; hooks/** and the executeAttested chain need expo-device, jail-monkey and json-canonicalize and are unreachable from the app, which imports only client/deviceAssessment. Everything else - classification, shared, native, and the rest of client - is now checked.",
   "exclude": [
-    "src/attestation/**"
+    "src/attestation/server/**",
+    "src/attestation/hooks/**",
+    "src/attestation/client/executeAttested.ts",
+    "src/attestation/client/instrumentation.ts",
+    "src/attestation/client/payloadBinding.ts",
+    "src/attestation/client/index.ts"
   ]
 }

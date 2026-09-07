@@ -8,9 +8,11 @@
         "expo",
         "start",
         "--port",
-        "8081"
+        "8081",
+        "--clear"
       ],
-      "port": 8081
+      "port": 8081,
+      "autoPort": false
     },
     {
       "name": "web",

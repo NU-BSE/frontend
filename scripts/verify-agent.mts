@@ -1915,6 +1915,116 @@ console.log('\na scope failure tells the model how to fix it:');
   }
 }
 
+/*
+ * A package that is not installed says so, and says what to do.
+ *
+ * Asked to open Gemini's settings the planner produced
+ * `com.google.android.apps.gemini`, which does not exist — the real id is
+ * `com.google.android.apps.bard`. Two tools then agreed with it:
+ * `android.apps.get_info` answered `{ app: null }` and reported *success*, so
+ * the timeline read "done" and the invented id looked confirmed; then
+ * `open_app` failed with the destination being unavailable, which is a
+ * different fault entirely. The model concluded App Details was unsupported,
+ * claimed to have opened the app by hand, and announced it would retry with
+ * the same id.
+ */
+console.log('\nan invented package id is refused, not confirmed:');
+{
+  const { createAndroidSettingsTools } = await import(
+    '@mobile-agent/connector-android'
+  );
+
+  const installed = [
+    {
+      packageName: 'com.google.android.apps.bard',
+      label: 'Gemini',
+      enabled: true,
+      systemApp: false,
+      launchable: true,
+    },
+  ];
+
+  const bridge = {
+    getAppInfo: (packageName: string) =>
+      installed.find((app) => app.packageName === packageName)
+        ? { ...installed[0], versionName: '1.0', versionCode: 1 }
+        : null,
+    findApps: (query: string) =>
+      installed.filter(
+        (app) =>
+          app.label.toLowerCase().includes(query.toLowerCase()) ||
+          app.packageName.toLowerCase().includes(query.toLowerCase()),
+      ),
+    canOpenAppSettings: () => true,
+    openAppSettings: () => Promise.resolve(true),
+  } as never;
+
+  const tools = createAndroidSettingsTools({ bridge });
+  const tool = (name: string) =>
+    tools.find((candidate) => candidate.name === name)!;
+
+  const call = async (name: string, args: Record<string, unknown>) => {
+    try {
+      await tool(name).execute(args as never, {} as never);
+      return null;
+    } catch (error) {
+      return error instanceof Error ? error.message : String(error);
+    }
+  };
+
+  const infoError = await call('android.apps.get_info', {
+    connectionId: 'android-device',
+    packageName: 'com.google.android.apps.gemini',
+  });
+  assert(
+    infoError !== null,
+    'get_info fails for a package that is not there, rather than succeeding with null',
+  );
+  assert(
+    infoError?.includes('No app with package') === true,
+    'and names the actual fault',
+  );
+  assert(
+    infoError?.includes('android.apps.find') === true,
+    'and the tool that would have produced a real id',
+  );
+  assert(
+    infoError?.includes('com.google.android.apps.bard') === true,
+    'and lists what is installed under a similar name',
+  );
+
+  const openError = await call('android.settings.open_app', {
+    connectionId: 'android-device',
+    target: 'appDetails',
+    packageName: 'com.google.android.apps.gemini',
+  });
+  assert(
+    openError?.includes('No app with package') === true,
+    'open_app blames the missing package, not the destination',
+  );
+  assert(
+    openError?.includes('destination is unavailable') !== true,
+    'so "App Details is not available" is no longer what a wrong id produces',
+  );
+
+  // The real id still works, through both tools.
+  assert(
+    (await call('android.apps.get_info', {
+      connectionId: 'android-device',
+      packageName: 'com.google.android.apps.bard',
+    })) === null,
+    'an installed package still reads normally',
+  );
+  assert(
+    (await call('android.settings.open_app', {
+      connectionId: 'android-device',
+      target: 'appDetails',
+      packageName: 'com.google.android.apps.bard',
+    })) === null,
+    'and still opens',
+  );
+}
+
 console.log('verify:agent — all checks passed');
 }
 

@@ -11,6 +11,7 @@ import {
 } from 'react-native';
 
 import { track } from '@/analytics';
+import { Button } from '@/components/Button';
 import { Icon } from '@/components/Icon';
 import { OnboardingProgress, progressFor } from '@/components/OnboardingProgress';
 import { Screen } from '@/components/Screen';
@@ -21,7 +22,7 @@ import {
   buildFirstTaskSuggestions,
   type FirstTaskSuggestion,
 } from '@/features/onboarding/suggestions';
-import { getSelectedIntents } from '@/storage/prefs';
+import { getSelectedIntents, setFirstTaskDone } from '@/storage/prefs';
 import { gutter, palette, radius, spacing } from '@/theme/tokens';
 import ChevronRight from '@assets/icons/chevron-right.svg';
 
@@ -38,6 +39,7 @@ export default function OnboardingTry() {
   const [intents, setIntents] = useState<string[]>([]);
   const [customActive, setCustomActive] = useState(false);
   const [customText, setCustomText] = useState('');
+  const [continuing, setContinuing] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -81,6 +83,13 @@ export default function OnboardingTry() {
   }, [customText, router]);
 
   const canSendCustom = customText.trim().length > 0;
+
+  const continueSetup = useCallback(async () => {
+    if (continuing) return;
+    setContinuing(true);
+    await setFirstTaskDone();
+    router.replace('/onboarding/feedback');
+  }, [continuing, router]);
 
   return (
     <Screen>
@@ -206,6 +215,13 @@ export default function OnboardingTry() {
                 </Pressable>
               </View>
             ) : null}
+
+            <Button
+              label="Continue"
+              loading={continuing}
+              onPress={() => void continueSetup()}
+              style={styles.continueButton}
+            />
           </View>
         </ScrollView>
       </KeyboardAvoidingView>
@@ -250,6 +266,7 @@ const styles = StyleSheet.create({
   rowText: { flex: 1 },
   empty: { textAlign: 'center', paddingVertical: spacing.md },
   customBox: { gap: spacing.lg },
+  continueButton: { marginTop: spacing.md },
   customInput: {
     minHeight: 96,
     padding: spacing.lg,

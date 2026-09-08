@@ -54,6 +54,13 @@ export interface AgentRuntimeOptions {
   mcp?: AgentMcpClient;
   /** What the user actually has connected — injected into model context. */
   connections: ConnectionSummary[];
+  /** Live grants stay executor-only; they are never sent to the model. */
+  connectionScopes?: Record<string, readonly string[]>;
+  /** Re-read device grants after Android returns from a consent surface. */
+  refreshConnections?: () => Promise<{
+    connections: ConnectionSummary[];
+    connectionScopes: Record<string, readonly string[]>;
+  }>;
   maxSteps?: number;
   /**
    * Whether the app is in front of the user. Defaults to always active, which
@@ -200,6 +207,209 @@ export class AgentRuntime {
     this.setState(resumeState);
   }
 
+  private async refreshConnectionState(): Promise<void> {
+    const refreshed = await this.options.refreshConnections?.();
+    if (!refreshed) return;
+    this.options.connections = refreshed.connections;
+    this.options.connectionScopes = refreshed.connectionScopes;
+  }
+
+  private androidConnectionFor(call: AgentToolCall): ConnectionSummary | null {
+    const connectionId = call.args.connectionId;
+    if (typeof connectionId !== 'string') return null;
+    return (
+      this.options.connections.find(
+        (connection) =>
+          connection.id === connectionId && connection.provider === 'android',
+      ) ?? null
+    );
+  }
+
+  private noAndroidConnectionResult(): AgentToolResult {
+    return {
+      status: 'error',
+      error:
+        'No Android device is connected. Connect “This device” in Creepy ' +
+        'Settings, then try again.',
+      errorCode: 'CONNECTION_NOT_FOUND',
+    };
+  }
+
+  /** Executes and records an app-injected prerequisite just like a model call. */
+  private async executePrerequisite(
+    mcp: AgentMcpClient,
+    call: AgentToolCall,
+    tools: readonly AgentToolDefinition[],
+    stepToolResults: StepToolResult[],
+    steps: AgentRunStep[],
+    signal: AbortSignal,
+  ): Promise<AgentToolResult> {
+    this.setState({ type: 'calling_tool', toolName: call.toolName });
+    steps.push({
+      type: 'tool_call',
+      toolName: call.toolName,
+      safePreview: truncateStrings(call.args),
+    });
+
+    let result = await executeToolCall(mcp, call, signal);
+    if (result.status === 'approval_required') {
+      result = await this.handleApproval(mcp, call, result, steps);
+    }
+
+    this.toolLedger.record(call, result);
+    this.pushToolResult(
+      call,
+      result,
+      tools.find((tool) => tool.name === call.toolName),
+      stepToolResults,
+      steps,
+      false,
+    );
+    return result;
+  }
+
+  /**
+   * Usage access is a prerequisite, not a failure the model must decipher.
+   * Open Android's consent screen before querying, then re-read the local
+   * connection and only continue when the scope was actually granted.
+   */
+  private async prepareAndroidUsage(
+    mcp: AgentMcpClient,
+    call: AgentToolCall,
+    tools: readonly AgentToolDefinition[],
+    stepToolResults: StepToolResult[],
+    steps: AgentRunStep[],
+    signal: AbortSignal,
+  ): Promise<AgentToolResult | null> {
+    if (call.toolName !== 'android.usage.recent') return null;
+
+    const connection = this.androidConnectionFor(call);
+    if (!connection) return this.noAndroidConnectionResult();
+
+    const scopes = this.options.connectionScopes?.[connection.id];
+    // Runtimes without a scope source (notably isolated tests) retain the
+    // ordinary MCP behavior rather than assuming a permission is missing.
+    if (!scopes || scopes.includes('android.usage.read')) return null;
+
+    const openCall: AgentToolCall = {
+      id: this.nextId('call'),
+      toolName: 'android.settings.open',
+      args: { connectionId: connection.id, screen: 'usageAccess' },
+    };
+    const opened = await this.executePrerequisite(
+      mcp,
+      openCall,
+      tools,
+      stepToolResults,
+      steps,
+      signal,
+    );
+    if (opened.status !== 'success') {
+      return opened.status === 'user_denied'
+        ? opened
+        : {
+            status: 'error',
+            error:
+              'Creepy could not open Android Usage access settings. Open ' +
+              'Creepy’s device settings and allow Usage access, then try again.',
+            errorCode: 'PERMISSION_REQUIRED',
+          };
+    }
+
+    // Give AppState a chance to observe the system activity before waiting
+    // for the return. The Settings tool itself completes as soon as it opens.
+    await new Promise((resolve) => setTimeout(resolve, 200));
+    await this.awaitForeground(signal);
+    await this.refreshConnectionState();
+
+    const refreshedScopes = this.options.connectionScopes?.[connection.id];
+    if (!refreshedScopes?.includes('android.usage.read')) {
+      return {
+        status: 'error',
+        error:
+          'Usage access is still off. Turn on Usage access for Creepy in ' +
+          'Android Settings, return to Creepy, and try again.',
+        errorCode: 'PERMISSION_REQUIRED',
+      };
+    }
+
+    return null;
+  }
+
+  private assistantRoleRequired(
+    call: AgentToolCall,
+    result: AgentToolResult,
+  ): boolean {
+    return (
+      call.toolName.startsWith('android.assistant.') &&
+      call.toolName !== 'android.assistant.request_role' &&
+      result.status === 'error' &&
+      result.errorCode === 'PERMISSION_REQUIRED'
+    );
+  }
+
+  /** Requests the assistant role, refreshes consent, and retries the operation. */
+  private async recoverAssistantRole(
+    mcp: AgentMcpClient,
+    originalCall: AgentToolCall,
+    tools: readonly AgentToolDefinition[],
+    stepToolResults: StepToolResult[],
+    steps: AgentRunStep[],
+    signal: AbortSignal,
+  ): Promise<AgentToolResult> {
+    const connection = this.androidConnectionFor(originalCall);
+    if (!connection) return this.noAndroidConnectionResult();
+
+    const requestCall: AgentToolCall = {
+      id: this.nextId('call'),
+      toolName: 'android.assistant.request_role',
+      args: { connectionId: connection.id },
+    };
+    const requested = await this.executePrerequisite(
+      mcp,
+      requestCall,
+      tools,
+      stepToolResults,
+      steps,
+      signal,
+    );
+    if (requested.status !== 'success') return requested;
+
+    await this.awaitForeground(signal);
+    await this.refreshConnectionState();
+
+    const statusCall: AgentToolCall = {
+      id: this.nextId('call'),
+      toolName: 'android.assistant.get_status',
+      args: { connectionId: connection.id },
+    };
+    const status = await this.executePrerequisite(
+      mcp,
+      statusCall,
+      tools,
+      stepToolResults,
+      steps,
+      signal,
+    );
+    const role = status.data as { isDefault?: unknown } | undefined;
+    if (status.status !== 'success' || role?.isDefault !== true) {
+      return {
+        status: 'error',
+        error:
+          'Creepy is not the active Android assistant. Choose Creepy in the ' +
+          'Android assistant-role prompt, then return and try again.',
+        errorCode: 'PERMISSION_REQUIRED',
+      };
+    }
+
+    this.setState({ type: 'calling_tool', toolName: originalCall.toolName });
+    let retried = await executeToolCall(mcp, originalCall, signal);
+    if (retried.status === 'approval_required') {
+      retried = await this.handleApproval(mcp, originalCall, retried, steps);
+    }
+    return retried;
+  }
+
   /** Updates the local MCP client without rebuilding the runtime. */
   setMcp(mcp: AgentMcpClient | undefined): void {
     this.mcp = mcp;
@@ -216,6 +426,10 @@ export class AgentRuntime {
    */
   setConnections(connections: ConnectionSummary[]): void {
     this.options.connections = connections;
+  }
+
+  setConnectionScopes(scopes: Record<string, readonly string[]>): void {
+    this.options.connectionScopes = scopes;
   }
 
   getMessages(): readonly AgentMessage[] {
@@ -594,12 +808,23 @@ export class AgentRuntime {
                 'The local tool runtime is unavailable, so this action cannot be executed.',
               errorCode: 'TOOL_EXECUTION_ERROR',
             };
+          } else if (
+            call.toolName.startsWith('android.') &&
+            !this.androidConnectionFor(call)
+          ) {
+            toolResult = this.noAndroidConnectionResult();
           } else {
-            toolResult = await executeToolCall(
+            const prerequisiteResult = await this.prepareAndroidUsage(
               this.mcp,
               call,
+              tools,
+              stepToolResults,
+              steps,
               controller.signal,
             );
+            toolResult =
+              prerequisiteResult ??
+              (await executeToolCall(this.mcp, call, controller.signal));
           }
 
           if (toolResult.status === 'approval_required' && this.mcp) {
@@ -608,6 +833,20 @@ export class AgentRuntime {
               call,
               toolResult,
               steps,
+            );
+          }
+
+          if (
+            this.mcp &&
+            this.assistantRoleRequired(call, toolResult)
+          ) {
+            toolResult = await this.recoverAssistantRole(
+              this.mcp,
+              call,
+              tools,
+              stepToolResults,
+              steps,
+              controller.signal,
             );
           }
 

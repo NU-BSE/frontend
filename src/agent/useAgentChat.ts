@@ -8,8 +8,16 @@ import {
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 
 import { messageText } from '@/features/chat/MessageBubble';
-import { approveConnectorTool, getLocalMcpRuntime } from '@/mcp/runtime-singleton';
-import { useConnections } from '@/connections/useConnections';
+import {
+  approveConnectorTool,
+  getLocalMcpRuntime,
+  refreshLocalDeviceConnections,
+} from '@/mcp/runtime-singleton';
+import { listConnections } from '@/connections/connectionService';
+import {
+  CONNECTIONS_QUERY_KEY,
+  useConnections,
+} from '@/connections/useConnections';
 import { appendHistory } from '@/storage/history';
 import { useCreepyChat } from '@/ai/useCreepyChat';
 
@@ -88,6 +96,18 @@ export function useAgentChat(options: UseAgentChatOptions = {}): AgentChat {
 
   const connectionsQuery = useConnections();
 
+  const refreshConnections = useCallback(async () => {
+    await refreshLocalDeviceConnections();
+    const records = await listConnections();
+    queryClient.setQueryData(CONNECTIONS_QUERY_KEY, records);
+    return {
+      connections: toConnectionSummaries(records),
+      connectionScopes: Object.fromEntries(
+        records.map((record) => [record.id, record.scopes]),
+      ),
+    };
+  }, [queryClient]);
+
   const [runState, setRunState] = useState<AgentRunState>({ type: 'idle' });
   const [pendingApproval, setPendingApproval] =
     useState<PendingApproval | null>(null);
@@ -106,6 +126,10 @@ export function useAgentChat(options: UseAgentChatOptions = {}): AgentChat {
     return new AgentRuntime({
       model,
       connections: toConnectionSummaries(connectionsQuery.data ?? []),
+      connectionScopes: Object.fromEntries(
+        (connectionsQuery.data ?? []).map((record) => [record.id, record.scopes]),
+      ),
+      refreshConnections,
       approveApproval: approveConnectorTool,
       foreground: foregroundGate,
       onState: (state) => {
@@ -140,7 +164,7 @@ export function useAgentChat(options: UseAgentChatOptions = {}): AgentChat {
     // connectionsQuery.data is intentionally not a dependency: live updates
     // flow through setConnections below, without rebuilding the conversation.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [category, model, queryClient]);
+  }, [category, model, queryClient, refreshConnections]);
 
   useEffect(() => {
     return () => {
@@ -159,7 +183,12 @@ export function useAgentChat(options: UseAgentChatOptions = {}): AgentChat {
 
   useEffect(() => {
     agentRuntime?.setConnections(summaries);
-  }, [agentRuntime, summaries]);
+    agentRuntime?.setConnectionScopes(
+      Object.fromEntries(
+        (connectionsQuery.data ?? []).map((record) => [record.id, record.scopes]),
+      ),
+    );
+  }, [agentRuntime, connectionsQuery.data, summaries]);
 
   const subscribeToMessages = useCallback(
     (onChange: () => void) =>

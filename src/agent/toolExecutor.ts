@@ -52,6 +52,76 @@ export function classifyToolError(message: string): AgentErrorCode {
   return 'TOOL_EXECUTION_ERROR';
 }
 
+export interface NormalizedToolFailure {
+  message: string;
+  errorCode: AgentErrorCode;
+}
+
+function jsonErrorMessage(value: unknown): string | null {
+  if (typeof value === 'string') return value.trim() || null;
+  if (typeof value !== 'object' || value === null) return null;
+
+  const record = value as Record<string, unknown>;
+  for (const key of ['message', 'detail', 'error', 'reason']) {
+    const message = jsonErrorMessage(record[key]);
+    if (message) return message;
+  }
+  return null;
+}
+
+function parseEmbeddedJson(message: string): unknown {
+  const start = message.indexOf('{');
+  const end = message.lastIndexOf('}');
+  if (start < 0 || end <= start) return null;
+  try {
+    return JSON.parse(message.slice(start, end + 1));
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Turns backend/protocol failures into short text suitable for both the model
+ * and the visible transcript. Assistant-role failures are special because
+ * some backends return their whole JSON error body as the exception message.
+ */
+export function normalizeToolFailure(
+  toolName: string,
+  rawMessage: string,
+): NormalizedToolFailure {
+  const assistantTool = toolName.startsWith('android.assistant.');
+  if (assistantTool && /\bNOT_ALLOWED\b/iu.test(rawMessage)) {
+    return {
+      message:
+        'Creepy is not the active Android assistant yet. Ask the user to ' +
+        'allow the assistant role, then check the role again.',
+      errorCode: 'PERMISSION_REQUIRED',
+    };
+  }
+
+  if (assistantTool) {
+    const parsed = parseEmbeddedJson(rawMessage);
+    if (parsed !== null) {
+      return {
+        message:
+          jsonErrorMessage(parsed)?.slice(0, MAX_ERROR_CHARS) ??
+          'Creepy could not complete the Android assistant request.',
+        errorCode: classifyToolError(rawMessage),
+      };
+    }
+  }
+
+  const errorCode = classifyToolError(rawMessage);
+  return {
+    message: sanitizeForModel(
+      errorCode === 'PERMISSION_REQUIRED'
+        ? withScopeRemedy(rawMessage)
+        : rawMessage,
+    ),
+    errorCode,
+  };
+}
+
 /**
  * Trims a long error from the middle, not the end.
  *
@@ -226,7 +296,8 @@ interface StructuredToolContent {
  * error stands — guessing which of a user's two Google accounts to act on is
  * exactly the decision that must not be made for them.
  *
- * An absent connectionId is left absent: whether a tool takes one is the
+ * An absent connectionId is injected only for the sole local Android device.
+ * It stays absent everywhere else: whether another tool takes one is the
  * schema's business, and `system.health` would reject the extra field.
  *
  * Resolution happens before execution rather than inside it, so the approval
@@ -239,9 +310,6 @@ export function resolveConnectionIds(
 ): AgentToolCall[] {
   return calls.map((call) => {
     const given = call.args.connectionId;
-    if (typeof given !== 'string' || given.length === 0) return call;
-    if (connections.some((connection) => connection.id === given)) return call;
-
     const namespace = call.toolName.split('.')[0] ?? '';
     // The same match `toolsForConnections` uses: `telegram-user` serves
     // `telegram.*`.
@@ -250,6 +318,22 @@ export function resolveConnectionIds(
         connection.provider === namespace ||
         connection.provider.startsWith(`${namespace}-`),
     );
+
+    /*
+     * Android has one local-device connection, not an account picker. The
+     * model is allowed to omit this implementation detail; inject it when the
+     * active device is unambiguous. Keep absent ids absent for every other
+     * namespace, especially account providers and runtime tools.
+     */
+    if (typeof given !== 'string' || given.length === 0) {
+      if (namespace !== 'android' || serving.length !== 1) return call;
+      return {
+        ...call,
+        args: { ...call.args, connectionId: serving[0]!.id },
+      };
+    }
+
+    if (connections.some((connection) => connection.id === given)) return call;
     if (serving.length !== 1) return call;
 
     const resolved = serving[0]!.id;
@@ -306,13 +390,16 @@ async function callMcpTool(
     if (signal?.aborted) {
       throw new AgentError('CANCELLED', 'The run was stopped', error);
     }
-    const message =
+    const rawMessage =
       error instanceof Error ? error.message : 'Tool execution failed';
     const isToolError =
       error instanceof Error && error.name === 'ToolExecutionError';
-    const errorCode: AgentErrorCode = isToolError
-      ? classifyToolError(message)
-      : 'TOOL_EXECUTION_ERROR';
+    const normalized = isToolError
+      ? normalizeToolFailure(name, rawMessage)
+      : {
+          message: sanitizeForModel(rawMessage),
+          errorCode: 'TOOL_EXECUTION_ERROR' as const,
+        };
     if (DEV_LOG) {
       /*
        * The arguments too. Diagnosing "target: Invalid option" from a log that
@@ -322,17 +409,15 @@ async function callMcpTool(
        */
       console.error('[tool] call failed', {
         tool: name,
-        errorCode,
-        message,
+        errorCode: normalized.errorCode,
+        message: rawMessage,
         args: JSON.stringify(args).slice(0, 300),
       });
     }
     return {
       status: 'error',
-      error: sanitizeForModel(
-        errorCode === 'PERMISSION_REQUIRED' ? withScopeRemedy(message) : message,
-      ),
-      errorCode,
+      error: normalized.message,
+      errorCode: normalized.errorCode,
     };
   }
 

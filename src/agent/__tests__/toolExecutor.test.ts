@@ -1,4 +1,9 @@
-import { classifyToolError, SCOPE_REMEDIES } from '@/agent/toolExecutor';
+import {
+  classifyToolError,
+  normalizeToolFailure,
+  resolveConnectionIds,
+  SCOPE_REMEDIES,
+} from '@/agent/toolExecutor';
 
 const SIGNAL_SCOPES = [
   'android.usage.read',
@@ -35,5 +40,66 @@ describe('signal-scope permission classification', () => {
     expect(SCOPE_REMEDIES.get('android.media.control')?.screen).toBe(
       'notificationListener',
     );
+  });
+});
+
+describe('Android execution prerequisites', () => {
+  const android = {
+    id: 'android-device',
+    provider: 'android',
+    displayName: 'This device',
+    capabilities: [],
+  };
+
+  it('injects the sole active Android connection when the model omits it', () => {
+    const [resolved] = resolveConnectionIds(
+      [
+        {
+          id: 'usage',
+          toolName: 'android.usage.recent',
+          args: { days: 7 },
+        },
+      ],
+      [android],
+    );
+
+    expect(resolved?.args).toEqual({ days: 7, connectionId: 'android-device' });
+  });
+
+  it('does not invent an Android connection when none is connected', () => {
+    const [resolved] = resolveConnectionIds(
+      [
+        {
+          id: 'usage',
+          toolName: 'android.usage.recent',
+          args: { days: 7 },
+        },
+      ],
+      [],
+    );
+
+    expect(resolved?.args).toEqual({ days: 7 });
+  });
+
+  it('turns assistant NOT_ALLOWED JSON into readable permission guidance', () => {
+    const failure = normalizeToolFailure(
+      'android.assistant.get_screen_context',
+      'Backend error: {"code":"NOT_ALLOWED","detail":"role missing"}',
+    );
+
+    expect(failure.errorCode).toBe('PERMISSION_REQUIRED');
+    expect(failure.message).toContain('not the active Android assistant');
+    expect(failure.message).not.toContain('{');
+    expect(failure.message).not.toContain('NOT_ALLOWED');
+  });
+
+  it('extracts readable assistant errors instead of showing raw JSON', () => {
+    const failure = normalizeToolFailure(
+      'android.assistant.get_status',
+      '{"detail":{"message":"Assistant service is unavailable."}}',
+    );
+
+    expect(failure.message).toBe('Assistant service is unavailable.');
+    expect(failure.message).not.toContain('{');
   });
 });

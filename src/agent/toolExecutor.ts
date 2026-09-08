@@ -126,6 +126,65 @@ export const SCOPE_REMEDIES: ReadonlyMap<string, ScopeRemedy> = new Map([
         'confirm.',
     },
   ],
+  [
+    'android.usage.read',
+    {
+      screen: 'usageAccess',
+      advice:
+        'Creepy cannot read app usage history until the user allows "Usage ' +
+        'access" for it. Call android.settings.open with screen "usageAccess" ' +
+        'to put that switch in front of them, then say in plain words that ' +
+        'they need to turn it on. Do not retry until they confirm.',
+    },
+  ],
+  [
+    'android.notifications.read',
+    {
+      screen: 'notificationListener',
+      advice:
+        'Creepy cannot read notifications until the user allows "Notification ' +
+        'access" for it. Call android.settings.open with screen ' +
+        '"notificationListener" to put that switch in front of them, then say ' +
+        'in plain words that they need to turn it on. Do not retry until they ' +
+        'confirm.',
+    },
+  ],
+  [
+    'android.notifications.reply',
+    {
+      screen: 'notificationListener',
+      advice:
+        'Creepy cannot reply through notifications until the user allows ' +
+        '"Notification access" for it. Call android.settings.open with screen ' +
+        '"notificationListener" to put that switch in front of them, then say ' +
+        'in plain words that they need to turn it on. Do not retry until they ' +
+        'confirm.',
+    },
+  ],
+  [
+    'android.media.read',
+    {
+      screen: 'notificationListener',
+      advice:
+        'Creepy cannot read what is playing until the user allows "Notification ' +
+        'access" for it — Android exposes active media sessions only to ' +
+        'notification listeners. Call android.settings.open with screen ' +
+        '"notificationListener" to put that switch in front of them. Do not ' +
+        'retry until they confirm.',
+    },
+  ],
+  [
+    'android.media.control',
+    {
+      screen: 'notificationListener',
+      advice:
+        'Creepy cannot control playback until the user allows "Notification ' +
+        'access" for it — Android exposes media transport controls only to ' +
+        'notification listeners. Call android.settings.open with screen ' +
+        '"notificationListener" to put that switch in front of them. Do not ' +
+        'retry until they confirm.',
+    },
+  ],
 ]);
 
 /** Appends the remedy for whichever known scope the message names. */

@@ -1,4 +1,4 @@
-import React, { useEffect } from 'react';
+import React, { useEffect, useState } from 'react';
 import { AppState, Pressable, ScrollView, StyleSheet, View } from 'react-native';
 import { router } from 'expo-router';
 
@@ -16,6 +16,8 @@ import {
   requestWriteSystemSettingsPermission,
 } from '@/connections/android/device-access';
 import { useDeviceSignalAccess } from '@/connections/android/useDeviceSignalAccess';
+import { useAssistantAccess } from '@/connections/android/useAssistantAccess';
+import { getAndroidNativeModulesHealth } from '@/connections/android/nativeModulesHealth';
 import {
   MIN_TOUCH_TARGET,
   gutter,
@@ -42,6 +44,12 @@ export default function AndroidConnectScreen() {
   const disconnect = useDisconnectConnection();
   const access = useAndroidDeviceAccess();
   const signals = useDeviceSignalAccess();
+  const assistant = useAssistantAccess();
+  const [missingModules] = useState(() =>
+    getAndroidNativeModulesHealth().filter(
+      (entry) => entry.available === false && entry.reason === 'MODULE_NOT_LINKED',
+    ),
+  );
 
   // When the app returns to the foreground, re-sync the connection record so
   // `scopes` reflect any permission the user just granted/revoked. `connect()`
@@ -118,6 +126,19 @@ export default function AndroidConnectScreen() {
               />
             </View>
 
+            {assistant.available ? (
+              <View style={styles.card}>
+                <AccessRow
+                  title="Digital assistant"
+                  description="Lets Creepy read your screen when you invoke it."
+                  allowed={assistant.status?.isDefault}
+                  optional
+                  onPress={assistant.requestRole}
+                  last
+                />
+              </View>
+            ) : null}
+
             <Text variant="headline">Device signals</Text>
             {/*
               Separate from the rows above because these are granted on their
@@ -159,6 +180,14 @@ export default function AndroidConnectScreen() {
             <Text variant="bodySmall" tone="muted">
               Changes apply when you return from the Android settings screen.
             </Text>
+
+            {missingModules.length > 0 ? (
+              <Text variant="bodySmall" tone="danger">
+                Native modules missing from this build:{' '}
+                {missingModules.map((entry) => entry.module).join(', ')}. The
+                matching capabilities will not work until the app is rebuilt.
+              </Text>
+            ) : null}
           </View>
         )}
 

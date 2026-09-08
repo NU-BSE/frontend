@@ -53,6 +53,74 @@ const ASSISTANT_CAPABILITIES = [
 ];
 
 /**
+ * Device-signal capabilities (usage history, the notification shade, media
+ * control). The tools are registered whenever the signal bridge exists; the
+ * *scopes* below are granted only when the matching Android access is live.
+ */
+const SIGNAL_CAPABILITIES = [
+  'android.usage.read',
+  'android.notifications.read',
+  'android.notifications.reply',
+  'android.media.read',
+  'android.media.control',
+];
+
+export interface AndroidScopeInput {
+  canWrite: boolean;
+  canOverlay: boolean;
+  assistantBridgePresent: boolean;
+  signalBridgePresent: boolean;
+  usageGranted: boolean;
+  notificationsGranted: boolean;
+}
+
+/**
+ * The scopes a fresh `connect()` should write onto the device connection.
+ *
+ * Pure and exported so the grant logic is unit-testable without a connector.
+ * The read scope is unconditional (ordinary apps may read Settings); every
+ * other scope is granted only when the matching live Android access exists.
+ * Media control depends on Notification Listener access on Android, so its
+ * scopes follow the notification grant rather than being independent.
+ */
+export function computeAndroidScopes(input: AndroidScopeInput): string[] {
+  const assistant = input.assistantBridgePresent ? ASSISTANT_CAPABILITIES : [];
+  const media = input.notificationsGranted
+    ? ['android.media.read', 'android.media.control']
+    : [];
+  return [
+    'android.settings.read',
+    ...assistant,
+    ...(input.canWrite ? ['android.settings.write'] : []),
+    ...(input.canOverlay ? ['android.overlay'] : []),
+    ...(input.usageGranted ? ['android.usage.read'] : []),
+    ...(input.notificationsGranted
+      ? ['android.notifications.read', 'android.notifications.reply']
+      : []),
+    ...media,
+  ];
+}
+
+/**
+ * The capabilities a fresh `connect()` should advertise.
+ *
+ * Capabilities describe what the tools *can* do when the matching native
+ * bridge exists — not whether the user has granted access. Tools are
+ * registered whenever the bridge exists, so the capabilities match the
+ * registered tool list.
+ */
+export function computeAndroidCapabilities(input: {
+  assistantBridgePresent: boolean;
+  signalBridgePresent: boolean;
+}): string[] {
+  return [
+    ...CAPABILITIES,
+    ...(input.assistantBridgePresent ? ASSISTANT_CAPABILITIES : []),
+    ...(input.signalBridgePresent ? SIGNAL_CAPABILITIES : []),
+  ];
+}
+
+/**
  * Real on-device Android Settings connector.
  *
  * `partial`: the Settings and app-discovery tools are real, while unrelated
@@ -88,24 +156,37 @@ export class AndroidConnector extends StoreBackedConnector {
       const canWrite = this.settingsBridge.canWriteSystemSettings();
       const canOverlay = this.settingsBridge.canDrawOverlays();
 
+      /*
+       * Usage and notification access are granted on their own system screens
+       * and report nothing back, so the only source of truth is a live
+       * re-check. Media control rides on notification access. Without these
+       * grants the matching MCP tools are advertised but rejected at the scope
+       * gate with PERMISSION_REQUIRED (plus a remedy) — the same contract the
+       * write-settings scope uses.
+       */
+      const [usageGranted, notificationsGranted] = await Promise.all([
+        this.signalBridge ? this.signalBridge.usage.hasPermission() : false,
+        this.signalBridge
+          ? this.signalBridge.notifications.hasPermission()
+          : false,
+      ]);
+
       const now = Date.now();
       const existing = await this.store.get(ANDROID_CONNECTION_ID);
 
-      /*
-       * Assistant tools are registered only when their native bridge exists.
-       * Grant the matching local-device scopes in the same condition; without
-       * them MCP advertises the tools but rejects every call before execution.
-       */
-      const assistantCapabilities = this.assistantBridge
-        ? ASSISTANT_CAPABILITIES
-        : [];
+      const scopes = computeAndroidScopes({
+        canWrite,
+        canOverlay,
+        assistantBridgePresent: this.assistantBridge != null,
+        signalBridgePresent: this.signalBridge != null,
+        usageGranted,
+        notificationsGranted,
+      });
 
-      const scopes = [
-        'android.settings.read',
-        ...assistantCapabilities,
-        ...(canWrite ? ['android.settings.write'] : []),
-        ...(canOverlay ? ['android.overlay'] : []),
-      ];
+      const recordCapabilities = computeAndroidCapabilities({
+        assistantBridgePresent: this.assistantBridge != null,
+        signalBridgePresent: this.signalBridge != null,
+      });
 
       const displayName =
         [capabilities.manufacturer, capabilities.model]
@@ -119,7 +200,7 @@ export class AndroidConnector extends StoreBackedConnector {
         displayName,
         status: 'connected',
         scopes,
-        capabilities: [...CAPABILITIES, ...assistantCapabilities],
+        capabilities: recordCapabilities,
         createdAt: existing?.createdAt ?? now,
         updatedAt: now,
       };

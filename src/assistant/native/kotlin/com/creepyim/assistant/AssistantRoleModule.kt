@@ -102,9 +102,9 @@ class AssistantRoleModule(
         }
 
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) {
-            // No RoleManager: send the user to the assist settings screen. It
-            // cannot report back, so this resolves false and the caller
-            // re-checks when the app returns to the foreground.
+            // No RoleManager: send the user to Default apps when Android has
+            // that public destination. It cannot report back, so this resolves
+            // false and the caller re-checks when the app returns.
             openAssistSettings(activity)
             promise.resolve(false)
             return
@@ -139,7 +139,7 @@ class AssistantRoleModule(
         }
     }
 
-    /** Opens the system screen where the assistant app is chosen. */
+    /** Opens the public Default apps screen where the assistant can be chosen. */
     @ReactMethod
     fun openAssistantSettings(promise: Promise) {
         val activity = reactContext.currentActivity
@@ -194,9 +194,13 @@ class AssistantRoleModule(
     }
 
     private fun openAssistSettings(activity: Activity): Boolean = try {
+        val action = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
+            Settings.ACTION_MANAGE_DEFAULT_APPS_SETTINGS
+        } else {
+            Settings.ACTION_APPLICATION_SETTINGS
+        }
         activity.startActivity(
-            Intent(Settings.ACTION_VOICE_INPUT_SETTINGS)
-                .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
+            Intent(action).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
         )
         true
     } catch (error: Throwable) {

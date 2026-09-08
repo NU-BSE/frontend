@@ -99,7 +99,16 @@ const DESCRIBERS: Record<
   'android.settings.set_brightness': (args) => ({
     title: 'Change screen brightness?',
     confirmLabel: 'Change',
-    fields: [{ label: 'Brightness', value: `${asText(args.percent)}%` }],
+    fields: [
+      { label: 'Brightness', value: `${asText(args.percent)}%` },
+      // Automatic brightness overrides a fixed level, so an exact value
+      // requires manual mode. This is conditional (it only happens when
+      // adaptive is on) but the user must know it is part of the action.
+      {
+        label: 'Adaptive brightness',
+        value: 'Switched off if it is on, to hold this level',
+      },
+    ],
   }),
 
   'android.settings.set_screen_timeout': (args) => ({

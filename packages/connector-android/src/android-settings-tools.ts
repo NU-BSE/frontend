@@ -198,8 +198,17 @@ const APP_INFO_SCHEMA = APP_SUMMARY_SCHEMA.extend({
   versionCode: z.number().int().nullable(),
 });
 
+/*
+ * In-band backstop for a stale connection record. The primary gate is the MCP
+ * scope check (the message there — "missing required scopes: …" — is what the
+ * app classifies as PERMISSION_REQUIRED and decorates with a remedy). The
+ * same phrasing is reused here so the two layers classify identically: a
+ * record that still claims android.settings.write after Android revoked it
+ * must read as a permission problem, never as an auth/infrastructure one.
+ */
 const PERMISSION_MESSAGE =
-  'Permission to modify Android system settings is required. Enable it in Account → Connectors → This device.';
+  'Connection "This device" is missing required scopes: android.settings.write. ' +
+  'The user has not granted "Modify system settings" for Creepy on this phone.';
 
 export interface AndroidSettingsToolsDeps {
   bridge: AndroidSettingsBridge;
@@ -351,12 +360,21 @@ export function createAndroidSettingsTools(
     {
       name: 'android.settings.set_brightness',
       title: 'Set screen brightness',
-      description: 'Set screen brightness to a percentage (0..100).',
+      description:
+        'Set screen brightness to a percentage (0..100). If adaptive ' +
+        'brightness is on, Creepy switches it to manual first — automatic mode ' +
+        'overrides a fixed value — and reports the change. Returns the ' +
+        'brightness Android actually reported afterwards, not the requested ' +
+        'number.',
       inputSchema: z.object({
         connectionId: CONNECTION_ID,
         percent: z.number().min(0).max(100),
       }),
-      outputSchema: z.object({ percent: z.number() }),
+      outputSchema: z.object({
+        percent: z.number(),
+        brightnessMode: z.enum(['manual', 'automatic']),
+        adaptiveDisabled: z.boolean(),
+      }),
       risk: 'write',
       capabilities: ['android.settings.brightness'],
       requiredScopes: ['android.settings.write'],
@@ -364,8 +382,41 @@ export function createAndroidSettingsTools(
       execute: async (input: { connectionId: string; percent: number }) => {
         requireWriteSettings();
         try {
-          requireApplied(bridge.setScreenBrightnessPercent(input.percent), 'brightness');
-          return { percent: input.percent };
+          // Automatic brightness overrides any fixed value Android may accept,
+          // so an exact level is only reachable in manual mode. Switching modes
+          // is part of the same user-visible action — the approval copy names
+          // it — never a silent side effect.
+          const modeBefore = bridge.getBrightnessMode();
+          let adaptiveDisabled = false;
+          if (modeBefore === 'automatic') {
+            requireApplied(
+              bridge.setBrightnessMode('manual'),
+              'switching brightness to manual',
+            );
+            adaptiveDisabled = true;
+          }
+
+          requireApplied(
+            bridge.setScreenBrightnessPercent(input.percent),
+            'brightness',
+          );
+
+          // Read back rather than echoing the request: `putInt` returning true
+          // only means the write was accepted, not that the value stuck (OEM
+          // brightness managers and HyperOS layers can override it).
+          const actual = bridge.getScreenBrightnessPercent();
+          if (Math.abs(actual - input.percent) > 5) {
+            throw new ConnectorError(
+              `Android reported the screen brightness as ${actual}%, not the ` +
+                `${input.percent}% requested, so the change did not stick.`,
+              'PROVIDER_ERROR',
+            );
+          }
+          return {
+            percent: actual,
+            brightnessMode: bridge.getBrightnessMode(),
+            adaptiveDisabled,
+          };
         } catch (error) {
           throw mapAndroidSettingsError(error, 'setting screen brightness');
         }
@@ -394,7 +445,9 @@ export function createAndroidSettingsTools(
     {
       name: 'android.settings.set_brightness_mode',
       title: 'Set brightness mode',
-      description: 'Switch Android screen brightness between manual and automatic mode.',
+      description:
+        'Switch Android screen brightness between manual and automatic mode. ' +
+        'Reports the mode Android actually holds afterwards.',
       inputSchema: z.object({
         connectionId: CONNECTION_ID,
         mode: z.enum(['manual', 'automatic']),
@@ -408,7 +461,7 @@ export function createAndroidSettingsTools(
         requireWriteSettings();
         try {
           requireApplied(bridge.setBrightnessMode(input.mode), 'brightness mode');
-          return { mode: input.mode };
+          return { mode: bridge.getBrightnessMode() };
         } catch (error) {
           throw mapAndroidSettingsError(error, 'setting brightness mode');
         }
@@ -451,7 +504,7 @@ export function createAndroidSettingsTools(
         requireWriteSettings();
         try {
           requireApplied(bridge.setScreenTimeout(input.milliseconds), 'screen timeout');
-          return { milliseconds: input.milliseconds };
+          return { milliseconds: bridge.getScreenTimeout() };
         } catch (error) {
           throw mapAndroidSettingsError(error, 'setting screen timeout');
         }
@@ -491,7 +544,7 @@ export function createAndroidSettingsTools(
         requireWriteSettings();
         try {
           requireApplied(bridge.setAutoRotate(input.enabled), 'auto-rotate setting');
-          return { enabled: input.enabled };
+          return { enabled: bridge.getAutoRotate() };
         } catch (error) {
           throw mapAndroidSettingsError(error, 'setting auto-rotate');
         }
@@ -531,7 +584,7 @@ export function createAndroidSettingsTools(
         requireWriteSettings();
         try {
           requireApplied(bridge.setHapticFeedbackEnabled(input.enabled), 'haptic feedback setting');
-          return { enabled: input.enabled };
+          return { enabled: bridge.getHapticFeedbackEnabled() };
         } catch (error) {
           throw mapAndroidSettingsError(error, 'setting haptic feedback');
         }
@@ -571,7 +624,7 @@ export function createAndroidSettingsTools(
         requireWriteSettings();
         try {
           requireApplied(bridge.setSoundEffectsEnabled(input.enabled), 'system sound effects setting');
-          return { enabled: input.enabled };
+          return { enabled: bridge.getSoundEffectsEnabled() };
         } catch (error) {
           throw mapAndroidSettingsError(error, 'setting system sound effects');
         }

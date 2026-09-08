@@ -158,9 +158,24 @@ describe('android.settings tools through the MCP boundary', () => {
   });
 
   it('set_brightness writes through the bridge after approval', async () => {
-    const setScreenBrightnessPercent = jest.fn(() => true);
+    // Stateful bridge: automatic brightness is on, and reads return what the
+    // writes actually applied — otherwise the read-back honesty check fires.
+    let mode: 'manual' | 'automatic' = 'automatic';
+    let brightness = 100;
+    const setScreenBrightnessPercent = jest.fn((value: number) => {
+      brightness = value;
+      return true;
+    });
     const { runtime, approvalService } = await connectAndStart(
-      makeBridge({ setScreenBrightnessPercent }),
+      makeBridge({
+        getBrightnessMode: () => mode,
+        setBrightnessMode: (value) => {
+          mode = value;
+          return true;
+        },
+        getScreenBrightnessPercent: () => brightness,
+        setScreenBrightnessPercent,
+      }),
     );
 
     const result = await approveThenCall(
@@ -172,7 +187,7 @@ describe('android.settings tools through the MCP boundary', () => {
 
     expect(result.structuredContent).toEqual({
       status: 'success',
-      data: { percent: 40 },
+      data: { percent: 40, brightnessMode: 'manual', adaptiveDisabled: true },
     });
     expect(setScreenBrightnessPercent).toHaveBeenCalledWith(40);
   });
@@ -218,7 +233,7 @@ describe('android.settings tools through the MCP boundary', () => {
         connectionId: ANDROID_CONNECTION_ID,
         percent: 40,
       }),
-    ).rejects.toThrow(/Permission to modify Android system settings is required/);
+    ).rejects.toThrow(/missing required scopes: android\.settings\.write/);
   });
 
   it('every production tool is real and no low-level/permission tools are exposed', async () => {

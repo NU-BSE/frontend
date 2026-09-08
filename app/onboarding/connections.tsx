@@ -156,6 +156,30 @@ export default function OnboardingConnections() {
           ) : null}
         </View>
 
+        {android?.status === "connected" ? (
+          <Pressable
+            accessibilityRole="button"
+            onPress={() => router.push("/connect/android")}
+            style={({ pressed }) => [
+              styles.deviceAccess,
+              pressed && styles.pressed,
+            ]}
+          >
+            <View style={styles.deviceAccessCopy}>
+              <Text variant="label" tone="brand">
+                Set up device access
+              </Text>
+              <Text variant="bodySmall" tone="secondary">
+                Modify system settings, usage access, notifications and the
+                assistant — each asked for only when you want it.
+              </Text>
+            </View>
+            <Text variant="label" tone="faint">
+              ›
+            </Text>
+          </Pressable>
+        ) : null}
+
         <Pressable
           accessibilityRole="button"
           onPress={() => void finish()}
@@ -273,5 +297,20 @@ const styles = StyleSheet.create({
     marginTop: spacing.xl,
     padding: spacing.md,
   },
+  deviceAccess: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: spacing.md,
+    minHeight: 56,
+    marginTop: spacing.xxl,
+    paddingHorizontal: spacing.lg,
+    paddingVertical: spacing.md,
+    borderWidth: 1,
+    borderColor: palette.brand,
+    borderRadius: radius.md,
+    backgroundColor: palette.surface,
+  },
+  deviceAccessCopy: { flex: 1, gap: spacing.xs },
   pressed: { opacity: 0.7 },
 });

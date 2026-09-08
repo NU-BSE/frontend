@@ -209,10 +209,31 @@ describe('AndroidConnector tools', () => {
     const setBrightness = jest.fn(() => true);
     const setBrightnessMode = jest.fn(() => true);
     const setHaptics = jest.fn(() => true);
+
+    /*
+     * A stateful bridge: reads return what the writes applied, the way a real
+     * device behaves. The static makeBridge defaults (mode automatic, read-back
+     * always 50%) would make set_brightness fail its read-back honesty check.
+     */
+    let mode: 'manual' | 'automatic' = 'manual';
+    let brightness = 50;
+    let haptics = true;
     const bridge = makeBridge({
-      setScreenBrightnessPercent: setBrightness,
-      setBrightnessMode,
-      setHapticFeedbackEnabled: setHaptics,
+      getBrightnessMode: () => mode,
+      setBrightnessMode: (value) => {
+        mode = value;
+        return setBrightnessMode(value);
+      },
+      getScreenBrightnessPercent: () => brightness,
+      setScreenBrightnessPercent: (value) => {
+        brightness = value;
+        return setBrightness(value);
+      },
+      getHapticFeedbackEnabled: () => haptics,
+      setHapticFeedbackEnabled: (value) => {
+        haptics = value;
+        return setHaptics(value);
+      },
     });
     const tools = createAndroidSettingsTools({ bridge });
 
@@ -227,16 +248,16 @@ describe('AndroidConnector tools', () => {
         connectionId: ANDROID_CONNECTION_ID,
         percent: 40,
       }),
-    ).toEqual({ percent: 40 });
+    ).toEqual({ percent: 40, brightnessMode: 'manual', adaptiveDisabled: false });
     expect(setBrightness).toHaveBeenCalledWith(40);
 
     expect(
       await executeTool(tools, 'android.settings.set_brightness_mode', {
         connectionId: ANDROID_CONNECTION_ID,
-        mode: 'manual',
+        mode: 'automatic',
       }),
-    ).toEqual({ mode: 'manual' });
-    expect(setBrightnessMode).toHaveBeenCalledWith('manual');
+    ).toEqual({ mode: 'automatic' });
+    expect(setBrightnessMode).toHaveBeenCalledWith('automatic');
 
     expect(
       await executeTool(tools, 'android.settings.set_haptic_feedback', {
@@ -245,6 +266,32 @@ describe('AndroidConnector tools', () => {
       }),
     ).toEqual({ enabled: false });
     expect(setHaptics).toHaveBeenCalledWith(false);
+  });
+
+  it('disables adaptive brightness as part of an exact brightness write', async () => {
+    let mode: 'manual' | 'automatic' = 'automatic';
+    let brightness = 90;
+    const bridge = makeBridge({
+      getBrightnessMode: () => mode,
+      setBrightnessMode: (value) => {
+        mode = value;
+        return true;
+      },
+      getScreenBrightnessPercent: () => brightness,
+      setScreenBrightnessPercent: (value) => {
+        brightness = value;
+        return true;
+      },
+    });
+    const tools = createAndroidSettingsTools({ bridge });
+
+    expect(
+      await executeTool(tools, 'android.settings.set_brightness', {
+        connectionId: ANDROID_CONNECTION_ID,
+        percent: 25,
+      }),
+    ).toEqual({ percent: 25, brightnessMode: 'manual', adaptiveDisabled: true });
+    expect(mode).toBe('manual');
   });
 
   it('finds apps and reads app info', async () => {
@@ -349,7 +396,7 @@ describe('AndroidConnector tools', () => {
     expect(timeout.inputSchema.safeParse({ connectionId: 'x', milliseconds: 30000 }).success).toBe(true);
   });
 
-  it('exposes guide destinations but keeps connector grant screens out', () => {
+  it('exposes guide destinations and the two grant screens its remedies name', () => {
     const tools = createAndroidSettingsTools({ bridge: makeBridge() });
     const tool = tools.find((candidate) => candidate.name === 'android.settings.open');
     if (!tool) throw new Error('tool not found');
@@ -365,9 +412,19 @@ describe('AndroidConnector tools', () => {
       expect(tool.inputSchema.safeParse({ connectionId: 'x', screen }).success).toBe(true);
     }
 
-    for (const screen of ['writeSettings', 'overlay', 'unknownSources']) {
-      expect(tool.inputSchema.safeParse({ connectionId: 'x', screen }).success).toBe(false);
+    /*
+     * writeSettings and overlay gate this connector's own tools, so they are
+     * deliberately openable (commit 08adc996): a SCOPE_REMEDIES screen the
+     * model cannot reach is advice pointing at a door that is not there.
+     * unknownSources stays out — it gates nothing this connector does.
+     */
+    for (const screen of ['writeSettings', 'overlay']) {
+      expect(tool.inputSchema.safeParse({ connectionId: 'x', screen }).success).toBe(true);
     }
+    expect(
+      tool.inputSchema.safeParse({ connectionId: 'x', screen: 'unknownSources' })
+        .success,
+    ).toBe(false);
   });
 
   it('open panel accepts only the official panels', () => {

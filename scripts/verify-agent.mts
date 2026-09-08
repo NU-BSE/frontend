@@ -39,6 +39,7 @@ import {
 } from '../src/agent/toolExecutor.js';
 import { OPEN_SCREENS } from '@mobile-agent/connector-android';
 import type { ForegroundGate } from '../src/agent/foregroundGate.js';
+import { ToolExecutionLedger } from '../src/agent/toolExecutionLedger.js';
 import { mapMcpTools } from '../src/agent/toolMapper.js';
 import { createStructuredPlanner } from '../src/agent/models/structuredPlanner.js';
 import type { LlmEngine } from '../src/ai/types.js';
@@ -1354,7 +1355,9 @@ console.log('\nthe planner never shows protocol output as an answer:');
 
     const system = prompts[0] ?? '';
     assert(
-      system.includes('target: one of "appDetails"|"appNotifications"|"appUsage"'),
+      /^ {4}- target: one of "appDetails"\|"appNotifications"\|"appUsage"$/mu.test(
+        system,
+      ),
       'an enum argument is spelled out so the model can copy a valid value',
     );
     /*
@@ -1363,12 +1366,37 @@ console.log('\nthe planner never shows protocol output as an answer:');
      * arguments identically, so nothing said which could be left out.
      */
     assert(
-      system.includes('packageName: string;') ||
-        system.includes('packageName: string }'),
+      /^ {4}- packageName: string$/mu.test(system),
       'a required argument carries no marker',
     );
+
+    /*
+     * Each argument on its own line.
+     *
+     * They used to run together inside braces, separated by `;`, and
+     * `android.settings.open_app` came to 800 characters with one 300-character
+     * description among them. The model filled the slots positionally:
+     * `{"connectionId":"android-device","target":"com.google.android.apps.gemini"}`
+     * — a package id in the enum's slot, `packageName` missing entirely. The
+     * boundaries between arguments were invisible, so this checks they are not.
+     */
+    const argumentLines = system
+      .split('\n')
+      .filter((line) => line.startsWith('    - '));
     assert(
-      system.includes('channelId: string (optional)'),
+      argumentLines.length >= 4,
+      'every argument is on a line of its own',
+    );
+    assert(
+      argumentLines.every((line) => /^ {4}- [A-Za-z]+: /u.test(line)),
+      'and each line starts with the argument it describes',
+    );
+    assert(
+      !/Arguments: \{/u.test(system),
+      'nothing is left running together inside braces',
+    );
+    assert(
+      /^ {4}- channelId: string \(optional\)$/mu.test(system),
       'and an optional one is marked, which is what says the others are not',
     );
     assert(
@@ -1522,6 +1550,161 @@ console.log('\nan unmistakable connectionId is resolved, an ambiguous one is not
  * screen, and burned the rest of its step budget re-asking. Polling a state
  * the user is mid-way through changing has no true answer, so the loop holds.
  */
+/*
+ * The same failing call is not run twice.
+ *
+ * Asked to open Gemini's settings, the planner called
+ * android.settings.open_app with identical arguments four times — each one
+ * failing the same way — then wandered into brightness and auto-rotate and
+ * hit the ten-step ceiling with nothing to show. Nothing stopped it: the
+ * ledger only looked for successful duplicates, and the loop detector feeds
+ * tier escalation rather than termination.
+ */
+console.log('\nan identical call that already failed is not repeated:');
+{
+  const ledger = new ToolExecutionLedger();
+  const call = {
+    id: 'c1',
+    toolName: 'android.settings.open_app',
+    args: { connectionId: 'android-device', target: 'appDetails', packageName: 'com.x' },
+  } as never;
+
+  assert(
+    ledger.findRepeatedFailure(call) === undefined,
+    'a call that has not been tried is allowed',
+  );
+
+  ledger.record(call, {
+    status: 'error',
+    error: 'The "appDetails" destination is unavailable for com.x.',
+    errorCode: 'TOOL_EXECUTION_ERROR',
+  });
+
+  const blocked = ledger.findRepeatedFailure(call);
+  assert(blocked !== undefined, 'the identical repeat is caught');
+  assert(
+    blocked?.result?.error?.includes('unavailable') === true,
+    'and carries the original reason back, so the model is told why',
+  );
+
+  // Different arguments are a different call, and are the recovery the model
+  // should be making.
+  const other = {
+    ...(call as unknown as { id: string; toolName: string; args: Record<string, unknown> }),
+    args: { connectionId: 'android-device', target: 'appDetails', packageName: 'com.y' },
+  } as never;
+  assert(
+    ledger.findRepeatedFailure(other) === undefined,
+    'a call with different arguments is never blocked',
+  );
+
+  // Transient failures describe the world, not the call.
+  const flaky = { id: 'c2', toolName: 'google.gmail.list', args: {} } as never;
+  for (const errorCode of ['NETWORK_ERROR', 'RATE_LIMITED'] as const) {
+    ledger.record(flaky, { status: 'error', error: 'later', errorCode });
+    assert(
+      ledger.findRepeatedFailure(flaky) === undefined,
+      `${errorCode} stays retryable — a second attempt genuinely can succeed`,
+    );
+  }
+
+  // A success is not a failure, and must still be found by the dedup guard.
+  const done = { id: 'c3', toolName: 'calendar.create_event', args: { a: 1 } } as never;
+  ledger.record(done, { status: 'success', data: { id: 'e1' } });
+  assert(
+    ledger.findRepeatedFailure(done) === undefined,
+    'a successful call is not mistaken for a failed one',
+  );
+  assert(
+    ledger.findDuplicate(done) !== undefined,
+    'and the side-effect dedup guard still sees it',
+  );
+}
+
+/*
+ * And end to end: the second attempt never reaches MCP.
+ *
+ * The ledger check above proves the rule; this proves the runtime applies it,
+ * which is the part that spent a real run's budget.
+ */
+console.log('\na repeated failing call does not reach the tool twice:');
+{
+  let executions = 0;
+  const failingMcp = {
+    listTools: () =>
+      Promise.resolve([
+        {
+          name: 'android.settings.open_app',
+          description: 'Open app settings.',
+          inputSchema: { properties: {} },
+        },
+      ]),
+    callTool: () => {
+      executions += 1;
+      const error = new Error(
+        'The "appDetails" destination is unavailable for com.x on this device.',
+      );
+      error.name = 'ToolExecutionError';
+      return Promise.reject(error);
+    },
+  } as never;
+
+  // A planner that never learns: the same call, every step.
+  const stubborn: AgentModel = {
+    id: 'stubborn',
+    capabilities: { textGeneration: true, toolCalling: true, structuredOutput: true },
+    run: () =>
+      Promise.resolve({
+        kind: 'tool_calls',
+        toolCalls: [
+          {
+            id: `call_${executions}`,
+            toolName: 'android.settings.open_app',
+            args: { connectionId: 'android-device', target: 'appDetails', packageName: 'com.x' },
+          },
+        ],
+      }) as never,
+  } as never;
+
+  const runtime = new AgentRuntime({
+    model: stubborn,
+    mcp: failingMcp,
+    connections: [
+      { id: 'android-device', provider: 'android', displayName: 'This device', capabilities: [] },
+    ],
+    approveApproval: () => Promise.resolve(),
+    maxSteps: 6,
+  });
+
+  await runtime.sendMessage('open the Gemini app settings and turn it off');
+
+  assert(
+    executions === 1,
+    `the tool is called once however many times the planner asks (called ${executions})`,
+  );
+
+  const toolMessages = runtime
+    .getMessages()
+    .filter((message) => message.role === 'tool');
+  assert(
+    toolMessages.length > 1,
+    'the planner still gets a result for every attempt, so it can change course',
+  );
+  assert(
+    toolMessages
+      .slice(1)
+      .every((message) =>
+        String((message as { result?: { error?: string } }).result?.error ?? '')
+          .includes('Repeating it will not help'),
+      ),
+    'and every repeat is told plainly that repeating will not help',
+  );
+  assert(
+    toolMessages[0]?.result?.error?.includes('unavailable') === true,
+    'while the first attempt carries the real reason',
+  );
+}
+
 console.log('\nthe loop holds while the app is backgrounded:');
 {
   function gate() {
@@ -1730,6 +1913,116 @@ console.log('\na scope failure tells the model how to fix it:');
       `and the ${scope} advice actually names it`,
     );
   }
+}
+
+/*
+ * A package that is not installed says so, and says what to do.
+ *
+ * Asked to open Gemini's settings the planner produced
+ * `com.google.android.apps.gemini`, which does not exist — the real id is
+ * `com.google.android.apps.bard`. Two tools then agreed with it:
+ * `android.apps.get_info` answered `{ app: null }` and reported *success*, so
+ * the timeline read "done" and the invented id looked confirmed; then
+ * `open_app` failed with the destination being unavailable, which is a
+ * different fault entirely. The model concluded App Details was unsupported,
+ * claimed to have opened the app by hand, and announced it would retry with
+ * the same id.
+ */
+console.log('\nan invented package id is refused, not confirmed:');
+{
+  const { createAndroidSettingsTools } = await import(
+    '@mobile-agent/connector-android'
+  );
+
+  const installed = [
+    {
+      packageName: 'com.google.android.apps.bard',
+      label: 'Gemini',
+      enabled: true,
+      systemApp: false,
+      launchable: true,
+    },
+  ];
+
+  const bridge = {
+    getAppInfo: (packageName: string) =>
+      installed.find((app) => app.packageName === packageName)
+        ? { ...installed[0], versionName: '1.0', versionCode: 1 }
+        : null,
+    findApps: (query: string) =>
+      installed.filter(
+        (app) =>
+          app.label.toLowerCase().includes(query.toLowerCase()) ||
+          app.packageName.toLowerCase().includes(query.toLowerCase()),
+      ),
+    canOpenAppSettings: () => true,
+    openAppSettings: () => Promise.resolve(true),
+  } as never;
+
+  const tools = createAndroidSettingsTools({ bridge });
+  const tool = (name: string) =>
+    tools.find((candidate) => candidate.name === name)!;
+
+  const call = async (name: string, args: Record<string, unknown>) => {
+    try {
+      await tool(name).execute(args as never, {} as never);
+      return null;
+    } catch (error) {
+      return error instanceof Error ? error.message : String(error);
+    }
+  };
+
+  const infoError = await call('android.apps.get_info', {
+    connectionId: 'android-device',
+    packageName: 'com.google.android.apps.gemini',
+  });
+  assert(
+    infoError !== null,
+    'get_info fails for a package that is not there, rather than succeeding with null',
+  );
+  assert(
+    infoError?.includes('No app with package') === true,
+    'and names the actual fault',
+  );
+  assert(
+    infoError?.includes('android.apps.find') === true,
+    'and the tool that would have produced a real id',
+  );
+  assert(
+    infoError?.includes('com.google.android.apps.bard') === true,
+    'and lists what is installed under a similar name',
+  );
+
+  const openError = await call('android.settings.open_app', {
+    connectionId: 'android-device',
+    target: 'appDetails',
+    packageName: 'com.google.android.apps.gemini',
+  });
+  assert(
+    openError?.includes('No app with package') === true,
+    'open_app blames the missing package, not the destination',
+  );
+  assert(
+    openError?.includes('destination is unavailable') !== true,
+    'so "App Details is not available" is no longer what a wrong id produces',
+  );
+
+  // The real id still works, through both tools.
+  assert(
+    (await call('android.apps.get_info', {
+      connectionId: 'android-device',
+      packageName: 'com.google.android.apps.bard',
+    })) === null,
+    'an installed package still reads normally',
+  );
+  assert(
+    (await call('android.settings.open_app', {
+      connectionId: 'android-device',
+      target: 'appDetails',
+      packageName: 'com.google.android.apps.bard',
+    })) === null,
+    'and still opens',
+  );
 }
 
 console.log('verify:agent — all checks passed');

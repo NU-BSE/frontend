@@ -44,6 +44,41 @@ export class ToolExecutionLedger {
   }
 
   /**
+   * Returns a previous *failure* of this exact call, when repeating it cannot
+   * plausibly help.
+   *
+   * Asked to open Gemini's settings, the planner called
+   * `android.settings.open_app` with identical arguments four times, each one
+   * failing the same way, then wandered into brightness and auto-rotate and
+   * hit the ten-step ceiling with nothing to show. Nothing stopped it: this
+   * ledger only ever looked for *successful* duplicates, and the loop detector
+   * feeds tier escalation rather than termination — and clears its own
+   * fingerprints on this class of error, so the repetition never even
+   * registered.
+   *
+   * The same arguments against the same tool produce the same failure, so the
+   * second attempt is not a retry, it is the budget being spent to learn
+   * nothing. Different arguments hash differently and are always allowed,
+   * which is the recovery the model should be making.
+   *
+   * `NETWORK_ERROR` and `RATE_LIMITED` are the exceptions, and the only ones:
+   * they describe the world at a moment rather than the call, and a second
+   * attempt genuinely can succeed.
+   */
+  findRepeatedFailure(
+    call: AgentToolCall,
+  ): ToolExecutionRecord | undefined {
+    const hash = normalizeArgsHash(call);
+    const record = this.records.get(callKey(call.toolName, hash));
+    if (record?.status !== 'failed') return undefined;
+
+    const code = record.result?.errorCode;
+    if (code === 'NETWORK_ERROR' || code === 'RATE_LIMITED') return undefined;
+
+    return record;
+  }
+
+  /**
    * Returns a previous record whose outcome is unknown — the side effect may
    * or may not have happened. The agent must NOT auto-replay it; the user has
    * to decide explicitly.
@@ -85,7 +120,12 @@ export class ToolExecutionLedger {
       toolName: call.toolName,
       argsHash: hash,
       status,
-      ...(result.status === 'success' ? { result } : {}),
+      // Kept for failures as well as successes: `findRepeatedFailure` needs
+      // the error code to tell a transient failure from a settled one, and
+      // the message to hand back instead of re-running the call.
+      ...(result.status === 'success' || result.status === 'error'
+        ? { result }
+        : {}),
     });
   }
 

@@ -14,11 +14,14 @@ const GIB = 1024 ** 3;
  * Floor for the three capacities that decide whether the model can run
  * locally: RAM, free storage for the weights, and CPU parallelism.
  *
- * Set for the 2B teacher, which is larger than every student it replaced —
- * roughly 1.3 GB of Q4 text weights plus an f16 vision projector — so these
- * are at or above what the old top tier asked for. Lowering them would let the
- * app promise local inference on a phone that then OOMs mid-generation, which
- * is worse than saying cloud up front.
+ * RAM and cores are properties of running a local model at all, not of one
+ * model, so they stay fixed. Lowering them would let the app promise local
+ * inference on a phone that then OOMs mid-generation, which is worse than
+ * saying cloud up front.
+ *
+ * Storage is different: it is the size of a specific download, and the backend
+ * decides what that is. `minStorageBytes` is the fallback for a screen asked
+ * before the catalogue has answered — see `storageRequirementFor`.
  *
  * `minCpuCores` gates generation speed rather than whether the model loads.
  * Weights that fit in RAM on a 4-core device still produce tokens too slowly
@@ -32,6 +35,25 @@ const REQUIREMENTS: {
   minCpuCores: number;
 } = { minMemoryBytes: 6 * GIB, minStorageBytes: 3 * GIB, minCpuCores: 8 };
 
+/**
+ * Free storage needed for a published bundle.
+ *
+ * A fixed 3 GB was the 2B teacher's download plus room to work, and it is
+ * wrong in both directions for any other model: it refuses a 700 MB model on a
+ * phone with 2 GB free, and it accepts a 4 GB model on a phone that cannot
+ * hold it. The published size is the only honest input.
+ *
+ * The headroom is the download itself again, not a constant. A resumed
+ * download keeps a partial file while the rest arrives, and the margin that
+ * covers that has to scale with the thing being downloaded.
+ */
+export function storageRequirementFor(totalBytes?: number): number {
+  if (typeof totalBytes !== 'number' || totalBytes <= 0) {
+    return REQUIREMENTS.minStorageBytes;
+  }
+  return Math.round(totalBytes * 2);
+}
+
 const LOCAL_PROFILES: Exclude<MemoryProfile, 'cloud'>[] = ['on-device'];
 
 const formatRequirement = (bytes: number): string =>
@@ -39,6 +61,8 @@ const formatRequirement = (bytes: number): string =>
 
 export function getModelOptionSupport(
   assessment: DeviceAssessment | null,
+  /** What the backend publishes for the local profile, when it is known. */
+  publishedBytes?: number,
 ): ModelOptionSupport[] {
   if (!assessment || assessment.platform !== 'android') {
     return [
@@ -85,8 +109,10 @@ export function getModelOptionSupport(
             ? 'Android reports this as a low-RAM device.'
             : null;
 
+  const minStorageBytes = storageRequirementFor(publishedBytes);
+
   const local = LOCAL_PROFILES.map((profile): ModelOptionSupport => {
-    const requirement = REQUIREMENTS;
+    const requirement = { ...REQUIREMENTS, minStorageBytes };
     if (localBlockReason) {
       return {
         profile,

@@ -9,6 +9,10 @@
  *
  * Run: npm run verify:layout
  */
+import { execFileSync } from 'node:child_process';
+import { readFileSync } from 'node:fs';
+import path from 'node:path';
+
 import Yoga, {
   Align,
   Direction,
@@ -712,6 +716,94 @@ for (const windowWidth of [360, 390, 412]) {
   );
 }
 
+console.log('\nbottom tab bar:');
+
+/*
+ * The bar and what the system reserves under it.
+ *
+ * React Navigation adds the bottom inset to the tab bar for you — unless
+ * `tabBarStyle` carries an explicit `height`, which replaces the computed one
+ * outright. It did, so the bar was 74pt whatever was beneath it: fine under
+ * gesture navigation, where the inset is a thin pill, and wrong under
+ * three-button navigation, where 48dp of system buttons sat on top of the
+ * icons. Android draws edge-to-edge by default in RN 0.86, so nothing else
+ * leaves that space.
+ *
+ * The insets below are the real ones: 0 with the bar hidden, ~24 for the
+ * gesture pill, 48 for three-button navigation.
+ */
+const TAB_BAR_HEIGHT = 74;
+const TAB_PADDING_TOP = 12; // spacing.md
+const TAB_PADDING_BOTTOM = 12; // spacing.md
+const TAB_ICON = 18;
+const TAB_LABEL_LINE = 14;
+
+function layoutTabBar(insetBottom: number, applyInset: boolean) {
+  const root = Yoga.Node.create();
+  root.setWidth(390);
+
+  const bar = Yoga.Node.create();
+  bar.setHeight(TAB_BAR_HEIGHT + (applyInset ? insetBottom : 0));
+  bar.setPadding(Edge.Top, TAB_PADDING_TOP);
+  bar.setPadding(
+    Edge.Bottom,
+    TAB_PADDING_BOTTOM + (applyInset ? insetBottom : 0),
+  );
+  bar.setFlexDirection(FlexDirection.Row);
+  bar.setJustifyContent(Justify.SpaceAround);
+  root.insertChild(bar, 0);
+
+  const cells = [0, 1, 2].map((index) => {
+    const cell = Yoga.Node.create();
+    cell.setFlexDirection(FlexDirection.Column);
+    cell.setAlignItems(Align.Center);
+    const icon = Yoga.Node.create();
+    icon.setWidth(TAB_ICON);
+    icon.setHeight(TAB_ICON);
+    cell.insertChild(icon, 0);
+    const label = Yoga.Node.create();
+    label.setHeight(TAB_LABEL_LINE);
+    label.setMargin(Edge.Top, 2);
+    cell.insertChild(label, 1);
+    bar.insertChild(cell, index);
+    return cell;
+  });
+
+  root.calculateLayout(390, undefined, Direction.LTR);
+  const barLayout = bar.getComputedLayout();
+  const cell = cells[0]!.getComputedLayout();
+  return {
+    barHeight: barLayout.height,
+    // Distance from the bottom of the bar to the bottom of the icons+label.
+    contentBottomGap: barLayout.height - (cell.top + cell.height),
+  };
+}
+
+for (const [label, inset] of [
+  ['hidden', 0],
+  ['gesture pill', 24],
+  ['three-button', 48],
+] as const) {
+  const fixed = layoutTabBar(inset, false);
+  const withInset = layoutTabBar(inset, true);
+
+  assert(
+    withInset.contentBottomGap >= inset,
+    `${label} (${inset}pt): the icons clear the system bar (${withInset.contentBottomGap}pt of ${inset}pt)`,
+  );
+  assert(
+    withInset.barHeight === TAB_BAR_HEIGHT + inset,
+    `${label}: the bar grows by the inset rather than absorbing it (${withInset.barHeight}pt)`,
+  );
+
+  if (inset > TAB_PADDING_BOTTOM) {
+    assert(
+      fixed.contentBottomGap < inset,
+      `${label}: control — a fixed 74pt bar really does put the icons under the buttons (${fixed.contentBottomGap}pt of ${inset}pt)`,
+    );
+  }
+}
+
 console.log('\ncontrol — the header that shipped broken:');
 {
   const brokenFrames = layoutChatHeader(360, 4, 'broken');
@@ -733,6 +825,93 @@ console.log('\ncontrol — the header that shipped broken:');
   assert(
     closeCentre - titleCentre > HEADLINE_LINE_HEIGHT / 2,
     `centre alignment really does drop Close below the title (${closeCentre} vs ${titleCentre})`,
+  );
+}
+
+/*
+ * The chat composer is not left to Android's good intentions.
+ *
+ * `behavior={Platform.OS === 'ios' ? 'padding' : undefined}` reads as "iOS
+ * needs help, Android handles itself". It does not: `undefined` falls through
+ * KeyboardAvoidingView's `switch (behavior)` to the default branch, which
+ * renders a plain View and adjusts nothing at all. The arrangement only ever
+ * worked because the window itself shrank for the keyboard — and Android draws
+ * edge-to-edge by default in RN 0.86, so it no longer does. The keyboard came
+ * up over the input.
+ *
+ * Setting it is safe where the window does still resize: the view measures its
+ * own already-shrunk frame against the reported keyboard top, gets ~0, and
+ * adds nothing. `padding` rather than `height`, because `height` caches the
+ * frame height from before the first keyboard and reuses it — wrong precisely
+ * when the window is the thing that resized.
+ *
+ * Geometry cannot show this, so the source is checked instead.
+ */
+console.log('\nchat composer keyboard avoidance:');
+{
+  const chat = readFileSync(
+    path.join(process.cwd(), 'app/chat.tsx'),
+    'utf8',
+  );
+
+  const kav = chat.slice(chat.indexOf('<KeyboardAvoidingView'));
+  const props = kav.slice(0, kav.indexOf('>'));
+
+  assert(
+    /behavior=["']padding["']/u.test(props),
+    'the composer asks for padding on every platform',
+  );
+  assert(
+    !/behavior=\{[^}]*undefined[^}]*\}/u.test(props),
+    'and never for undefined, which adjusts nothing on Android',
+  );
+  assert(
+    !/behavior=\{[^}]*Platform\.OS[^}]*\}/u.test(props),
+    'the behaviour is not conditioned on the platform at all',
+  );
+}
+
+/*
+ * Escape sequences in JSX string attributes.
+ *
+ * `description="one.\n\ntwo."` is not a JavaScript string literal. JSX
+ * attribute values are their own grammar and do not process escapes, so this
+ * renders the two characters backslash-n on screen — which is exactly what
+ * shipped on the connections step, where both connector cards read
+ * "send replies.\n\nCreepy always asks". The expression form
+ * `{"one.\n\ntwo."}` is a real string literal and does interpret them.
+ *
+ * Nothing else catches it: it type-checks, it lints, and the text is present,
+ * merely wrong. Two paragraphs are better expressed as two blocks anyway, so
+ * the fix was a second prop rather than the expression form.
+ */
+console.log('\nJSX attribute escapes:');
+{
+  const files = execFileSync('git', ['ls-files', '-z', '*.tsx'], {
+    encoding: 'utf8',
+  })
+    .split('\0')
+    .filter(Boolean);
+
+  // A JSX attribute: name="…" with no spaces around `=`, which is what
+  // distinguishes it from an assignment to a JS string, where escapes work.
+  const attribute = /(?:^|[\s{])([a-zA-Z][a-zA-Z0-9]*)="([^"\n]*\\[nrt][^"\n]*)"/gu;
+
+  const offenders: string[] = [];
+  for (const file of files) {
+    const source = readFileSync(path.join(process.cwd(), file), 'utf8');
+    source.split('\n').forEach((line, index) => {
+      for (const match of line.matchAll(attribute)) {
+        offenders.push(`${file}:${index + 1} ${match[1]}="…${match[2].slice(-28)}"`);
+      }
+    });
+  }
+
+  assert(
+    offenders.length === 0,
+    offenders.length
+      ? `JSX string attributes must not carry an escape:\n    ${offenders.join('\n    ')}`
+      : `no JSX string attribute carries a \\n, \\r or \\t (${files.length} files checked)`,
   );
 }
 

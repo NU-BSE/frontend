@@ -5,7 +5,13 @@ import { Text } from '@/components/Text';
 import { Button } from '@/components/Button';
 import { SubscriptionRequiredError } from '@/ai/modelInstall';
 import { useAi } from '@/ai/AiProvider';
-import { getDeviceAssessment, getMemoryProfile } from '@/storage/prefs';
+import {
+  getDeviceAssessment,
+  getMemoryProfile,
+  setMemoryProfile,
+} from '@/storage/prefs';
+import { canUseLocalProfile } from '@/ai/deviceModelSelection';
+import { memoryProfileAfterInstallChange } from './memoryProfileForInstall';
 import { useModelInstall } from './useModelInstall';
 import { palette, radius, spacing, typography } from '@/theme/tokens';
 
@@ -34,13 +40,30 @@ export function ModelDownloadCard({ profile }: { profile: string }) {
   const { activateSelectedEngine } = useAi();
 
   /*
-   * Restart the engine when the model arrives.
+   * Restart the engine when the model arrives — and move the profile with it.
    *
    * The engine is chosen once, when the provider mounts, from what was on disk
    * then. Downloading a model after that changed nothing until the app was
    * killed and reopened — the user watched a download finish and kept talking
    * to the stub. Removing it has the same problem in reverse, which is why
    * this reacts to the phase rather than to the download's success.
+   *
+   * Re-activating was not enough on its own. This card is shown to someone on
+   * cloud inference on purpose, because deciding whether to switch means
+   * seeing the download size first — but `resolveEngine` returns remote for
+   * `cloud` before it looks at the disk at all, so a cloud user could download
+   * a gigabyte, watch it finish, and still be talking to the cloud. The
+   * download was offered as the way to switch and did not switch anything.
+   *
+   * So the profile follows the weights. Downloading them is a deliberate act
+   * with one purpose, and removing them leaves `on-device` pointing at nothing
+   * — a profile that resolves to a degraded stub — so the reverse has to move
+   * too.
+   *
+   * Only when the device can actually run it. Nothing about the download
+   * checks the hardware (`downloadAllowed` is the subscription, not the
+   * phone), so a device that failed the local gate would otherwise be switched
+   * onto a profile that immediately degrades.
    */
   const lastPhase = useRef(state.phase);
   useEffect(() => {
@@ -50,12 +73,22 @@ export function ModelDownloadCard({ profile }: { profile: string }) {
     if (state.phase !== 'installed' && previous !== 'installed') return;
     if (previous === 'checking') return;
 
+    const arrived = state.phase === 'installed';
+
     void (async () => {
       const [memoryProfile, assessment] = await Promise.all([
         getMemoryProfile(),
         getDeviceAssessment(),
       ]);
-      await activateSelectedEngine(memoryProfile, assessment);
+
+      const next = memoryProfileAfterInstallChange({
+        installed: arrived,
+        current: memoryProfile,
+        canRunLocally: canUseLocalProfile('on-device', assessment),
+      });
+      if (next !== memoryProfile) await setMemoryProfile(next);
+
+      await activateSelectedEngine(next, assessment);
     })();
   }, [state.phase, activateSelectedEngine]);
 

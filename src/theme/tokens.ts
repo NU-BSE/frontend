@@ -1,71 +1,114 @@
 /**
- * Design tokens — warm paper and coffee.
+ * Design tokens — neo-green.
  *
- * The palette is lifted from the chat reference: a cream page, an off-white
- * incoming bubble, and a deep coffee outgoing bubble with cream text. It
- * replaces the blue-on-white scheme normalised from the Figma Home frame.
+ * Green as the working colour: a near-black green ground, a vivid green for
+ * anything that acts or advances, and cool light text over both. It follows
+ * the landing page rather than inventing a second identity for the app —
+ * someone arriving from the site should recognise where they are.
+ *
+ * This replaces the warm cream-and-coffee scheme. That palette was calm and
+ * said nothing about what the app does; green reads as utility and progress,
+ * which is the whole claim.
  *
  * Everything the app paints comes from here. No screen hardcodes a hex, so
- * re-theming is this file plus the font registration in app/_layout.tsx —
- * which is what made this change a token edit rather than a sweep.
+ * re-theming is this file — which is what made a full redesign a token edit
+ * rather than a sweep across forty components.
  *
- * Contrast was checked against WCAG AA for body text (4.5:1):
- *   textPrimary on canvas   #33251c on #efe9df  →  10.9:1
- *   textPrimary on surface  #33251c on #fbf8f3  →  12.3:1
- *   onBrand on brand        #f7f2ea on #4a3428  →   9.7:1
- *   textSecondary on canvas #5c4a3d on #efe9df  →   6.1:1
- *   textMuted on canvas     #7a6657 on #efe9df  →   4.1:1  (large/secondary only)
+ * Every pair below is computed by `npm run verify:contrast` against WCAG AA,
+ * not asserted here by hand. The previous version of this comment carried
+ * hand-written ratios, which is a claim nothing checked; the script fails the
+ * build instead. Worth noting that `textMuted` now passes AA for body text at
+ * 5.73:1 where the warm palette had it at 4.1:1 and confined to large text.
  */
 
 export const palette = {
-  /** The page: warm cream paper. */
-  canvas: '#efe9df',
-  /** Cards and the incoming chat bubble — paper, a shade lighter than canvas. */
-  surface: '#fbf8f3',
+  /** The page: near-black green. */
+  canvas: '#0d1512',
+  /**
+   * Cards and the incoming chat bubble — one step up from the ground.
+   *
+   * Only one step. On paper a card separates by its shadow; on a near-black
+   * ground a black shadow is invisible and Android's elevation draws almost
+   * nothing, so separation has to come from lightness and edge instead. Pushed
+   * further it separates better and starts crushing the muted text that sits
+   * on it — `#1e3027` takes `textMuted` under AA — so the border carries the
+   * edge and this carries only a hint. `verify:contrast` holds both ends.
+   */
+  surface: '#1b2b23',
 
-  /** Deep coffee: primary actions, the outgoing bubble, active states. */
-  brand: '#4a3428',
+  /**
+   * Vivid green: primary actions, the outgoing bubble, active states.
+   *
+   * Bright enough to carry dark text on top of it (11.14:1), which is what
+   * makes it usable as a button fill rather than only as an accent.
+   */
+  brand: '#35e08a',
   /** 10% brand — icon wells and tag chips. */
-  brandWash: 'rgba(74, 52, 40, 0.1)',
+  brandWash: 'rgba(53, 224, 138, 0.1)',
   /** 20% brand — the load-more underline. */
-  brandHairline: 'rgba(74, 52, 40, 0.2)',
+  brandHairline: 'rgba(53, 224, 138, 0.2)',
   /**
    * `brandWash` flattened onto `canvas`, for anything that also has elevation.
    *
    * Android composites an elevation shadow *through* a translucent background
    * rather than behind it, so `brandWash` plus `shadow.card` renders as a flat
-   * grey block with a lighter patch where the text sits — which is what the
+   * block with a lighter patch where the text sits — which is what the
    * deep-link button in chat looked like. An opaque colour has no such
    * interaction. Same appearance over the canvas, minus the artifact.
    */
-  brandChip: '#dfd7cd',
+  brandChip: '#11291e',
 
-  textPrimary: '#33251c',
-  textSecondary: '#5c4a3d',
-  textMuted: '#7a6657',
+  textPrimary: '#e8f0ea',
+  textSecondary: '#a9bdb2',
+  /*
+   * Lightened from the first attempt at this palette. At `#7e948a` it measured
+   * 4.58:1 on the surface — over the AA line by a hundredth, which is not a
+   * margin, it is a coincidence. This has room to survive a surface that moves
+   * again.
+   */
+  textMuted: '#89a096',
   /** 60% of textSecondary — timestamps in History. */
-  textFaint: 'rgba(92, 74, 61, 0.6)',
+  textFaint: 'rgba(169, 189, 178, 0.6)',
 
-  border: '#d9cfc0',
-  borderSoft: 'rgba(217, 207, 192, 0.6)',
-  borderFaint: 'rgba(217, 207, 192, 0.35)',
+  /*
+   * Lighter than the ground by enough to be seen.
+   *
+   * The first attempt at this palette reused the warm scheme's border weight
+   * and came out at 1.43:1 against the canvas — a card with no visible edge.
+   * On paper a border is darker than the page; on a dark ground it has to be
+   * lighter, and by more than a straight inversion suggests.
+   */
+  border: '#415e4e',
+  /*
+   * 0.7 rather than 0.6. At 0.6 this landed on 1.49:1 over `surface` — a
+   * hairline that is technically present and reads as absent. The check
+   * caught it; the eye would have called the cards edgeless and left it
+   * unexplained.
+   */
+  borderSoft: 'rgba(65, 94, 78, 0.7)',
+  borderFaint: 'rgba(65, 94, 78, 0.4)',
 
   /** Neutral accent — "flat navigation" tags and inactive chips. */
-  neutralWash: 'rgba(217, 207, 192, 0.45)',
-  neutralChip: '#e6ddd0',
+  neutralWash: 'rgba(65, 94, 78, 0.45)',
+  neutralChip: '#1e2d26',
 
   /** Warm accent — the "real-time" scenario. */
-  gold: '#7a5c12',
-  goldWash: 'rgba(184, 154, 74, 0.28)',
+  gold: '#e0b64a',
+  goldWash: 'rgba(224, 182, 74, 0.28)',
 
   /**
    * Content sitting *on* `brand` — the pill mascot, primary button labels,
-   * the onboarding check. Cream rather than pure white, as in the reference:
-   * stark white on warm brown reads cold and slightly glares.
+   * the onboarding check. Near-black rather than pure black: the green is
+   * bright, and true black on it reads harsher than the ground it sits over.
    */
-  onBrand: '#f7f2ea',
+  onBrand: '#06110c',
 
-  danger: '#a33a2a',
+  /**
+   * Warm red for failures. Kept warm rather than turned green-adjacent: a
+   * palette where the working colour and the failure colour are neighbours is
+   * one where a user cannot tell at a glance which happened.
+   */
+  danger: '#ff6b52',
 } as const;
 
 /**

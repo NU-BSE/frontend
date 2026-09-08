@@ -79,11 +79,28 @@ export function AgentMessageItem({
   }
 
   if (result.status === 'error') {
+    /*
+     * The reason, not just the verdict.
+     *
+     * A run that failed the same call four times showed four rows reading
+     * "android.settings.open_app — failed" and nothing else, so neither the
+     * user nor anyone reading the screenshot could tell whether the package
+     * was wrong, the screen unsupported, or a permission missing. The message
+     * is already carried on the result and was simply not rendered.
+     *
+     * Trimmed, because a tool error can run to a paragraph — the model gets
+     * the whole thing, the timeline gets the first line of it.
+     */
     return (
       <View style={styles.stepRow}>
         <Text variant="bodySmall" tone="danger">
           {label} — failed
         </Text>
+        {result.error ? (
+          <Text variant="bodySmall" tone="muted" numberOfLines={3}>
+            {result.error}
+          </Text>
+        ) : null}
       </View>
     );
   }
@@ -118,5 +135,6 @@ const styles = StyleSheet.create({
   stepRow: {
     alignSelf: 'stretch',
     paddingHorizontal: spacing.xs,
+    gap: spacing.xs,
   },
 });

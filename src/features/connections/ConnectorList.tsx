@@ -18,7 +18,17 @@ import {
   useDisconnectConnection,
   useRegisteredConnectorIds,
 } from '@/connections/useConnections';
+import { isEntitled, useEntitlements } from '@/features/subscription/useEntitlements';
 import { palette, radius, spacing } from '@/theme/tokens';
+
+/**
+ * Where a tile sends someone who has not paid.
+ *
+ * `upgrade=1` is what stops the onboarding paywall from behaving like
+ * onboarding: it returns here instead of completing setup and replacing the
+ * stack with the feed.
+ */
+const UPGRADE_ROUTE = '/onboarding/subscription?upgrade=1';
 
 const COLUMNS = 3;
 const GRID_GAP = spacing.md;
@@ -44,6 +54,14 @@ export function ConnectorList() {
   const connect = useConnectConnector();
   const disconnect = useDisconnectConnection();
   const { data: customServers } = useCustomServers();
+  const { data: entitlements } = useEntitlements();
+
+  /*
+   * Everything but Settings is behind the subscription. Undefined entitlements
+   * — still loading, or the request failed — read as unpaid, so the offer is
+   * what a broken network produces rather than free access.
+   */
+  const entitled = isEntitled(entitlements);
 
   /*
    * Shown as a count rather than a dot or a badge: "Custom" alone gives no
@@ -140,6 +158,12 @@ export function ConnectorList() {
                 (connect.isPending && connect.variables === entry.connectorId) ||
                 (disconnect.isPending && disconnect.variables === connection?.id);
               const canPress = hasConnections || connectable;
+              /*
+               * Behind the paywall. Still pressable — the tap is what opens
+               * the offer — so this only changes what the tile says and where
+               * it goes.
+               */
+              const locked = !entitled && !entry.includedOnFreePlan;
 
               return (
                 <Pressable
@@ -150,7 +174,13 @@ export function ConnectorList() {
                     selected: connected,
                   }}
                   accessibilityLabel={
-                    entry.route
+                    !entitled && !entry.includedOnFreePlan
+                      ? `${
+                          entry.key === CUSTOM_SERVERS_ENTRY.key
+                            ? CUSTOM_SERVERS_ENTRY.label
+                            : entry.label
+                        }. Included with Creepy Pro. Tap to see the plans`
+                      : entry.route
                       ? `${entry.key === CUSTOM_SERVERS_ENTRY.key ? customLabel : entry.label}. ${entry.summary}`
                       : connectable
                       ? `${entry.label}. ${
@@ -168,6 +198,18 @@ export function ConnectorList() {
                   }
                   disabled={!canPress || busy || isPending}
                   onPress={() => {
+                    /*
+                     * Before anything else, including the route entries: the
+                     * custom-MCP screen is as much a paid feature as a
+                     * connector, and it is reached by route rather than by
+                     * connector id.
+                     */
+                    if (!entitled && !entry.includedOnFreePlan) {
+                      router.push(
+                        UPGRADE_ROUTE as Parameters<typeof router.push>[0],
+                      );
+                      return;
+                    }
                     if (entry.route) {
                       router.push(entry.route as Parameters<typeof router.push>[0]);
                       return;
@@ -199,14 +241,16 @@ export function ConnectorList() {
                   style={({ pressed }) => [
                     styles.cellSlot,
                     styles.cell,
-                    connected && styles.cellConnected,
+                    connected && !locked && styles.cellConnected,
                     !connectable && styles.cellPlanned,
                     pressed && styles.pressed,
                   ]}
                 >
                   <Text
                     variant="label"
-                    tone={!connectable ? 'faint' : connected ? 'brand' : 'primary'}
+                    tone={
+                      !connectable ? 'faint' : connected && !locked ? 'brand' : 'primary'
+                    }
                     style={styles.cellText}
                     numberOfLines={2}
                   >
@@ -220,13 +264,18 @@ export function ConnectorList() {
                   >
                     {busy
                       ? 'Working…'
-                      : connected
-                        ? (connection?.displayName ?? 'Connected')
-                        : reconnectRequired
-                          ? 'Reconnect required'
-                          : (entry.note ?? entry.summary)}
+                      : locked
+                        ? // Says what the tile costs, not that it is
+                          // forbidden. The summary is no use to someone who
+                          // cannot reach the thing it describes.
+                          'With Pro'
+                        : connected
+                          ? (connection?.displayName ?? 'Connected')
+                          : reconnectRequired
+                            ? 'Reconnect required'
+                            : (entry.note ?? entry.summary)}
                   </Text>
-                  {connected ? (
+                  {connected && !locked ? (
                     <Text variant="tag" tone="brand" uppercase>
                       Connected
                     </Text>

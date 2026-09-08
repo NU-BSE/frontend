@@ -1,15 +1,19 @@
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useMemo, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
+
+import { getModelCatalog } from '@/api/client';
 import { useRouter } from 'expo-router';
 import { ActivityIndicator, Pressable, ScrollView, StyleSheet, View } from 'react-native';
 
 import { track } from '@/analytics';
 import { useAi } from '@/ai/AiProvider';
+import { getModelOptionSupport } from '@/ai/deviceModelSelection';
 import {
-  getModelOptionSupport,
-  getRecommendedMemoryProfile,
-} from '@/ai/deviceModelSelection';
-import { getLocalModelReason, getLocalModelState } from '@/ai/localModelState';
+  getLocalModelReason,
+  getLocalModelState,
+  initialAiMode,
+  type AiMode,
+} from '@/ai/localModelState';
 import { useModelInstall } from '@/features/model/useModelInstall';
 import { Button } from '@/components/Button';
 import { Icon } from '@/components/Icon';
@@ -26,8 +30,15 @@ import {
 } from '@/storage/prefs';
 import { gutter, palette, radius, spacing } from '@/theme/tokens';
 
-type AiMode = 'local' | 'cloud';
-
+/*
+ * One local option and one remote one.
+ *
+ * The local card does not name the model. It said "2B", which was true of the
+ * model the app happened to be written against and became a lie the moment the
+ * backend published a different one — the app downloads whatever the catalogue
+ * offers. Every size on this screen is read from the catalogue instead, which
+ * stays true whatever is served, and reads as the thing a user actually weighs.
+ */
 const formatBytes = (bytes: number): string => {
   if (bytes >= 1024 ** 3) return `${(bytes / 1024 ** 3).toFixed(1)} GB`;
   if (bytes >= 1024 ** 2) return `${Math.round(bytes / 1024 ** 2)} MB`;
@@ -46,9 +57,8 @@ const formatBytes = (bytes: number): string => {
 export default function OnboardingMemory() {
   const router = useRouter();
   const { activateSelectedEngine } = useAi();
-  const [choice, setChoice] = useState<AiMode>('cloud');
+  const [picked, setPicked] = useState<AiMode | null>(null);
   const [saving, setSaving] = useState(false);
-  const initializedChoice = useRef(false);
 
   const { data: assessment, isPending } = useQuery({
     queryKey: ['device-assessment'],
@@ -56,11 +66,27 @@ export default function OnboardingMemory() {
     staleTime: Infinity,
   });
 
+  /*
+   * What the backend actually publishes, so the storage requirement is the
+   * size of this download rather than a constant measured from one model.
+   * Best-effort: an unreachable catalogue leaves the fallback in place instead
+   * of blocking the screen.
+   */
+  const { data: catalog } = useQuery({
+    queryKey: ['model-catalog'],
+    queryFn: getModelCatalog,
+    retry: false,
+    staleTime: 5 * 60_000,
+  });
+  const localBundle = catalog?.bundles.find(
+    (bundle) => bundle.profile === 'on-device',
+  );
+
   const { state: install, start, stop } = useModelInstall('on-device');
 
   const support = useMemo(
-    () => getModelOptionSupport(assessment ?? null),
-    [assessment],
+    () => getModelOptionSupport(assessment ?? null, localBundle?.totalBytes),
+    [assessment, localBundle?.totalBytes],
   );
   const deviceSupported =
     support.find((option) => option.profile === 'on-device')?.supported ?? false;
@@ -71,13 +97,25 @@ export default function OnboardingMemory() {
   const installed = install.phase === 'installed';
   const localState = getLocalModelState(assessment ?? null, installed);
 
-  // Cloud is the safe default unless this device can actually run on-device.
-  useEffect(() => {
-    if (!isPending && !initializedChoice.current) {
-      initializedChoice.current = true;
-      setChoice(localState === 'available' ? 'local' : 'cloud');
-    }
-  }, [isPending, localState]);
+  /*
+   * Cloud is the safe default unless this device can actually run on-device —
+   * but only once both halves of "can it" have answered. The assessment is one
+   * AsyncStorage read; the install check reads the disk and settles later. So
+   * the preselection is derived on every render rather than latched by an
+   * effect on the first one: a latch fires when the faster half lands, reads
+   * `installed` as false because the file check is still running, and
+   * preselects Cloud over weights that are already on the phone.
+   *
+   * `picked` is null until the user actually taps, so their choice always wins
+   * once made, and the preselection can correct itself before then.
+   */
+  const installSettled = install.phase !== 'checking';
+  const preselected = initialAiMode({
+    deviceSettled: !isPending,
+    installSettled,
+    localState,
+  });
+  const choice: AiMode = picked ?? preselected ?? 'cloud';
 
   const downloadable =
     install.downloadAllowed && install.bundle != null;
@@ -168,7 +206,7 @@ export default function OnboardingMemory() {
             accessibilityState={{ selected: choice === 'local', disabled: !localCardEnabled }}
             accessibilityLabel="On this phone. AI runs directly on your Android."
             disabled={!localCardEnabled || saving}
-            onPress={() => setChoice('local')}
+            onPress={() => setPicked('local')}
             style={({ pressed }) => [
               styles.card,
               choice === 'local' && styles.cardActive,
@@ -256,7 +294,7 @@ export default function OnboardingMemory() {
             accessibilityState={{ selected: choice === 'cloud' }}
             accessibilityLabel="Cloud. Uses Creepy's cloud AI."
             disabled={saving}
-            onPress={() => setChoice('cloud')}
+            onPress={() => setPicked('cloud')}
             style={({ pressed }) => [
               styles.card,
               choice === 'cloud' && styles.cardActive,
@@ -292,7 +330,9 @@ export default function OnboardingMemory() {
         onAdvance={() => void finish()}
         advanceLabel={saving ? 'Saving' : 'Continue'}
         advanceDisabled={
-          saving || isPending || (choice === 'local' && !installed)
+          saving ||
+          preselected === null ||
+          (choice === 'local' && !installed)
         }
       />
     </Screen>

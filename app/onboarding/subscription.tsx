@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { useRouter } from "expo-router";
+import { useLocalSearchParams, useRouter } from "expo-router";
 import { ActivityIndicator, Pressable, ScrollView, StyleSheet, View } from "react-native";
 
 import { track } from "@/analytics";
@@ -24,6 +24,7 @@ import {
 import { resolvePricing } from "@/features/subscription/pricing";
 import { shouldShowPaywall } from "@/features/onboarding/subscriptionDecision";
 import { getMySubscription, verifyPlayPurchase } from "@/api/client";
+import { ENTITLEMENTS_QUERY_KEY } from "@/features/subscription/useEntitlements";
 import { getInstalledModel, verifyInstalled } from "@/ai/modelInstall";
 import { getMemoryProfile, setOnboardingComplete } from "@/storage/prefs";
 import { gutter, palette, radius, spacing } from "@/theme/tokens";
@@ -103,12 +104,31 @@ export default function OnboardingSubscription() {
     };
   }, []);
 
+  /*
+   * The same screen serves two arrivals, and they must not end the same way.
+   *
+   * During onboarding, leaving means setup is finished: mark it complete and
+   * replace the stack with the feed. Reached from a locked connector tile
+   * (`?upgrade=1`), it is a detour — finishing means going back to the tile
+   * that was tapped, and marking onboarding complete from here would end a
+   * setup the user might be halfway through.
+   */
+  const { upgrade } = useLocalSearchParams<{ upgrade?: string }>();
+  const isUpgrade = upgrade === "1";
+
   const complete = useCallback(async () => {
+    if (isUpgrade) {
+      // Whatever was bought changes what the tiles do, so the answer the
+      // gate reads has to be re-fetched rather than served from cache.
+      await queryClient.invalidateQueries({ queryKey: ENTITLEMENTS_QUERY_KEY });
+      router.back();
+      return;
+    }
     await setOnboardingComplete();
     await queryClient.invalidateQueries({ queryKey: ["onboarding-status"] });
     track("onboarding_completed");
     router.replace("/(tabs)/feed");
-  }, [queryClient, router]);
+  }, [isUpgrade, queryClient, router]);
 
   const startTrial = useCallback(async () => {
     if (busy) return;
@@ -294,15 +314,19 @@ export default function OnboardingSubscription() {
 
         <Pressable
           accessibilityRole="button"
-          accessibilityLabel="Not now, continue without Pro"
+          accessibilityLabel={
+            isUpgrade ? "Not now, go back" : "Not now, continue without Pro"
+          }
           disabled={busy}
           onPress={() => void complete()}
           style={({ pressed }) => [styles.skip, pressed && styles.pressed]}
         >
           <Text variant="label" tone="secondary">
-            {onDevice
-              ? "Not now — keep using Creepy on this phone"
-              : "Not now — continue with Cloud"}
+            {isUpgrade
+              ? "Not now"
+              : onDevice
+                ? "Not now — keep using Creepy on this phone"
+                : "Not now — continue with Cloud"}
           </Text>
         </Pressable>
       </ScrollView>

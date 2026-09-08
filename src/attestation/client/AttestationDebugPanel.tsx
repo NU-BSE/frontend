@@ -6,6 +6,7 @@ import {
   subscribeClassifierTrace,
 } from './debugTrace';
 import type { ClassifierTrace } from '@attestation/shared/wire';
+import { palette } from '@/theme/tokens';
 
 type Props = {
   trace?: ClassifierTrace | null;
@@ -34,16 +35,22 @@ export const AttestationDebugPanel = ({ trace }: Props) => {
   );
 };
 
+/*
+ * The last three hardcoded colours in the app. They were light-theme greys,
+ * so on the neo-green ground this panel rendered as near-invisible text inside
+ * a near-invisible box. Re-theming is a token edit everywhere else; these were
+ * the exception that proves it, and are no longer one.
+ */
 const styles = StyleSheet.create({
   panel: {
-    borderColor: '#d0d7de',
+    borderColor: palette.border,
     borderRadius: 8,
     borderWidth: StyleSheet.hairlineWidth,
     maxHeight: 260,
     padding: 12,
   },
   title: {
-    color: '#24292f',
+    color: palette.textPrimary,
     fontSize: 14,
     fontWeight: '600',
     marginBottom: 8,
@@ -52,7 +59,7 @@ const styles = StyleSheet.create({
     maxHeight: 210,
   },
   code: {
-    color: '#57606a',
+    color: palette.textSecondary,
     fontFamily: 'Courier',
     fontSize: 12,
   },

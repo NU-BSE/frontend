@@ -35,6 +35,7 @@
 
 import { getModelCatalog, modelFileUrl, type ModelFileEntry } from '@/api/client';
 import { getToken } from '@/api/client';
+import { runtimeForModel, type ModelRuntime } from './modelProfiles';
 
 const INSTALL_KEY = 'creepyim.model.install.v1';
 const DIRECTORY = 'models';
@@ -90,6 +91,17 @@ export interface InstalledModel {
   files: InstalledFile[];
   /** Total across every file, for display. */
   bytes: number;
+  /**
+   * The context and reply budget this model was installed with.
+   *
+   * Stored rather than recomputed, so the engine loads the weights on the
+   * terms they were published under. A global constant was right while there
+   * was one model and wrong the moment the backend served another.
+   *
+   * Optional: a record written before this existed has none, and
+   * `runtimeForModel` derives one from the size instead.
+   */
+  runtime?: ModelRuntime;
   installedAt: number;
 }
 
@@ -147,7 +159,7 @@ function fileFor(name: string) {
  * and `java.io.File(URI)` rejects a URI with no scheme outright. So
  * `new File('/data/user/0/…/model.gguf')` throws rather than reporting a
  * missing file — and `verifyInstalled` catches everything and answers
- * `false`, which reads as "not downloaded". A complete 1.1 GB install failed
+ * `false`, which reads as "not downloaded". A complete multi-gigabyte install failed
  * its own check on every launch, the engine fell back to the stub, and the
  * account screen reported "The on-device model has not been downloaded yet"
  * to someone looking at the model they had just waited twenty minutes for.
@@ -177,7 +189,7 @@ export async function getInstalledModel(): Promise<InstalledModel | null> {
  * path that no longer exists would otherwise be handed to llama.rn, which
  * fails deep in native code with a message that names nothing useful.
  *
- * Size is checked; content is not. Hashing a 1.1 GB file in JavaScript on a
+ * Size is checked; content is not. Hashing a gigabyte-scale file in JavaScript on a
  * phone takes minutes, so a per-launch integrity check would cost more than
  * the failure it prevents. The bytes arrive over HTTPS and the exact length is
  * verified, which catches the realistic failure — a truncated download — and
@@ -386,6 +398,7 @@ export async function installModel(options: {
       role: entry.role,
     })),
     bytes: bundle.totalBytes,
+    runtime: runtimeForModel(bundle),
     installedAt: Date.now(),
   };
   await persist(install);

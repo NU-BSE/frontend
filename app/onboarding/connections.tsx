@@ -136,7 +136,8 @@ export default function OnboardingConnections() {
           {wantsTelegram ? (
             <ConnectionCard
               title="Telegram"
-              description="Find chats, catch up on messages and send replies.\n\nCreepy always asks before sending a message."
+              description="Find chats, catch up on messages and send replies."
+              note="Creepy always asks before sending a message."
               connected={telegram?.status === "connected"}
               connectLabel="Connect Telegram"
               onConnect={startTelegram}
@@ -146,7 +147,8 @@ export default function OnboardingConnections() {
           {wantsGoogle ? (
             <ConnectionCard
               title="Google"
-              description="Calendar, Drive and Gmail.\n\nCalendar and Drive start read-only. Gmail access is requested only when you use an email feature."
+              description="Calendar, Drive and Gmail."
+              note="Calendar and Drive start read-only. Gmail access is requested only when you use an email feature."
               connected={google?.status === "connected"}
               connectLabel="Connect Google"
               onConnect={startGoogle}
@@ -178,6 +180,7 @@ function ConnectionCard({
   title,
   badge,
   description,
+  note,
   connected,
   connectLabel,
   connecting,
@@ -186,6 +189,17 @@ function ConnectionCard({
   title: string;
   badge?: string;
   description: string;
+  /**
+   * A second paragraph, for what Creepy will not do without being asked.
+   *
+   * Its own prop rather than "\n\n" inside `description`: a JSX string
+   * attribute is not a JS string literal and does not process escapes, so
+   * that rendered the backslashes verbatim on screen. Writing it as
+   * `{"...\n\n..."}` would fix the escape but still stack two lines at the
+   * body line-height, whereas the card is a flex column with a gap and gives
+   * a real paragraph break to anything rendered as its own block.
+   */
+  note?: string;
   connected?: boolean;
   connectLabel: string;
   connecting?: boolean;
@@ -204,6 +218,11 @@ function ConnectionCard({
       <Text variant="bodySmall" tone="secondary">
         {description}
       </Text>
+      {note ? (
+        <Text variant="bodySmall" tone="secondary">
+          {note}
+        </Text>
+      ) : null}
       {connected ? (
         <Text variant="label" tone="brand">
           Connected

@@ -9,6 +9,7 @@
  *
  * Run: npm run verify:layout
  */
+import { execFileSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
 
@@ -867,6 +868,50 @@ console.log('\nchat composer keyboard avoidance:');
   assert(
     !/behavior=\{[^}]*Platform\.OS[^}]*\}/u.test(props),
     'the behaviour is not conditioned on the platform at all',
+  );
+}
+
+/*
+ * Escape sequences in JSX string attributes.
+ *
+ * `description="one.\n\ntwo."` is not a JavaScript string literal. JSX
+ * attribute values are their own grammar and do not process escapes, so this
+ * renders the two characters backslash-n on screen — which is exactly what
+ * shipped on the connections step, where both connector cards read
+ * "send replies.\n\nCreepy always asks". The expression form
+ * `{"one.\n\ntwo."}` is a real string literal and does interpret them.
+ *
+ * Nothing else catches it: it type-checks, it lints, and the text is present,
+ * merely wrong. Two paragraphs are better expressed as two blocks anyway, so
+ * the fix was a second prop rather than the expression form.
+ */
+console.log('\nJSX attribute escapes:');
+{
+  const files = execFileSync('git', ['ls-files', '-z', '*.tsx'], {
+    encoding: 'utf8',
+  })
+    .split('\0')
+    .filter(Boolean);
+
+  // A JSX attribute: name="…" with no spaces around `=`, which is what
+  // distinguishes it from an assignment to a JS string, where escapes work.
+  const attribute = /(?:^|[\s{])([a-zA-Z][a-zA-Z0-9]*)="([^"\n]*\\[nrt][^"\n]*)"/gu;
+
+  const offenders: string[] = [];
+  for (const file of files) {
+    const source = readFileSync(path.join(process.cwd(), file), 'utf8');
+    source.split('\n').forEach((line, index) => {
+      for (const match of line.matchAll(attribute)) {
+        offenders.push(`${file}:${index + 1} ${match[1]}="…${match[2].slice(-28)}"`);
+      }
+    });
+  }
+
+  assert(
+    offenders.length === 0,
+    offenders.length
+      ? `JSX string attributes must not carry an escape:\n    ${offenders.join('\n    ')}`
+      : `no JSX string attribute carries a \\n, \\r or \\t (${files.length} files checked)`,
   );
 }
 

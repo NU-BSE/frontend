@@ -1,320 +1,510 @@
-# Creepy.IM — Android frontend
+# Creepy.IM
 
-Expo SDK 57 + Expo Router + TanStack Query + TanStack AI. Android only, built
-from the Creepy.IM Figma file.
+**An open-source, local-first AI assistant for Android that can use tools, connect to your apps, and perform actions on your behalf — while keeping you in control.**
 
-## Status
+Creepy.IM is an experiment in moving AI assistants beyond chat.
 
-| Area | State |
-| --- | --- |
-| Onboarding (categories → memory config) | Built from Figma |
-| Feed / Home (tabs, scenario cards) | Built from Figma |
-| History (search, sort, filters, entries) | Built from Figma |
-| Auth (email code) | Built and wired to the backend |
-| Ask Creepy chat | Built — **no Figma frame existed**, designed to match |
-| Deep links | Live code paths, **stub targets** |
-| AI layer (on-device, swappable) | Done, verified against a real `ChatClient` |
-| Agent orchestration (LLM ↔ MCP tool loop) | Done, verified end-to-end |
-| Approvals UI (human confirmation gate) | Done, verified |
-| Connection model (persistent store + registry) | Done, verified |
-| Telegram personal connector | **Mock adapter**; native TDLib bridge stubbed (needs dev build) |
-| Google / Microsoft / Slack / … connectors | **Mock** — hidden in production until real |
+Instead of only answering questions, Creepy can understand a task, decide which tools are needed, interact with connected services through MCP, and execute actions after explicit user approval.
 
-`tsc` clean · `expo lint` clean · `expo-doctor` 20/20 · Android bundle exports.
+The project is designed around a simple idea:
 
-### Implementation status legend
+> **An AI assistant should be able to act — without becoming an uncontrolled agent.**
 
-Every connector package exports an honest `implementationStatus`, and the
-production registry refuses to register `mock` connectors, so the model can
-never be shown tools that would report fake success.
+Creepy can run AI models directly on the device, use cloud inference when requested, connect to external services, and expose those capabilities to an agent through a permission-aware tool layer.
 
-- **Implemented and real** — agent orchestration, approval flow, connection
-  store/registry, email auth, MCP runtime.
-- **Implemented but mock** — all provider connectors (Telegram, Google,
-  Android, …) plus the built-in calendar. They exercise the full loop in
-  development and tests but are not registered in production.
-- **Requires native development build** — Telegram personal-account support
-  (TDLib via the `TelegramTdlibModule` native module, Phase D). The
-  TypeScript adapter seam and auth state machine exist; the Kotlin/TDLib side
-  does not yet.
-- **Requires backend / OAuth broker** — real Google OAuth token exchange and
-  any provider with a confidential client secret. Never bundled in the APK.
+The project is currently focused on Android.
 
-## Run
+---
+
+## What Creepy can do
+
+Creepy is built around an agent runtime rather than a traditional chatbot.
+
+A request can look like:
+
+```text
+Find the conversation where we discussed the trip and remind me tomorrow.
+```
+
+Instead of treating that as a single prompt, the agent can:
+
+```text
+Understand the request
+        ↓
+Choose available tools
+        ↓
+Read relevant information
+        ↓
+Prepare an action
+        ↓
+Ask for approval when required
+        ↓
+Execute the action
+        ↓
+Return the result
+```
+
+The same architecture can be extended to messaging, calendars, files, productivity tools, device capabilities and other services.
+
+---
+
+## Core principles
+
+### Local-first AI
+
+Creepy supports on-device inference through `llama.rn`.
+
+The UI and agent runtime are model-agnostic, so inference can be switched between:
+
+* on-device models;
+* remote models;
+* an offline development / preview engine.
+
+The goal is to keep local execution possible instead of making the application permanently dependent on a cloud LLM.
+
+### Tools, not just chat
+
+The agent can interact with real capabilities through a connector system built around MCP.
+
+```text
+User
+  ↓
+Creepy UI
+  ↓
+Agent Runtime
+  ↓
+LLM / Planner
+  ↓
+MCP
+  ↓
+Policy & Approval Layer
+  ↓
+Connector
+  ↓
+External service / Android
+```
+
+Connectors are isolated from the model itself.
+
+The model decides **what it wants to do**.
+
+The tool layer decides **whether and how that action can actually happen**.
+
+### Human approval
+
+Actions with external side effects can require explicit confirmation.
+
+For example, reading data and sending a message are treated differently.
+
+The model cannot approve its own actions.
+
+Approval happens in the application layer before the connector is allowed to execute the operation.
+
+### Credentials stay outside the model
+
+Credentials are referenced by the connection layer and stored separately from model context.
+
+The agent receives tools and tool results — not OAuth secrets, refresh tokens or account passwords.
+
+### Honest capabilities
+
+A connector should not pretend that an operation succeeded when the real provider implementation is unavailable.
+
+Development mocks are useful for testing, but production capabilities are registered separately from mocked ones.
+
+---
+
+## Architecture
+
+Creepy is primarily composed of five layers.
+
+```text
+┌──────────────────────────────────────┐
+│             React Native UI          │
+└─────────────────┬────────────────────┘
+                  │
+┌─────────────────▼────────────────────┐
+│             Agent Runtime            │
+│                                      │
+│  planning → tools → results → answer │
+└───────────┬──────────────────────────┘
+            │
+┌───────────▼──────────────────────────┐
+│                MCP                   │
+│                                      │
+│ tool registry / validation / policy  │
+└───────────┬──────────────────────────┘
+            │
+┌───────────▼──────────────────────────┐
+│          Connector Layer             │
+│                                      │
+│ Google / Telegram / Android / ...    │
+└───────────┬──────────────────────────┘
+            │
+┌───────────▼──────────────────────────┐
+│        External capabilities         │
+└──────────────────────────────────────┘
+```
+
+The AI engine is intentionally replaceable:
+
+```text
+                    ┌─ On-device LLM
+                    │
+Agent Runtime ──────┼─ Remote LLM
+                    │
+                    └─ Development engine
+```
+
+---
+
+## Tech stack
+
+Creepy currently uses:
+
+* React Native
+* Expo
+* Expo Router
+* TypeScript
+* TanStack Query
+* TanStack AI
+* Model Context Protocol (MCP)
+* `llama.rn`
+* Zod
+* Expo SecureStore
+* React Native AsyncStorage
+
+The repository is structured as a monorepo, with reusable agent, MCP and connector packages living alongside the application.
+
+---
+
+## Repository structure
+
+```text
+app/
+  Android application screens and routing
+
+src/
+  agent/
+      agent runtime, planners and tool execution
+
+  ai/
+      local / remote AI engines and adapters
+
+  connections/
+      persistent connection management
+
+  mcp/
+      MCP runtime and tool registration
+
+  features/
+      application features and UI flows
+
+  storage/
+      persistent application storage
+
+packages/
+  connector-core
+  connector-google
+  connector-telegram
+  connector-android
+  connector-github
+  connector-slack
+  connector-discord
+  connector-notion
+  connector-dropbox
+  connector-spotify
+  connector-todoist
+  mcp-client
+  mcp-server
+  approval-core
+  policy-core
+  credential-vault
+  ...
+
+modules/
+  native Android modules
+
+scripts/
+  architecture and integration verification scripts
+
+test/
+  tests
+```
+
+---
+
+## Getting started
+
+### Requirements
+
+You will need:
+
+* Node.js
+* npm
+* Android Studio / Android SDK
+* an Android emulator or physical Android device
+
+Clone the repository and install dependencies:
 
 ```bash
-npm install --legacy-peer-deps   # see "Known npm quirk"
+git clone <repository-url>
+cd frontend
+
+npm install --legacy-peer-deps
+```
+
+Create your environment configuration:
+
+```bash
 cp .env.example .env
+```
+
+Then run the Android application:
+
+```bash
 npm run android
 ```
 
-Verification:
+---
+
+## Environment
+
+The application can run with different levels of external integration.
+
+The important configuration groups are:
+
+```env
+EXPO_PUBLIC_API_URL=
+
+EXPO_PUBLIC_LLM_ENGINE=
+EXPO_PUBLIC_LLM_MODEL_PATH=
+
+EXPO_PUBLIC_TELEGRAM_ADAPTER=
+EXPO_PUBLIC_TELEGRAM_API_ID=
+EXPO_PUBLIC_TELEGRAM_API_HASH=
+
+EXPO_PUBLIC_MCP_RUNTIME_MODE=
+```
+
+Do not commit personal credentials.
+
+If you want to use Telegram through the native connector, create your own Telegram application credentials.
+
+Some cloud functionality may require the Creepy.IM backend or your own compatible backend implementation.
+
+---
+
+## On-device AI
+
+Creepy supports running GGUF models directly on Android through `llama.rn`.
+
+A model can be configured with:
+
+```env
+EXPO_PUBLIC_LLM_ENGINE=on-device
+EXPO_PUBLIC_LLM_MODEL_PATH=/path/to/model.gguf
+```
+
+The agent and UI do not depend directly on a specific model implementation.
+
+That means the inference layer can evolve independently from the rest of the application.
+
+---
+
+## MCP and connectors
+
+Connectors expose capabilities to the agent as tools.
+
+Conceptually:
+
+```text
+Connector
+   ↓
+Tool definitions
+   ↓
+MCP registry
+   ↓
+Agent
+```
+
+A connector may provide operations such as:
+
+```text
+search_messages
+read_calendar
+find_files
+create_event
+send_message
+change_device_setting
+```
+
+The agent never calls provider APIs directly.
+
+This boundary allows Creepy to apply validation, permissions and user approvals before an operation reaches the external service.
+
+Some connectors are still experimental or development-only.
+
+The connector system is one of the main areas where contributions are welcome.
+
+---
+
+## Approval model
+
+Creepy distinguishes between actions that can happen automatically and actions that should require the user.
+
+For example:
+
+```text
+Read calendar
+      ↓
+allowed
+
+Send message
+      ↓
+approval required
+      ↓
+user approves
+      ↓
+execute
+```
+
+Approval requests are bound to the action being approved so that the model cannot silently replace the requested operation after confirmation.
+
+---
+
+## Development
+
+Type-check the project:
 
 ```bash
 npm run typecheck
-npm run lint
-npm run verify               # everything below, in order
-npm run verify:ai            # drives a real ChatClient through the custom connection
-npm run verify:logic         # history sort / filter / search pipeline
-npm run verify:layout        # runs Yoga over the category grid's real node tree
-npm run verify:device        # attested device → model-profile selection
-npm run verify:mcp           # in-process MCP runtime + approval round-trips
-npm run verify:agent         # the full agent loop: plan → tool → approve → execute
-npm run verify:connections   # connection truthfulness (no fake connections)
 ```
 
-`verify:layout` matters more than it looks. The category grid collapsed to one
-column twice: first from `maxWidth: 48.5%` plus a 16pt `gap` exceeding 100%, then
-because a *correct* arithmetic test was passing while the structure it described
-was not what rendered. The grid now uses explicit rows of `flex: 1` cells — the
-column count is structural, so it cannot depend on measurement — and the test
-computes real frames with Yoga, the same engine RN uses. It includes the old
-broken structure as a control and asserts that it still collapses, so the harness
-is proven able to tell the two apart.
-
-## History sorting
-
-Chronological order is the primary axis — History is a log, and "when" is the
-question people bring to it. Category is an optional narrowing on top.
-
-The filter glyph in the search field is the sort control (the Figma asset is a
-funnel, not a magnifier, so it drives sorting rather than sitting decorative). It
-tints brand-blue with a wash background when the order is non-default, and the
-current order is spelled out in words below the category chips — an icon alone
-cannot tell you *which* direction is active.
-
-Filtering, searching and sorting all run through `applyHistoryView` in
-`src/features/history/sort.ts`, so the list and the "N of M" count can never
-disagree. It copies before sorting: the array comes from the Query cache, and
-reordering it in place would reshuffle data under other subscribers.
-
-## Design decisions you should know about
-
-**The Figma file is not token-driven.** `get_variable_defs` returns `{}`, so
-every value came from raw hex — and the three screen families disagreed:
-
-| | Home | History | Onboarding |
-| --- | --- | --- | --- |
-| Blue | `#094cb2` | `#0055ff` | `#0041c8` |
-| Serif | Noto Serif | Noto Serif | Source Serif 4 |
-| Label face | Public Sans | Public Sans | JetBrains Mono |
-
-Normalised to **Home's palette** by decision. Reversing that means editing
-`palette.brand` and `fontFamily` in `src/theme/tokens.ts` — nothing else, because
-no screen hardcodes a hex or a font size.
-
-**There is no chat frame in Figma.** The Ask Creepy screen was designed to match
-the system (same surfaces, radii, type scale) rather than invented freely, but it
-is the one screen with no design to check against.
-
-**Icons are Figma exports, not redraws.** All 23 SVGs in `assets/icons/` came out
-of the file, rewritten to `fill="currentColor"` so a `color` prop can tint them —
-which is what active/inactive nav states need. Non-square glyphs pass an explicit
-height so they keep their designed aspect ratio. Two exceptions:
-
-- The unselected radio in Memory Config has no asset in the export, so it is
-  drawn as a bordered `View`.
-- **The mascot is a supplied vector, not a Figma export.** In Figma it is a
-  *bitmap* — asking for an SVG returns a wrapper around an embedded base64
-  raster with zero paths, so there was nothing to tint.
-  `assets/icons/creepy-mascot.svg` is the vector traced outside the file; the
-  only change made here was `fill="#000000"` → `fill="currentColor"` so the
-  `color` prop drives it. It renders brand-blue in the onboarding frame and the
-  header pill. Replacing it means dropping in a new SVG with `currentColor`
-  fills — no code change.
-
-## The scenario registry
-
-`src/features/scenarios/registry.ts` is the spine. One entry drives four
-surfaces:
-
-- the onboarding category grid
-- the Home tab selector
-- the Home scenario cards
-- the chat's suggestion chips and deep links
-
-Adding a scenario is one object. No screen changes.
-
-## The chat
-
-Opened from the "Ask Creepy" header pill (unscoped) or from a scenario card or
-tab (scoped: `/chat?scenario=sports`). It presents both halves the brief asked
-for — tappable suggestion chips *and* free-text input — plus a deep-link row.
-
-Suggestions stay visible after the first exchange rather than disappearing; a
-conversation in progress still benefits from a nudge.
-
-### Deep links are stubs, deliberately live
-
-`src/features/chat/deepLinks.ts` tries the real app scheme, then a web fallback,
-and only then shows an inline "not wired up yet" notice. The buttons are not
-disabled. The reasoning: a disabled button teaches the user nothing and has to be
-rewired later, whereas this path starts working the moment a real target replaces
-the stub in the registry — no code change.
-
-## The AI architecture
-
-The brief asked for an on-device model *through* TanStack AI. Not a conflict:
-
-```
-UI  ──►  useChat (@tanstack/ai-react)  ──►  ConnectionAdapter  ──►  engine
-                    │                              │
-        screens only ever see this      this is the swappable part
-```
-
-`ConnectionAdapter` is normally an HTTP transport. TanStack AI also exports
-`stream(factory)`, taking any `AsyncIterable<StreamChunk>` — the documented seam
-for non-HTTP transports. `src/ai/engineConnection.ts` uses it to run inference
-in-process and emit a protocol-correct AG-UI event stream:
-
-```
-RUN_STARTED → TEXT_MESSAGE_START → TEXT_MESSAGE_CONTENT×N → TEXT_MESSAGE_END → RUN_FINISHED
-```
-
-- No server, no network, no API key needed for the app to work.
-- Screens are engine-agnostic; moving to a hosted model is a change in
-  `resolveEngine()`, not in any screen.
-- `npm run verify:ai` drives a real `ChatClient` through this connection and
-  asserts the message assembles and the loading state resolves. A hand-built
-  event stream can look right and still hang the client — that script is what
-  rules it out. It caught exactly that class of bug during development.
-
-### Engines
-
-| Engine | File | When it runs |
-| --- | --- | --- |
-| On-device | `src/ai/engines/onDeviceEngine.ts` | `EXPO_PUBLIC_LLM_MODEL_PATH` set **and** `llama.rn` present |
-| Offline preview | `src/ai/engines/stubEngine.ts` | Fallback, and the default in Expo Go |
-| Remote | TanStack AI's `xhrHttpStream` | Only when `EXPO_PUBLIC_LLM_ENGINE=remote` |
-
-`llama.rn` is imported lazily inside a `try/catch` — it is a native module that
-does not exist in Expo Go or before `expo prebuild`, and a static import would
-crash the bundle for anyone who has not built yet. `AiProvider` degrades to the
-preview engine **with a visible reason** rather than leaving a chat that silently
-never answers.
-
-### Enabling real on-device inference
+Run linting:
 
 ```bash
-npm install llama.rn
-npx expo prebuild --platform android
-# push a GGUF to the device, then set EXPO_PUBLIC_LLM_MODEL_PATH
+npm run lint
 ```
 
-The Memory Config onboarding step already collects the user's intended size
-(512MB / 1B / 1.5B / cloud-only) into `getMemoryProfile()` — wire that to model
-selection when you ship real weights. Start with Q4_K_M; `n_gpu_layers` defaults
-to 0 because GPU offload is inconsistent across Android GPUs.
+Run tests:
 
-## The agent architecture
-
-Chat is not text-in/text-out. `app/chat.tsx` talks to one hook —
-`useAgentChat` — and the agent layer (`src/agent/`) owns the loop:
-
-```
-user message
-   ↓
-AgentRuntime (bounded loop, ≤ MAX_AGENT_STEPS)
-   ├─► AgentModel (planner)            → validated tool call
-   ├─► MCP client → MCP server          → policy + approval gate
-   ├─► ConnectorRegistry → connector    → provider (Telegram, …)
-   └─► tool result back to the planner  → final answer
+```bash
+npm test
 ```
 
-Division of labor, enforced by construction:
+Run the full verification suite:
 
-- **The LLM plans actions.** It never executes anything and never sees
-  credentials. Tool calls are Zod-validated before MCP.
-- **MCP executes tools.** `registerConnectorTools` resolves the connection
-  from `input.connectionId` at execution time, so one tool name serves many
-  accounts (Google personal + work).
-- **The UI owns human approval.** External side effects and destructive
-  actions pause the run and surface `ApprovalSheet`. Approving re-invokes the
-  tool with the byte-identical payload plus the approval id — the approval
-  service hashes the arguments, so a tampered or replayed payload fails. The
-  model has no tool that approves actions; it cannot approve its own side
-  effect. Cancelling returns a structured `user_denied` result.
-- **Credentials stay outside the model.** Connection records carry a
-  `credentialReference`, never a secret. Secrets live in the CredentialVault
-  (expo-secure-store / Android Keystore on-device).
-
-### Planners
-
-| Planner | When | Notes |
-| --- | --- | --- |
-| Structured planner | on-device engine | Strict JSON protocol over the text engine; every response Zod-validated. Unparseable output degrades to a text answer — never a guessed tool call. |
-| Deterministic planner | offline-preview stub | Drives the full loop (search chat → send → approve → confirm) so the vertical slice is demoable without weights. |
-| Text-only | remote engine | No tool contract with the backend yet; chat degrades honestly instead of faking tool use. |
-
-### Connections are real
-
-`src/connections/` reads and writes the persistent `ConnectionStore`
-(AsyncStorage metadata; versioned document). The UI, the MCP registry and
-connector auth flows all share it — there is no separate "UI connection
-state". A fresh install exposes **no** external tools; only a completed auth
-flow creates `status: connected`; disconnect removes the record and revokes
-the stored credential; the MCP runtime restarts so the tool list always
-matches reality. `npm run verify:connections` proves all of it.
-
-In development mode the runtime seeds clearly labeled `(development mock)`
-accounts so the loop is exercisable; production never seeds anything.
-
-## Layout
-
-```
-app/
-  _layout.tsx            Fonts + providers: Gesture → SafeArea → Query → Ai → Agent
-  index.tsx              Gate: onboarding vs feed
-  onboarding/
-    index.tsx            Support categories (multi-select grid)
-    connections.tsx      Connect services (real connection state)
-    memory.tsx           Memory config (radio rows)
-  (tabs)/
-    feed.tsx             Home: tab selector + scenario cards
-    history.tsx          Search, category filters, entry cards
-    auth.tsx             Account + connectors + engine status
-  chat.tsx               Ask Creepy — modal over the tabs (agent chat)
-  dev/diagnostics.tsx    MCP health, tools, connections, model capabilities
-src/
-  agent/                 AgentRuntime, planners, tool mapper/executor, hooks
-  ai/                    Engines, connection adapter, provider, hook
-  components/            Text, Screen, Button, Icon, TopAppBar, TabSelector
-  connections/           ConnectionService + TanStack Query hooks
-  features/
-    approvals/           ApprovalSheet + human-readable previews
-    scenarios/registry   ← one file drives four surfaces
-    chat/                Bubbles, chips, composer, deep links, tool labels
-    connections/         ConnectorList (shared by onboarding + account)
-  mcp/                   Runtime singleton, registry factory, dev seed, app deps
-  storage/               AsyncStorage repositories
-  auth/providers.ts      Registry mapping providers → connector ids
-  theme/tokens.ts        ← the whole design system
-packages/                @mobile-agent/* workspace packages (MCP + connectors)
-assets/icons/            23 Figma SVG exports
+```bash
+npm run verify
 ```
 
-## Still to do
+The repository also contains focused verification commands for major subsystems:
 
-**Telegram TDLib native bridge (Phase D).** The TypeScript seam
-(`packages/connector-telegram/src/tdlib/`) and the phone/code/2FA auth state
-machine are in place; the Kotlin `TelegramTdlibModule` + TDLib build is not.
-Until then, `connect('telegram-user')` in production reports exactly that.
+```bash
+npm run verify:ai
+npm run verify:mcp
+npm run verify:agent
+npm run verify:connections
+npm run verify:telegram
+npm run verify:google
+npm run verify:gmail
+npm run verify:on-device
+npm run verify:custom-mcp
+```
 
-**Interactive Telegram auth screen.** The state machine lives in the adapter;
-the phone/code/2FA UI flow needs a screen (Phase D).
+---
 
-**Real provider implementations.** Google (OAuth → Calendar → Gmail → People →
-Drive → Tasks) is next, per `FINISH_FRONTEND_AGENT.md`. Everything else stays
-mock until it is real — never a fake success.
+## Project status
 
-**Real deep-link targets.** Replace the `url` values in the registry.
+Creepy.IM is under active development.
 
-**Loading skeleton.** The Figma file has a Home loading state (`0:123`) that is
-not built — the current Home has no async fetch to wait on, so a skeleton would
-be decorative. Worth adding when real feed data arrives.
+The core architecture is already implemented, including:
 
-## Known npm quirk
+* agent orchestration;
+* MCP tool execution;
+* human approval flow;
+* persistent connections;
+* local and remote AI engine abstraction;
+* on-device model integration;
+* connector architecture;
+* Android-native capabilities;
+* automated architecture and integration checks.
 
-`expo-router` pulls web-only deps (`vaul` → `react-dom@19.2.8`) whose peer range
-does not match the `react@19.2.3` Expo pins. Irrelevant to an Android-only app,
-but it blocks a strict `npm install`. Use `--legacy-peer-deps`.
+However, not every connector or capability should currently be considered production-ready.
+
+Expect APIs, interfaces and project structure to evolve.
+
+---
+
+## Roadmap
+
+Some of the areas we want to explore next:
+
+* more production-ready connectors;
+* better on-device models;
+* richer Android system integration;
+* custom MCP servers;
+* improved agent planning;
+* stronger permission and policy controls;
+* better local memory;
+* multi-step background workflows;
+* desktop and other platforms;
+* easier self-hosting;
+* community-built connectors.
+
+The long-term goal is to make Creepy a platform where developers can add capabilities without having to redesign the agent itself.
+
+---
+
+## Contributing
+
+Contributions are welcome.
+
+There are many ways to help:
+
+* implement a connector;
+* improve Android integrations;
+* add tests;
+* improve local model support;
+* work on the agent runtime;
+* improve documentation;
+* report bugs;
+* propose new tools and capabilities;
+* improve security and permission boundaries.
+
+Before submitting a large architectural change, opening an issue to discuss the idea is recommended.
+
+More detailed contribution guidelines will be added to `CONTRIBUTING.md`.
+
+---
+
+## Security
+
+Creepy interacts with personal accounts and device capabilities, so security boundaries are a core part of the architecture.
+
+If you discover a security vulnerability, please do **not** publish credentials, access tokens or personal user data in a public GitHub issue.
+
+A dedicated security disclosure process will be documented in `SECURITY.md`.
+
+---
+
+## Why open source?
+
+Personal AI agents are becoming capable of accessing increasingly sensitive parts of our digital lives.
+
+That makes transparency important.
+
+We want the architecture behind Creepy — its tools, permissions, connectors and agent behavior — to be inspectable, testable and improvable by other developers.
+
+Open sourcing Creepy is also an invitation to experiment with a larger question:
+
+**What should a personal AI agent look like when the user — not the model — is ultimately in control?**
+
+---
+
+## License
+
+Creepy.IM is licensed under the **GNU General Public License v3.0**.
+
+See [LICENSE](LICENSE) for details.

@@ -475,8 +475,7 @@ There are many ways to help:
 
 Before submitting a large architectural change, opening an issue to discuss the idea is recommended.
 
-More detailed contribution guidelines will be added to `CONTRIBUTING.md`.
-
+See [CONTRIBUTING.md](CONTRIBUTING.md) for detailed contribution guidelines.
 ---
 
 ## Security

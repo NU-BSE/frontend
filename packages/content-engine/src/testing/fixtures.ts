@@ -11,6 +11,7 @@ import type { DocumentComplexity } from '../execution/document-complexity';
 export interface DocumentFixture {
   name: string;
   format: DocumentFormat;
+  bytes?: Uint8Array;
   sizeBytes?: number;
   complexity?: Partial<DocumentComplexity>;
 }

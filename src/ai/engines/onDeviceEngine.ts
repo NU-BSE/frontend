@@ -290,8 +290,13 @@ export function createOnDeviceEngine(config: OnDeviceEngineConfig): LlmEngine {
             : undefined;
 
         let completionCategory: 'success' | 'cancelled' | 'error' = 'success';
-        let errorCategory: 'abort' | 'context_full' | 'unknown' | undefined =
-          undefined;
+        let errorCategory:
+          | 'abort'
+          | 'timeout'
+          | 'out_of_memory'
+          | 'context_full'
+          | 'unknown'
+          | undefined = undefined;
 
         if (options.signal?.aborted) {
           completionCategory = 'cancelled';
@@ -302,9 +307,15 @@ export function createOnDeviceEngine(config: OnDeviceEngineConfig): LlmEngine {
             caughtError instanceof Error
               ? caughtError.message
               : String(caughtError);
-          errorCategory = /context is full/iu.test(errMsg)
-            ? 'context_full'
-            : 'unknown';
+          if (/context is full/iu.test(errMsg)) {
+            errorCategory = 'context_full';
+          } else if (/timeout/iu.test(errMsg)) {
+            errorCategory = 'timeout';
+          } else if (/out of memory|oom/iu.test(errMsg)) {
+            errorCategory = 'out_of_memory';
+          } else {
+            errorCategory = 'unknown';
+          }
         }
 
         void recordMetricsEvent({

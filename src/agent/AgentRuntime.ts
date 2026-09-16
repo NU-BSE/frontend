@@ -944,7 +944,7 @@ export class AgentRuntime {
       this.options.onRunRecord?.(record);
 
       let completionCategory: 'success' | 'cancelled' | 'error' | 'max_steps_reached' = 'success';
-      let errorCategory: 'abort' | 'context_full' | 'unknown' | undefined = undefined;
+      let errorCategory: 'abort' | 'timeout' | 'out_of_memory' | 'context_full' | 'validation' | 'unknown' | undefined = undefined;
 
       if (controller.signal.aborted) {
         completionCategory = 'cancelled';

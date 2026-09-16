@@ -6,6 +6,7 @@ import { createOnDeviceEngine } from '../engines/onDeviceEngine';
 import {
   clearMetrics,
   exportMetrics,
+  flushMetricsQueue,
   MAX_STORED_EVENTS,
   METRICS_STORAGE_KEY,
   readMetricsLog,
@@ -174,6 +175,18 @@ describe('Local Inference & Agent Metrics Module', () => {
       expect(await AsyncStorage.getItem(METRICS_STORAGE_KEY)).toBeNull();
     });
 
+    it('serializes concurrent write calls without race conditions or loss', async () => {
+      await Promise.all([
+        recordMetricsEvent({ eventType: 'engine_load', loadDurationMs: 100 }),
+        recordMetricsEvent({ eventType: 'inference', generationMs: 200 }),
+        recordMetricsEvent({ eventType: 'agent_run', totalSteps: 3 }),
+      ]);
+      await flushMetricsQueue();
+
+      const events = await readMetricsLog();
+      expect(events).toHaveLength(3);
+    });
+
     it('exports allowlisted payload with schemaVersion and exportedAt', async () => {
       await recordMetricsEvent({
         eventType: 'inference',
@@ -216,8 +229,8 @@ describe('Local Inference & Agent Metrics Module', () => {
 
       expect(tokens).toEqual(['Hello', ' world']);
 
-      // Allow background recordMetricsEvent promise in generate's finally block to settle
-      await new Promise((resolve) => setTimeout(resolve, 20));
+      // Deterministically flush the background metrics recording queue
+      await flushMetricsQueue();
 
       events = await readMetricsLog();
       expect(events).toHaveLength(2);
@@ -267,8 +280,8 @@ describe('Local Inference & Agent Metrics Module', () => {
 
       await runtime.sendMessage('Hello test');
 
-      // Allow background recordMetricsEvent promise to settle
-      await new Promise((resolve) => setTimeout(resolve, 20));
+      // Deterministically flush background metrics recording queue
+      await flushMetricsQueue();
 
       const events = await readMetricsLog();
       expect(events).toHaveLength(1);

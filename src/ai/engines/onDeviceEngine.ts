@@ -8,6 +8,7 @@
  * rather than a hard failure. This is what lets `resolveEngine()` fall back.
  */
 import { AsyncQueue } from '../asyncQueue';
+import { recordMetricsEvent } from '../metrics';
 import type {
   EngineGenerateOptions,
   EnginePrompt,
@@ -157,26 +158,53 @@ export function createOnDeviceEngine(config: OnDeviceEngineConfig): LlmEngine {
       const generation = lifecycleGeneration;
 
       preparing = (async () => {
+        const startLoad = Date.now();
         const binding = loadBinding();
         if (!binding) {
-          throw new OnDeviceUnavailableError(
+          const loadError = new OnDeviceUnavailableError(
             'the llama.rn native module is not present in this build',
           );
-        }
-        const created = await binding.initLlama({
-          model: modelPath,
-          n_ctx: contextSize,
-          n_gpu_layers: gpuLayers,
-        });
-
-        // The engine was disposed or a newer preparation took over while the
-        // native init was running — release this context so it never leaks.
-        if (disposed || generation !== lifecycleGeneration) {
-          await created.release().catch(() => undefined);
-          return;
+          void recordMetricsEvent({
+            eventType: 'engine_load',
+            engine: 'creepyim-on-device',
+            loadDurationMs: Date.now() - startLoad,
+            completionCategory: 'error',
+            errorCategory: 'unknown',
+          });
+          throw loadError;
         }
 
-        context = created;
+        try {
+          const created = await binding.initLlama({
+            model: modelPath,
+            n_ctx: contextSize,
+            n_gpu_layers: gpuLayers,
+          });
+
+          // The engine was disposed or a newer preparation took over while the
+          // native init was running — release this context so it never leaks.
+          if (disposed || generation !== lifecycleGeneration) {
+            await created.release().catch(() => undefined);
+            return;
+          }
+
+          context = created;
+          void recordMetricsEvent({
+            eventType: 'engine_load',
+            engine: 'creepyim-on-device',
+            loadDurationMs: Date.now() - startLoad,
+            completionCategory: 'success',
+          });
+        } catch (err) {
+          void recordMetricsEvent({
+            eventType: 'engine_load',
+            engine: 'creepyim-on-device',
+            loadDurationMs: Date.now() - startLoad,
+            completionCategory: 'error',
+            errorCategory: 'unknown',
+          });
+          throw err;
+        }
       })().finally(() => {
         preparing = null;
       });
@@ -204,6 +232,10 @@ export function createOnDeviceEngine(config: OnDeviceEngineConfig): LlmEngine {
       generating = true;
 
       const active = context;
+      const genStart = Date.now();
+      let firstTokenTime: number | null = null;
+      let outputTokens = 0;
+      let caughtError: unknown = null;
 
       const queue = new AsyncQueue<string>();
 
@@ -223,17 +255,68 @@ export function createOnDeviceEngine(config: OnDeviceEngineConfig): LlmEngine {
             stop,
           },
           (data) => {
-            if (data?.token) queue.push(data.token);
+            if (data?.token) {
+              if (firstTokenTime === null) {
+                firstTokenTime = Date.now();
+              }
+              outputTokens += 1;
+              queue.push(data.token);
+            }
           },
         )
         .then(() => queue.close())
-        .catch((error: unknown) => queue.fail(describeCompletionFailure(error)));
+        .catch((error: unknown) => {
+          caughtError = error;
+          queue.fail(describeCompletionFailure(error));
+        });
 
       try {
         yield* queue.drain();
+      } catch (err) {
+        caughtError = err;
+        throw err;
       } finally {
         generating = false;
         options.signal?.removeEventListener('abort', onAbort);
+
+        const genEnd = Date.now();
+        const generationMs = genEnd - genStart;
+        const timeToFirstTokenMs =
+          firstTokenTime !== null ? firstTokenTime - genStart : undefined;
+        const effectiveMs = Math.max(1, generationMs);
+        const tokensPerSecond =
+          outputTokens > 0
+            ? Number((outputTokens / (effectiveMs / 1000)).toFixed(2))
+            : undefined;
+
+        let completionCategory: 'success' | 'cancelled' | 'error' = 'success';
+        let errorCategory: 'abort' | 'context_full' | 'unknown' | undefined =
+          undefined;
+
+        if (options.signal?.aborted) {
+          completionCategory = 'cancelled';
+          errorCategory = 'abort';
+        } else if (caughtError) {
+          completionCategory = 'error';
+          const errMsg =
+            caughtError instanceof Error
+              ? caughtError.message
+              : String(caughtError);
+          errorCategory = /context is full/iu.test(errMsg)
+            ? 'context_full'
+            : 'unknown';
+        }
+
+        void recordMetricsEvent({
+          eventType: 'inference',
+          engine: 'creepyim-on-device',
+          timeToFirstTokenMs,
+          generationMs,
+          outputTokens,
+          tokensPerSecond,
+          completionCategory,
+          errorCategory,
+        });
       }
     },
 

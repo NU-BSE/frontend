@@ -22,6 +22,7 @@ import type { ModelRuntime } from './modelProfiles';
 import type { EngineDescriptor, EngineOrigin } from './types';
 
 export * from './types';
+export * as metrics from './metrics';
 export { engineConnection } from './engineConnection';
 export { isOnDeviceSupported } from './engines/onDeviceEngine';
 

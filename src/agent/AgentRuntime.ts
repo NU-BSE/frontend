@@ -39,6 +39,7 @@ import {
   recordModelCall,
   finalizeTelemetry,
 } from './routing/telemetry';
+import { recordMetricsEvent } from '../ai/metrics';
 
 import type {
   RoutingTelemetry,
@@ -941,6 +942,34 @@ export class AgentRuntime {
       this.options.onRoutingTelemetry?.(routingTelemetry);
       record.finalAnswer = finalAnswer;
       this.options.onRunRecord?.(record);
+
+      let completionCategory: 'success' | 'cancelled' | 'error' | 'max_steps_reached' = 'success';
+      let errorCategory: 'abort' | 'context_full' | 'unknown' | undefined = undefined;
+
+      if (controller.signal.aborted) {
+        completionCategory = 'cancelled';
+        errorCategory = 'abort';
+      } else if (!finalAnswer) {
+        if (routingTelemetry.totalSteps >= this.maxSteps) {
+          completionCategory = 'max_steps_reached';
+        } else {
+          completionCategory = 'error';
+          errorCategory = 'unknown';
+        }
+      }
+
+      void recordMetricsEvent({
+        eventType: 'agent_run',
+        engine: this.options.model.id,
+        generationMs: routingTelemetry.durationMs,
+        toolCallCount: routingTelemetry.totalToolCalls,
+        totalSteps: routingTelemetry.totalSteps,
+        inputTokens: routingTelemetry.promptTokens > 0 ? routingTelemetry.promptTokens : undefined,
+        outputTokens: routingTelemetry.completionTokens > 0 ? routingTelemetry.completionTokens : undefined,
+        completionCategory,
+        errorCategory,
+      });
+
       this.abortController = null;
       this.pendingApproval = null;
       this.pendingDecision = null;

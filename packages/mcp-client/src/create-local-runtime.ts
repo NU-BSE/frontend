@@ -11,6 +11,7 @@ import {
   createMobileAgentMcpServer,
   registerConnectorTools,
 } from "@mobile-agent/mcp-server";
+import type { DocumentToolSet } from "@mobile-agent/content-engine";
 
 import type {
   ConnectorRegistry,
@@ -53,6 +54,8 @@ export interface LocalMcpRuntimeOptions {
    * them off so the model never acts against `mock-personal`.
    */
   builtInCalendar?: boolean;
+  /** Local-only document engine and its explicit mutation approval service. */
+  documents?: DocumentToolSet;
 }
 
 /**
@@ -77,6 +80,7 @@ export async function createLocalMcpRuntime(
       ...(options.builtInCalendar !== undefined
         ? { builtInCalendar: options.builtInCalendar }
         : {}),
+      ...(options.documents ? { documents: options.documents } : {}),
     });
 
   /*

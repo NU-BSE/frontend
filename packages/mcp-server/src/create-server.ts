@@ -5,6 +5,10 @@ import type {
   CalendarEvent,
   MobileAgentDependencies,
 } from "@mobile-agent/connector-core";
+import {
+  registerDocumentTools,
+  type DocumentToolSet,
+} from "@mobile-agent/content-engine";
 
 const connectionIdSchema = z
   .string()
@@ -69,6 +73,8 @@ export interface MobileAgentMcpServerOptions {
    * against `mock-personal`; a real calendar backend re-enables them.
    */
   builtInCalendar?: boolean;
+  /** Optional local-only Content Engine tools, registered before connect. */
+  documents?: DocumentToolSet;
 }
 
 export function createMobileAgentMcpServer(
@@ -79,6 +85,10 @@ export function createMobileAgentMcpServer(
     name: "mobile-agent-local-server",
     version: "0.1.0",
   });
+
+  if (options.documents) {
+    registerDocumentTools(server, options.documents);
+  }
 
   /*
    * Простой системный инструмент.

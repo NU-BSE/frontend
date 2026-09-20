@@ -3,6 +3,11 @@ import type { DocumentChunk } from './chunks';
 import type { DocumentRef } from './document-ref';
 import type { DocumentLocation } from './locations';
 
+export interface DocumentFindResult {
+  documents: readonly DocumentRef[];
+  truncated: boolean;
+}
+
 export interface DocumentInspection {
   document: DocumentRef;
   capabilities: DocumentCapabilities;

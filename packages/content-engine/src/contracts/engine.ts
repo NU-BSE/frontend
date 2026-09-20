@@ -2,12 +2,20 @@ import type { DocumentRef, DocumentFormat } from './document-ref';
 import type { DocumentPatch } from './patches';
 import type { DocumentSelector } from './selectors';
 import type {
+  DocumentFindResult,
   DocumentExtractionResult,
   DocumentInspection,
   DocumentMutationResult,
   DocumentReadResult,
   DocumentSearchResult,
 } from './results';
+
+export interface DocumentFindQuery {
+  name?: string;
+  source?: DocumentRef['source'];
+  format?: DocumentFormat;
+  limit?: number;
+}
 
 export interface DocumentCreateRequest {
   name: string;
@@ -17,6 +25,8 @@ export interface DocumentCreateRequest {
 }
 
 export interface DocumentEngine {
+  /** Find documents by metadata only. Implementations must not inspect content. */
+  find(query: DocumentFindQuery): Promise<DocumentFindResult>;
   inspect(document: DocumentRef): Promise<DocumentInspection>;
   read(
     document: DocumentRef,

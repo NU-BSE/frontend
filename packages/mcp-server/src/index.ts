@@ -2,6 +2,8 @@ export {
   createMobileAgentMcpServer,
 } from "./create-server";
 
+export type { MobileAgentMcpServerOptions } from "./create-server";
+
 export {
   registerConnectorTools,
 } from "./register-connector-tools";

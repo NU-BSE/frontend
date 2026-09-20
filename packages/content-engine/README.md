@@ -141,6 +141,48 @@ document.save
 
 No `read_xlsx`, `parse_pdf_native`, `edit_excel_with_sheetjs`, and no `readLocal` / `readRemote` / `readGoogle` — execution location is an implementation detail.
 
+## MCP registration and approval flow
+
+The app registers the document tools on the same in-process MCP server as the
+other local tools. It must declare which model runtime receives results and
+provide an approval service that binds approvals to the exact mutation payload:
+
+```ts
+createLocalMcpRuntime(dependencies, connectors, {
+  documents: {
+    engine: documentEngine,
+    approvalService: documentApprovals,
+    modelRuntime: "local",
+  },
+});
+```
+
+Read-only calls execute directly. Synthetic example:
+
+```json
+{
+  "name": "document.read",
+  "arguments": {
+    "document": {
+      "id": "synthetic-1",
+      "source": "local",
+      "name": "sample.md",
+      "format": "md"
+    },
+    "selector": { "kind": "heading", "heading": "Example" }
+  }
+}
+```
+
+`document.create`, `document.update`, `document.convert`, and `document.save`
+use a two-call flow. The first call returns `approval_required`; after the UI
+confirms it, repeat the exact arguments with the returned `approvalId`.
+Changing any approved field or replaying a consumed approval fails closed.
+
+Private document tools reject cloud-model callers before the engine reads
+content. A document explicitly classified `public` may be read by a cloud
+model; credential-classified content is rejected for every model runtime.
+
 ```ts
 await document.read({
   document,

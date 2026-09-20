@@ -11,6 +11,7 @@
     "build": "tsc"
   },
   "dependencies": {
+    "@mobile-agent/content-engine": "*",
     "@mobile-agent/connector-core": "*",
     "@mobile-agent/connector-registry": "*",
     "@mobile-agent/policy-core": "*",

@@ -9,7 +9,7 @@ import { storeValues } from './store';
  * Build-time switches, inlined by Metro like every other EXPO_PUBLIC_* (src/ai/config.ts).
  *
  * Without EXPO_PUBLIC_ONLANG_URL nothing here runs and the classic paywall is the only one.
- * Consent defaults to `pending`: events are kept on the phone (14 days) and nothing is sent.
+ * Consent defaults to `pending`: events are kept on the phone (30 days) and nothing is sent.
  * Turning uploads on for real users waits on the privacy policy saying so and a setting to
  * opt out (onlang/README.md); pilot QA builds set EXPO_PUBLIC_ONLANG_CONSENT=granted.
  */

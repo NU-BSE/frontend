@@ -50,7 +50,7 @@ The SDK is vendored (`vendor/onlang-react-native-*.tgz`) until it is published t
 
 - **Privacy.** Onlang records UI events on the paywall (impressions, taps with coordinates,
   plan selections, the purchase outcome; no prompts, messages or account data). Consent defaults
-  to `pending`: events stay on the phone for 14 days and nothing is sent. Uploads should only be
+  to `pending`: events stay on the phone for 30 days and nothing is sent. Uploads should only be
   turned on once the privacy policy (creepy.im/policy) says so and there is a setting to opt out
   (`Onlang.setConsent('denied')` deletes what is queued).
 - **Terms.** The legal row needs a terms link; there is no Creepy terms page, so it points at

@@ -1,0 +1,12 @@
+{
+  "id": "paywall.cta.trial",
+  "module": "paywall.cta",
+  "kind": "tokens",
+  "screen": "paywall",
+  "rationale": "Framing the trial as trying Pro, rather than starting something, may lower the commitment felt at the button.",
+  "variants": [
+    { "id": "control", "tokens": { "cta.trial": { "en": "Start 7-day free trial" } } },
+    { "id": "try_pro", "tokens": { "cta.trial": { "en": "Try Pro free for {{trial.annual}}" } } },
+    { "id": "first_week", "tokens": { "cta.trial": { "en": "Get your first week free" } } }
+  ]
+}

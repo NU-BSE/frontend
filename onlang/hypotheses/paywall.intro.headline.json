@@ -1,0 +1,12 @@
+{
+  "id": "paywall.intro.headline",
+  "module": "paywall.intro",
+  "kind": "tokens",
+  "screen": "paywall",
+  "rationale": "Naming the work Creepy takes off the user's hands should land better than an abstract promise of continuity.",
+  "variants": [
+    { "id": "control", "tokens": { "intro.headline": { "en": "Keep Creepy working for you" } } },
+    { "id": "busywork", "tokens": { "intro.headline": { "en": "Hand Creepy the busywork" } } },
+    { "id": "your_apps", "tokens": { "intro.headline": { "en": "Your apps, handled for you" } } }
+  ]
+}

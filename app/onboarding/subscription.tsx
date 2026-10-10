@@ -28,6 +28,8 @@ import { ENTITLEMENTS_QUERY_KEY } from "@/features/subscription/useEntitlements"
 import { getInstalledModel, verifyInstalled } from "@/ai/modelInstall";
 import { getMemoryProfile, setOnboardingComplete } from "@/storage/prefs";
 import { gutter, palette, radius, spacing } from "@/theme/tokens";
+import { ONLANG_ENABLED } from "@/onlang";
+import { OnlangPaywall } from "@/onlang/OnlangPaywall";
 
 /**
  * The paywall, shown only after the first real Creepy task and the feedback
@@ -40,28 +42,6 @@ import { gutter, palette, radius, spacing } from "@/theme/tokens";
 export default function OnboardingSubscription() {
   const router = useRouter();
   const queryClient = useQueryClient();
-
-  const [period, setPeriod] = useState<BillingPeriod>("annual");
-  const [storePrices, setStorePrices] = useState<
-    Partial<Record<BillingPeriod, StorePrice>>
-  >({});
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-
-  const { data: memoryProfile } = useQuery({
-    queryKey: ["memory-profile"],
-    queryFn: getMemoryProfile,
-    staleTime: Infinity,
-  });
-  const { data: modelReady } = useQuery({
-    queryKey: ["on-device-model-ready"],
-    queryFn: async () => {
-      const installed = await getInstalledModel();
-      return installed ? verifyInstalled(installed) : false;
-    },
-    staleTime: Infinity,
-  });
-  const onDevice = memoryProfile !== "cloud" && modelReady === true;
 
   const paywallViewed = useRef(false);
   useEffect(() => {
@@ -90,21 +70,6 @@ export default function OnboardingSubscription() {
   });
 
   /*
-   * Play's prices are localized and authoritative; the plan table only carries
-   * the marketing figures. Fetching is best-effort — an unreachable store
-   * leaves the fallback prices on screen rather than an empty paywall.
-   */
-  useEffect(() => {
-    let cancelled = false;
-    void fetchStorePrices().then((prices) => {
-      if (!cancelled) setStorePrices(prices);
-    });
-    return () => {
-      cancelled = true;
-    };
-  }, []);
-
-  /*
    * The same screen serves two arrivals, and they must not end the same way.
    *
    * During onboarding, leaving means setup is finished: mark it complete and
@@ -129,6 +94,95 @@ export default function OnboardingSubscription() {
     track("onboarding_completed");
     router.replace("/(tabs)/feed");
   }, [isUpgrade, queryClient, router]);
+
+  /*
+   * Skip once, and only forwards. `complete()` navigates, so without the guard
+   * a re-render between the decision and the transition would fire it twice.
+   */
+  const skipped = useRef(false);
+  useEffect(() => {
+    if (exempt && !skipped.current) {
+      skipped.current = true;
+      void complete();
+    }
+  }, [complete, exempt]);
+
+  if (checkingExemption || exempt) {
+    // Held rather than showing the paywall for a beat and snatching it away.
+    return (
+      <Screen>
+        <View style={styles.checking}>
+          <ActivityIndicator color={palette.brand} />
+        </View>
+      </Screen>
+    );
+  }
+
+  /*
+   * With Onlang on, the paywall is a server-driven flow built from this
+   * screen's own pieces (src/onlang), and this screen is its fallback: shown
+   * when no flow can load and when the placement is switched off. Off, this
+   * screen is the only one, exactly as before.
+   */
+  const classic = <ClassicPaywall isUpgrade={isUpgrade} complete={complete} />;
+  return (
+    <Screen>
+      <View style={styles.progressWrap}>
+        <OnboardingProgress fraction={progressFor("subscription")} />
+      </View>
+      {ONLANG_ENABLED ? (
+        <OnlangPaywall fallback={classic} onDone={() => void complete()} />
+      ) : (
+        classic
+      )}
+    </Screen>
+  );
+}
+
+function ClassicPaywall({
+  isUpgrade,
+  complete,
+}: {
+  isUpgrade: boolean;
+  complete: () => Promise<void>;
+}) {
+  const router = useRouter();
+  const [period, setPeriod] = useState<BillingPeriod>("annual");
+  const [storePrices, setStorePrices] = useState<
+    Partial<Record<BillingPeriod, StorePrice>>
+  >({});
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const { data: memoryProfile } = useQuery({
+    queryKey: ["memory-profile"],
+    queryFn: getMemoryProfile,
+    staleTime: Infinity,
+  });
+  const { data: modelReady } = useQuery({
+    queryKey: ["on-device-model-ready"],
+    queryFn: async () => {
+      const installed = await getInstalledModel();
+      return installed ? verifyInstalled(installed) : false;
+    },
+    staleTime: Infinity,
+  });
+  const onDevice = memoryProfile !== "cloud" && modelReady === true;
+
+  /*
+   * Play's prices are localized and authoritative; the plan table only carries
+   * the marketing figures. Fetching is best-effort — an unreachable store
+   * leaves the fallback prices on screen rather than an empty paywall.
+   */
+  useEffect(() => {
+    let cancelled = false;
+    void fetchStorePrices().then((prices) => {
+      if (!cancelled) setStorePrices(prices);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   const startTrial = useCallback(async () => {
     if (busy) return;
@@ -184,29 +238,6 @@ export default function OnboardingSubscription() {
     }
   }, [busy, complete, period]);
 
-  /*
-   * Skip once, and only forwards. `complete()` navigates, so without the guard
-   * a re-render between the decision and the transition would fire it twice.
-   */
-  const skipped = useRef(false);
-  useEffect(() => {
-    if (exempt && !skipped.current) {
-      skipped.current = true;
-      void complete();
-    }
-  }, [complete, exempt]);
-
-  if (checkingExemption || exempt) {
-    // Held rather than showing the paywall for a beat and snatching it away.
-    return (
-      <Screen>
-        <View style={styles.checking}>
-          <ActivityIndicator color={palette.brand} />
-        </View>
-      </Screen>
-    );
-  }
-
   const selected = planFor(period);
   /*
    * Every figure on this screen comes from one source. Mixing Play's localized
@@ -217,10 +248,7 @@ export default function OnboardingSubscription() {
   const price = pricing.price;
 
   return (
-    <Screen>
-      <View style={styles.progressWrap}>
-        <OnboardingProgress fraction={progressFor("subscription")} />
-      </View>
+    <>
       <ScrollView
         contentContainerStyle={styles.content}
         showsVerticalScrollIndicator={false}
@@ -337,7 +365,7 @@ export default function OnboardingSubscription() {
         advanceLabel={busy ? "Opening Play" : selected.cta}
         advanceDisabled={busy}
       />
-    </Screen>
+    </>
   );
 }
 

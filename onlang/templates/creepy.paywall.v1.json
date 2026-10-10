@@ -1,0 +1,11 @@
+{
+  "id": "creepy.paywall.v1",
+  "kind": "paywall",
+  "sections": [
+    { "id": "intro", "children": [{ "slot": "intro", "accepts": ["PaywallIntro"] }] },
+    { "id": "plans", "children": [{ "slot": "plans", "accepts": ["PlanToggle"] }] },
+    { "id": "offer", "children": [{ "slot": "card", "accepts": ["PriceCard"] }, { "system": "price_disclosure" }] },
+    { "id": "cta", "children": [{ "slot": "primary_cta", "accepts": ["PurchaseButton"] }, { "slot": "skip", "accepts": ["SkipLink"] }] },
+    { "id": "legal", "children": [{ "system": "legal_links" }], "locked": true }
+  ]
+}

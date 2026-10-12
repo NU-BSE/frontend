@@ -32,6 +32,19 @@ EXPO_PUBLIC_ONLANG_KEY=onl_pk_…                        # the app's publishable
 EXPO_PUBLIC_ONLANG_CONSENT=granted                     # QA builds only; see below
 ```
 
+In production, Creepy's users are in Russia: point the SDK at Onlang's node in Moscow, which
+keeps paywalls and events working during the mobile-internet whitelist restrictions (Onlang
+repo: `docs/runbooks/ru-node.md`):
+
+```sh
+EXPO_PUBLIC_ONLANG_URL=https://delivery.ru.onlang.io
+EXPO_PUBLIC_ONLANG_INGEST_URL=https://ingest.ru.onlang.io
+EXPO_PUBLIC_ONLANG_KEY=onl_pk_…        # creepy_im's publishable key on the production cluster
+```
+
+The app `creepy_im` must exist on the production cluster (control.pilot.onlang.io) with a
+published release; until then the classic paywall shows, as when the URL is unset.
+
 Locally, against the Onlang staging stack (`infra/staging` in the Onlang repo) on an emulator:
 `adb reverse tcp:4321 tcp:4321 && adb reverse tcp:4322 tcp:4322`, then the URLs are
 `http://localhost:4321` and `http://localhost:4322`.

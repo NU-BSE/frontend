@@ -17,11 +17,15 @@ import { loadModelBundle } from "@/prediction/bundle";
 import { useUsageNotifications } from "@/prediction/useUsageNotifications";
 import { AuthRouteGuard } from "@/auth/AuthRouteGuard";
 import { registerAppMcpDependencies } from "@/mcp/app-dependencies";
+import { configureOnlang } from "@/onlang";
 import { palette } from "@/theme/tokens";
 
 // Wire the persistent ConnectionStore + Keystore-backed CredentialVault
 // before anything can touch the MCP runtime.
 registerAppMcpDependencies();
+
+// The server-driven paywall (a no-op unless the build sets EXPO_PUBLIC_ONLANG_URL).
+configureOnlang();
 
 void SplashScreen.preventAutoHideAsync();
 

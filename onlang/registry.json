@@ -1,0 +1,42 @@
+{
+  "registry": "creepy_im",
+  "version": "1.0.0",
+  "products": ["annual", "monthly"],
+  "components": {
+    "PaywallIntro": {
+      "props": {
+        "tag": { "type": "token", "max_chars": 20 },
+        "headline": { "type": "token", "max_chars": 40 },
+        "body": { "type": "token", "max_chars": 90 }
+      },
+      "platforms": ["android", "ios"]
+    },
+    "PlanToggle": {
+      "props": {
+        "products": { "type": "products", "min_items": 2, "max_items": 2 },
+        "default": { "type": "product" }
+      },
+      "interactive": true,
+      "emits": ["select"],
+      "platforms": ["android", "ios"]
+    },
+    "PriceCard": {
+      "props": {
+        "trial_headline": { "type": "token", "max_chars": 48 },
+        "paid_headline": { "type": "token", "max_chars": 48 }
+      },
+      "platforms": ["android", "ios"]
+    },
+    "PurchaseButton": {
+      "props": {
+        "trial_title": { "type": "token", "max_chars": 28 },
+        "paid_title": { "type": "token", "max_chars": 28 }
+      },
+      "platforms": ["android", "ios"]
+    },
+    "SkipLink": {
+      "props": {},
+      "platforms": ["android", "ios"]
+    }
+  }
+}

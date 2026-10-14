@@ -33,6 +33,7 @@
     "@mobile-agent/policy-core": "*",
     "@modelcontextprotocol/client": "^2.0.0",
     "@modelcontextprotocol/server": "^2.0.0",
+    "@onlang/react-native": "file:vendor/onlang-react-native-0.1.0.tgz",
     "@react-native-async-storage/async-storage": "2.2.0",
     "@tanstack/ai": "^0.42.0",
     "@tanstack/ai-client": "^0.22.1",

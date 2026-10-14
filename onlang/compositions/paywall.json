@@ -1,0 +1,37 @@
+{
+  "flow": ["paywall"],
+  "screens": {
+    "paywall": {
+      "template": "creepy.paywall.v1",
+      "slots": {
+        "intro": {
+          "use": "PaywallIntro",
+          "props": { "tag": { "$t": "intro.tag" }, "headline": { "$t": "intro.headline" }, "body": { "$t": "intro.body" } }
+        },
+        "plans": { "use": "PlanToggle", "props": { "products": ["monthly", "annual"], "default": "annual" } },
+        "card": { "use": "PriceCard", "props": { "trial_headline": { "$t": "card.trial" }, "paid_headline": { "$t": "card.paid" } } },
+        "primary_cta": {
+          "use": "PurchaseButton",
+          "props": { "trial_title": { "$t": "cta.trial" }, "paid_title": { "$t": "cta.paid" } },
+          "action": { "verb": "purchase" }
+        },
+        "skip": { "use": "SkipLink", "action": { "verb": "close" } }
+      }
+    }
+  },
+  "tokens": {
+    "en": {
+      "intro.tag": "Creepy Pro",
+      "intro.headline": "Keep Creepy working for you",
+      "intro.body": "Full access to Creepy, connected apps and local AI.",
+      "card.trial": "{{trial.annual}} free, then one simple price",
+      "card.paid": "One simple price",
+      "cta.trial": "Start 7-day free trial",
+      "cta.paid": "Continue monthly",
+      "legal.disclosure": "Annual: {{trial.annual}} free, then {{price.annual}}/{{period.annual}}. Monthly: {{price.monthly}}/{{period.monthly}}. Cancel anytime in Google Play.",
+      "legal.restore": "Restore purchases",
+      "legal.terms": "Play terms",
+      "legal.privacy": "Privacy"
+    }
+  }
+}
